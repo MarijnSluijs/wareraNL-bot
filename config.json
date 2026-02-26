@@ -20,7 +20,7 @@
         "welcome_buttons": 1468223553156546613,
         "verification": 1467976282968166706,
         "logs": 1456287198780457134,
-        "production": 1474472809215299706,
+        "bot_mededelingen": 1474472809215299706,
         "orders": 1467977826924761128,
         "rules": 0,
         "handleiding": 1457351757444419769,
@@ -29,7 +29,8 @@
         "vragen": 1456252976967581877,
         "embassy_category": 1456259898349453433,
         "reddit": 1474728411338641488,
-        "articles": 1474728499242860645
+        "articles": 1474728499242860645,
+        "events": 1474472809215299706
     },
     "welcome_message": "# Welcome to the Official Nederland War Era Server!\n\nGreetings, traveler! You have arrived at the gates of Nederland.\n\nPlease select your status below to proceed with verification:",
     "colors": {
