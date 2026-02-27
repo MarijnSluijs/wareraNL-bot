@@ -784,6 +784,7 @@ class ProductionChecker(commands.Cog, name="production_checker"):
         if not self._client or not self._db:
             return
         try:
+            self.bot.logger.info("Starting event poll...")
             await self._run_event_poll()
         except Exception:
             self.bot.logger.exception("event_poll: unexpected error")

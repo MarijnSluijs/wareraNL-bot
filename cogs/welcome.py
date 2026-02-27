@@ -90,6 +90,24 @@ async def create_verification_channel(interaction: discord.Interaction, request_
     config = getattr(interaction.client, "config", {}) or {}
     logger.info(f"Creating verification channel for {user.name} ({request_type}) in guild {guild.name}")
 
+    # check if the user already has the requested role to prevent duplicate requests
+    role_id = None
+    if request_type == "citizen":
+        role_id = config.get("roles", {}).get("nederlander")
+    elif request_type == "belgian":
+        role_id = config.get("roles", {}).get("belgian")
+    elif request_type == "foreigner":
+        role_id = config.get("roles", {}).get("foreigner")
+    
+    if role_id:
+        role = guild.get_role(role_id)
+        if role and role in user.roles:
+            await interaction.response.send_message(
+                f"You already have the {role.name} role and cannot create a new request.",
+                ephemeral=True,
+            )
+            return
+
 
 
     # Also check actual existing channels (covers bot restarts and manual channel cleanup)
@@ -193,7 +211,8 @@ async def create_verification_channel(interaction: discord.Interaction, request_
                 overwrites[role] = discord.PermissionOverwrite(
                     view_channel=True,
                     send_messages=True,
-                    read_message_history=True
+                    read_message_history=True,
+                    use_application_commands=True
                 )
 
     # Check if bot has permission to create channels in the category
@@ -307,52 +326,79 @@ class Welcome(commands.Cog, name="welcome"):
         # Use the central bot configuration
         self.config = getattr(self.bot, "config", {}) or {}
 
-    def cog_load(self) -> None:
-        """Start the scheduled tasks when the cog is loaded."""
-        self.daily_bezoeker_ping.start()
+    # def cog_load(self) -> None:
+    #     """Start the scheduled tasks when the cog is loaded."""
+    #     self.daily_bezoeker_ping.start()
 
-    def cog_unload(self) -> None:
-        """Cancel scheduled tasks when the cog is unloaded."""
-        self.daily_bezoeker_ping.cancel()
+    # def cog_unload(self) -> None:
+    #     """Cancel scheduled tasks when the cog is unloaded."""
+    #     self.daily_bezoeker_ping.cancel()
 
-    @tasks.loop(time=datetime.time(19, 0))  # Runs daily at 19:00
-    async def daily_bezoeker_ping(self):
-        """Send a daily ping to the bezoeker role in the welcome channel."""
-        try:
-            # Get the welcome channel id from bot config
-            welcome_channel_id = self.bot.config.get("channels", {}).get("welcome_buttons")
-            if not welcome_channel_id:
-                self.bot.logger.warning("Welcome channel ID not configured")
-                return
+    @commands.command(name="postwelcome", description="Post the welcome message with verification buttons (admin only)")
+    @commands.has_permissions(administrator=True)
+    async def post_welcome(self, ctx: commands.Context):
+        # Create the welcome embed
+        embed = discord.Embed(
+            title="🇳🇱 Welcome to Nederland!",
+            description=self.config.get("welcome_message", "Welcome!"),
+            color=discord.Color.gold(),
+            timestamp=datetime.datetime.now(datetime.UTC)
+        )
+        embed.set_thumbnail(url="https://3.bp.blogspot.com/-x8PxTZ-frT8/VzhaiN0qnTI/AAAAAAAAskA/BFXeRJND8YU3oUxBBqq6Ny9ITeWpq5BuACKgB/s1600/NEDERLAND.%2BWAPEN%2B%25281%2529.png")
+        # embed.set_author(name=member.name, icon_url=member.display_avatar.url)
+        # embed.set_footer(text=f"Member #{self.bot.guild.member_count}")
 
-            # Find the welcome channel across all guilds the bot is in
-            for guild in self.bot.guilds:
-                channel = guild.get_channel(welcome_channel_id)
-                if channel:
-                    # Get the bezoeker role
-                    bezoeker_role_id = self.bot.config.get("roles", {}).get("bezoeker")
-                    if not bezoeker_role_id:
-                        self.bot.logger.warning("Bezoeker role ID not configured")
-                        return
+        # Send welcome message with verification buttons
+        channel_id = self.bot.config.get("channels", {}).get("welcome_buttons")
+        if not channel_id:
+            await ctx.send("Welcome channel ID not configured in bot config.")
+            return
+        
+        channel = ctx.guild.get_channel(channel_id)
+        if not channel:
+            await ctx.send("Welcome channel not found. Please check the channel ID in bot config.")
+            return
+        
+        await channel.send(embed=embed, view=WelcomeView(self.bot))
 
-                    role = guild.get_role(bezoeker_role_id)
-                    if not role:
-                        self.bot.logger.warning(f"Bezoeker role not found in guild {guild.name}")
-                        return
+    # @tasks.loop(time=datetime.time(19, 0))  # Runs daily at 19:00
+    # async def daily_bezoeker_ping(self):
+    #     """Send a daily ping to the bezoeker role in the welcome channel."""
+    #     try:
+    #         # Get the welcome channel id from bot config
+    #         welcome_channel_id = self.bot.config.get("channels", {}).get("welcome_buttons")
+    #         if not welcome_channel_id:
+    #             self.bot.logger.warning("Welcome channel ID not configured")
+    #             return
 
-                    # Send the ping
-                    await channel.send(f"{role.mention} please use one of the above buttons to claim your role.")
-                    self.bot.logger.info(f"Sent daily bezoeker ping in {guild.name}")
-                    return
+    #         # Find the welcome channel across all guilds the bot is in
+    #         for guild in self.bot.guilds:
+    #             channel = guild.get_channel(welcome_channel_id)
+    #             if channel:
+    #                 # Get the bezoeker role
+    #                 bezoeker_role_id = self.bot.config.get("roles", {}).get("bezoeker")
+    #                 if not bezoeker_role_id:
+    #                     self.bot.logger.warning("Bezoeker role ID not configured")
+    #                     return
 
-            self.bot.logger.warning(f"Welcome channel {welcome_channel_id} not found in any guild")
-        except Exception as e:
-            self.bot.logger.error(f"Error sending daily bezoeker ping: {e}")
+    #                 role = guild.get_role(bezoeker_role_id)
+    #                 if not role:
+    #                     self.bot.logger.warning(f"Bezoeker role not found in guild {guild.name}")
+    #                     return
 
-    @daily_bezoeker_ping.before_loop
-    async def before_daily_ping(self):
-        """Ensure the bot is ready before starting the scheduled task."""
-        await self.bot.wait_until_ready()
+    #                 # Send the ping
+    #                 await channel.send(f"{role.mention} please use one of the above buttons to claim your role.")
+    #                 self.bot.logger.info(f"Sent daily bezoeker ping in {guild.name}")
+    #                 return
+
+    #         self.bot.logger.warning(f"Welcome channel {welcome_channel_id} not found in any guild")
+    #     except Exception as e:
+    #         self.bot.logger.error(f"Error sending daily bezoeker ping: {e}")
+
+    # @daily_bezoeker_ping.before_loop
+    # async def before_daily_ping(self):
+    #     """Ensure the bot is ready before starting the scheduled task."""
+    #     await self.bot.wait_until_ready()
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
@@ -378,9 +424,11 @@ class Welcome(commands.Cog, name="welcome"):
             if role:
                 await member.add_roles(role)
 
+
+
         embed = discord.Embed(
             title=f"🇳🇱 Welcome to Nederland!",
-            description=f"Welcome {member.mention}! We're glad to have you here.",
+            description=f"Welcome {member.mention}! We're glad to have you here.\n\nPlease head over to <#{welcome_channel_id}> and click one of the buttons to verify your status and gain access to the rest of the server!",
             color=int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16),
         )
         # optionally send to a dedicated welcome/announcement channel if configured
@@ -390,19 +438,19 @@ class Welcome(commands.Cog, name="welcome"):
             if ch:
                 await ch.send(embed=embed)
 
-        # Create the welcome embed
-        embed = discord.Embed(
-            title="🇳🇱 Welcome to Nederland!",
-            description=self.config.get("welcome_message", "Welcome!"),
-            color=discord.Color.gold(),
-            timestamp=datetime.datetime.now(datetime.UTC)
-        )
-        embed.set_thumbnail(url=member.display_avatar.url)
-        embed.set_author(name=member.name, icon_url=member.display_avatar.url)
-        embed.set_footer(text=f"Member #{member.guild.member_count}")
+        # # Create the welcome embed
+        # embed = discord.Embed(
+        #     title="🇳🇱 Welcome to Nederland!",
+        #     description=self.config.get("welcome_message", "Welcome!"),
+        #     color=discord.Color.gold(),
+        #     timestamp=datetime.datetime.now(datetime.UTC)
+        # )
+        # embed.set_thumbnail(url=member.display_avatar.url)
+        # embed.set_author(name=member.name, icon_url=member.display_avatar.url)
+        # embed.set_footer(text=f"Member #{member.guild.member_count}")
 
-        # Send welcome message with verification buttons
-        await channel.send(content=member.mention, embed=embed, view=WelcomeView(self.bot))
+        # # Send welcome message with verification buttons
+        # await channel.send(content=member.mention, embed=embed, view=WelcomeView(self.bot))
 
     @app_commands.command(name="nickname", description="Stel de bijnaam van een gebruiker in op de server")
     @app_commands.describe(user="De gebruiker van wie je de bijnaam wilt wijzigen", nickname="De nieuwe bijnaam")

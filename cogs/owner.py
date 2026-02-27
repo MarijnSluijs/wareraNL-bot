@@ -348,6 +348,114 @@ class Owner(commands.Cog, name="owner"):
         """
         await context.send(message)
 
+    @commands.hybrid_command(
+        name="purge",
+        description="Delete a number of messages.",
+    )
+    @commands.has_guild_permissions(manage_messages=True)
+    @commands.bot_has_permissions(manage_messages=True)
+    @app_commands.describe(amount="The amount of messages that should be deleted.")
+    async def purge(self, context: Context, amount: int) -> None:
+        """
+        Delete a number of messages.
+
+        :param context: The hybrid command context.
+        :param amount: The number of messages that should be deleted.
+        """
+        await context.send(
+            "Deleting messages..."
+        )  # Bit of a hacky way to make sure the bot responds to the interaction and doens't get a "Unknown Interaction" response
+        purged_messages = await context.channel.purge(limit=amount + 1)
+        embed = discord.Embed(
+            description=f"**{context.author}** cleared **{len(purged_messages)-1}** messages!",
+            color=0xBEBEFE,
+        )
+        await context.channel.send(embed=embed)
+
+    @commands.command(
+        name="congres-analyse",
+        description="Analyseer de congresleden en hun stemgedrag.",
+    )
+    @commands.is_owner()
+    async def congres_analyse(self, context: Context) -> None:
+        # count messages from each congress member in congress channel over last 30 days
+        from datetime import datetime, timedelta
+        from collections import Counter
+
+        channel_ids = self.bot.config.get("channels", {})
+        congres_channel_id = channel_ids.get("congres")
+        if not congres_channel_id:
+            await context.send("❌ `congres` channel niet geconfigureerd.")
+            return
+
+        start_time = datetime(2026, 2, 7)  # Get messages from 7 february to today
+        message_count = Counter()
+        async for message in self.bot.get_channel(congres_channel_id).history(limit=None, after=start_time):
+            if message.author.bot:
+                continue
+            message_count[message.author.id] += 1
+
+        # Send the results
+        results = "\n".join([f"<@{user_id}>: {count}" for user_id, count in message_count.most_common()])
+        embed = discord.Embed(
+            title="Congresleden Analyse",
+            description=f"Berichten in de congres channel over de laatste 30 dagen:\n{results}",
+            color=self.color,
+        )
+        await context.send(embed=embed)
+
+        # count messages from each congress member in debate forum over last 30 days
+        debate_channel_id = channel_ids.get("debat")
+        if not debate_channel_id:
+            await context.send("❌ `debat` channel niet geconfigureerd.")
+            return
+
+        message_count = Counter()
+        # this is a forum channel so we can't use history
+        for thread in self.bot.get_channel(debate_channel_id).threads:
+            async for message in thread.history(limit=None, after=start_time):
+                if message.author.bot:
+                    continue
+                message_count[message.author.id] += 1
+
+        # also count over closed threads
+        async for thread in self.bot.get_channel(debate_channel_id).archived_threads(limit=None):
+            async for message in thread.history(limit=None, after=start_time):
+                if message.author.bot:
+                    continue
+                message_count[message.author.id] += 1
+
+        # Send the results
+        results = "\n".join([f"<@{user_id}>: {count}" for user_id, count in message_count.most_common()])
+        embed = discord.Embed(
+            title="Debatleden Analyse",
+            description=f"Berichten in de debat channel over de laatste 30 dagen:\n{results}",
+            color=self.color,
+        )
+        await context.send(embed=embed)
+
+        # count votes from each congress member in stembureau channel over last 30 days
+        stembureau_channel_id = channel_ids.get("stembureau")
+        if not stembureau_channel_id:
+            await context.send("❌ `stembureau` channel niet geconfigureerd.")
+            return
+        vote_count = Counter()
+        async for message in self.bot.get_channel(stembureau_channel_id).history(limit=None, after=start_time):
+            # count reactions as votes
+            for reaction in message.reactions:
+                async for user in reaction.users():
+                    if user.bot:
+                        continue
+                    vote_count[user.id] += 1
+        # Send the results
+        results = "\n".join([f"<@{user_id}>: {count}" for user_id, count in vote_count.most_common()])
+        embed = discord.Embed(
+            title="Stembureau Analyse",
+            description=f"Votes in de stembureau channel over de laatste 30 dagen:\n{results}",
+            color=self.color,
+        )
+        await context.send(embed=embed)
+
     # @commands.hybrid_command(
     #     name="embed",
     #     description="The bot will say anything you want, but within embeds.",

@@ -60,7 +60,7 @@ class General(commands.Cog, name="general"):
         if message.author.bot:
             return
         content = message.content or ""
-        self.bot.logger.debug(f"Received message: {content} from {message.author} in {getattr(message.channel, 'id', 'DM')}")
+        # self.bot.logger.debug(f"Received message: {content} from {message.author} in {getattr(message.channel, 'id', 'DM')}")
         if "app.warera.io" not in content:
             return
         try:
