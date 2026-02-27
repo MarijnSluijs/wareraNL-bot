@@ -486,6 +486,8 @@ class ProductionChecker(commands.Cog, name="production_checker"):
         prev_bonus = float(prev.get("production_bonus") or 0) if prev else 0.0
         # Only report when the best permanent bonus actually increases
         changed = prev is None or (bonus > prev_bonus + 0.01)
+        # Only report if the new bonus is a different country
+        changed = changed and (country_name != prev.get("country_name") if prev else True)
 
         if changed and prev is not None:
             old_desc = f"{prev.get('country_name')} ({prev.get('production_bonus')}%)"
