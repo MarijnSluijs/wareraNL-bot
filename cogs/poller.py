@@ -1020,7 +1020,7 @@ class ProductionChecker(commands.Cog, name="production_checker"):
             )
             return
 
-        for event in items:
+        for event in reversed(items):  # oldest-first so we post in chronological order
             eid = str(event.get("id") or event.get("_id") or "")
             if not eid or await self._db.has_seen_event(eid):
                 continue
