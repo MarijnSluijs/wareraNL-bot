@@ -195,6 +195,49 @@ class ProductionChecker(commands.Cog, name="production_checker"):
         self.event_poll.start()
         self.resistance_poll.start()
 
+        # If citizen_levels is empty for NL (fresh DB), kick off an immediate
+        # background refresh so /paraatheid and related commands work right away
+        # without waiting up to one hour for the first scheduled tick.
+        asyncio.create_task(self._initial_citizen_fill_if_needed())
+
+    async def _initial_citizen_fill_if_needed(self) -> None:
+        """Run a full citizen refresh immediately if the NL cache is empty."""
+        await self.bot.wait_until_ready()
+        try:
+            nl_country_id = self.config.get("nl_country_id")
+            if not nl_country_id:
+                return
+            # Check whether we have any NL citizens in the cache
+            counts, _, _ = await self._db.get_level_distribution(nl_country_id)
+            if counts:
+                return  # already populated — nothing to do
+            self.bot.logger.info(
+                "citizen_cache: DB empty on startup — running initial fill now"
+            )
+        except Exception:
+            self.bot.logger.exception("_initial_citizen_fill_if_needed: DB check failed")
+            return
+        try:
+            all_countries = await self._client.get("/country.getAllCountries")
+            country_list = extract_country_list(all_countries)
+            async with self._heavy_api_lock:
+                for country in country_list:
+                    cid = cid_of(country)
+                    name = country.get("name", cid)
+                    try:
+                        await self._citizen_cache.refresh_country(cid, name)
+                    except Exception:
+                        self.bot.logger.exception(
+                            "_initial_citizen_fill_if_needed: error for %s", name
+                        )
+            await self._db.set_poll_state(
+                "citizen_refresh_last_run",
+                datetime.now(timezone.utc).isoformat(),
+            )
+            self.bot.logger.info("citizen_cache: initial fill complete")
+        except Exception:
+            self.bot.logger.exception("_initial_citizen_fill_if_needed: fill failed")
+
     # ------------------------------------------------------------------ #
     # Hourly production poll                                               #
     # ------------------------------------------------------------------ #

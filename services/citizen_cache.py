@@ -257,6 +257,13 @@ class CitizenCache:
     def _extract_skill_mode(obj: Any) -> str | None:
         """Classify a player as 'eco' or 'war' based on where they spent skill points.
 
+        Handles three known API shapes for the ``skills`` field:
+        - dict-of-dicts : {"attack": {"level": 5}, "entrepreneurship": {"level": 3}}
+        - flat dict      : {"attack": 5, "entrepreneurship": 3}
+        - list-of-dicts  : [{"name": "attack", "level": 5}, ...]
+
+        Also checks root-level ``skillMode`` / ``mode`` fields as a direct fallback.
+
         Points spent in skill at level L = L*(L+1)//2.
         Eco skills : entrepreneurship, energy, production, companies, management.
         War skills : attack, health, hunger, criticalChance, criticalDamages,
@@ -266,23 +273,67 @@ class CitizenCache:
         """
         if not isinstance(obj, dict):
             return None
+
+        # ── Direct mode field (cheapest, try first) ──────────────────────
+        for key in ("skillMode", "skill_mode", "mode"):
+            v = obj.get(key)
+            if isinstance(v, str) and v.lower() in ("eco", "war"):
+                return v.lower()
+
         skills = obj.get("skills")
-        if not isinstance(skills, dict):
+        if skills is None:
             return None
+
         eco_names = {"entrepreneurship", "energy", "production", "companies", "management"}
         war_names = {"attack", "health", "hunger", "criticalChance", "criticalDamages",
                      "armor", "precision", "dodge", "lootChance"}
         eco_pts = 0
         war_pts = 0
-        for name, sdata in skills.items():
-            if not isinstance(sdata, dict):
-                continue
-            lv = int(sdata.get("level") or 0)
+
+        # ── Check for direct mode inside the skills object ────────────────
+        if isinstance(skills, dict):
+            for key in ("mode", "skillMode", "currentMode"):
+                v = skills.get(key)
+                if isinstance(v, str) and v.lower() in ("eco", "war"):
+                    return v.lower()
+
+        # ── Normalise to iterable of (name, level) ───────────────────────
+        pairs: list[tuple[str, int]] = []
+        if isinstance(skills, dict):
+            for name, sdata in skills.items():
+                if isinstance(sdata, dict):
+                    lv = int(sdata.get("level") or 0)
+                elif isinstance(sdata, (int, float)):
+                    lv = int(sdata)
+                else:
+                    continue
+                pairs.append((name, lv))
+        elif isinstance(skills, list):
+            for entry in skills:
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("name") or entry.get("skill") or entry.get("type")
+                lv = int(entry.get("level") or entry.get("value") or 0)
+                if name:
+                    pairs.append((str(name), lv))
+        else:
+            return None
+
+        if not pairs:
+            return None
+
+        for name, lv in pairs:
             pts = lv * (lv + 1) // 2
             if name in eco_names:
                 eco_pts += pts
             elif name in war_names:
                 war_pts += pts
+
+        # If we found skill data but all levels are 0 (brand-new player), return None
+        # rather than defaulting to eco which would be misleading.
+        if eco_pts == 0 and war_pts == 0:
+            return None
+
         return "eco" if eco_pts >= war_pts else "war"
 
     @staticmethod
