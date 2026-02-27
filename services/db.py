@@ -201,6 +201,18 @@ class Database:
         await self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_citizen_luck_country ON citizen_luck(country_id)"
         )
+        # track current resistance bar per occupied region
+        await self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS resistance_state (
+                region_id   TEXT PRIMARY KEY,
+                region_name TEXT,
+                occupying_country TEXT,
+                resistance_value  REAL,
+                updated_at  TEXT
+            )
+            """
+        )
         await self._conn.commit()
         logger.info("Database initialized at %s", self.path)
 
@@ -1063,6 +1075,49 @@ class Database:
             async for row in cur:
                 rows.append((row[0], row[1]))
         return rows
+
+    async def get_resistance_state(self, region_id: str) -> dict | None:
+        """Return stored resistance info for a region, or None if not yet tracked."""
+        if not self._conn:
+            raise RuntimeError("Database not initialized; call setup() first")
+        async with self._conn.execute(
+            "SELECT region_id, region_name, occupying_country, resistance_value, updated_at "
+            "FROM resistance_state WHERE region_id = ?",
+            (region_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if not row:
+            return None
+        return {
+            "region_id": row[0], "region_name": row[1],
+            "occupying_country": row[2], "resistance_value": row[3],
+            "updated_at": row[4],
+        }
+
+    async def upsert_resistance_state(
+        self,
+        region_id: str,
+        region_name: str | None,
+        occupying_country: str | None,
+        resistance_value: float,
+        updated_at: str,
+    ) -> None:
+        """Insert or update resistance state for a region."""
+        if not self._conn:
+            raise RuntimeError("Database not initialized; call setup() first")
+        await self._conn.execute(
+            """
+            INSERT INTO resistance_state(region_id, region_name, occupying_country, resistance_value, updated_at)
+            VALUES(?, ?, ?, ?, ?)
+            ON CONFLICT(region_id) DO UPDATE SET
+                region_name       = excluded.region_name,
+                occupying_country = excluded.occupying_country,
+                resistance_value  = excluded.resistance_value,
+                updated_at        = excluded.updated_at
+            """,
+            (region_id, region_name, occupying_country, resistance_value, updated_at),
+        )
+        await self._conn.commit()
 
 
 __all__ = ["Database"]

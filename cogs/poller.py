@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -33,22 +33,97 @@ _LUCK_WEIGHT_TOTAL: float = sum(_LUCK_WEIGHTS.values())
 _BATTLE_URL = "https://app.warera.io/battle/{battle_id}"
 _WAR_URL    = "https://app.warera.io/war/{war_id}"
 
-_EVENT_POLL_TYPES = ["battleOpened", "warDeclared", "peaceMade", "peace_agreement"]
+_EVENT_POLL_TYPES = [
+    "battleOpened", "warDeclared", "peaceMade", "peace_agreement",
+    "regionTransfer", "depositDiscovered", "depositDepleted",
+    "allianceBroken", "allianceFormed", "regionLiberated",
+    "resistanceIncreased", "resistanceDecreased",
+    "countryMoneyTransfer", "newPresident",
+    "revolutionStarted", "revolutionEnded", "financedRevolt",
+]
 
 _EVENT_LABELS: dict[str, str] = {
-    "battleOpened":    "⚔️ Slag geopend",
-    "warDeclared":     "🚨 Oorlog verklaard",
-    "peaceMade":       "🕊️ Vrede gesloten",
-    "peace_agreement": "🕊️ Vredesakkoord",
+    "battleOpened":          "⚔️ Slag geopend",
+    "warDeclared":           "🚨 Oorlog verklaard",
+    "peaceMade":             "🕊️ Vrede gesloten",
+    "peace_agreement":       "🕊️ Vredesakkoord",
+    "regionTransfer":        "🗺️ Regio overgedragen",
+    "depositDiscovered":     "⚒️ Deposit ontdekt",
+    "depositDepleted":       "📦 Deposit uitgeput",
+    "allianceBroken":        "💔 Alliantie verbroken",
+    "allianceFormed":        "🤝 Alliantie gesloten",
+    "regionLiberated":       "🏳️ Regio bevrijd",
+    "resistanceIncreased":   "📈 Verzet toegenomen",
+    "resistanceDecreased":   "📉 Verzet afgenomen",
+    "countryMoneyTransfer":  "💰 Geldtransactie",
+    "newPresident":          "🏛️ Nieuwe president",
+    "revolutionStarted":     "🔥 Revolte gestart",
+    "revolutionEnded":       "✅ Revolte beëindigd",
+    "financedRevolt":        "💸 Revolte gefinancierd",
 }
 
 _EVENT_TYPE_ALIASES: dict[str, str] = {
-    "battleopened": "battleOpened",
-    "wardeclared": "warDeclared",
-    "peacemade": "peaceMade",
-    "peace_agreement": "peace_agreement",
-    "peaceagreement": "peace_agreement",
+    "battleopened":          "battleOpened",
+    "wardeclared":           "warDeclared",
+    "peacemade":             "peaceMade",
+    "peace_agreement":       "peace_agreement",
+    "peaceagreement":        "peace_agreement",
+    "regiontransfer":        "regionTransfer",
+    "depositdiscovered":     "depositDiscovered",
+    "depositdepleted":       "depositDepleted",
+    "alliancebroken":        "allianceBroken",
+    "allianceformed":        "allianceFormed",
+    "regionliberated":       "regionLiberated",
+    "resistanceincreased":   "resistanceIncreased",
+    "resistancedecreased":   "resistanceDecreased",
+    "countrymoneytransfer":  "countryMoneyTransfer",
+    "newpresident":          "newPresident",
+    "revolutionstarted":     "revolutionStarted",
+    "revolutionended":       "revolutionEnded",
+    "financedrevolt":        "financedRevolt",
 }
+
+# Maps event_type → category bucket used for per-category startup catch-up.
+_EVENT_TYPE_TO_CATEGORY: dict[str, str] = {
+    "battleOpened":          "battle",
+    "warDeclared":           "war",
+    "peaceMade":             "peace",
+    "peace_agreement":       "peace",
+    "regionTransfer":        "transfer",
+    "depositDiscovered":     "deposit",
+    "depositDepleted":       "deposit",
+    "allianceBroken":        "alliance",
+    "allianceFormed":        "alliance",
+    "regionLiberated":       "liberated",
+    "resistanceIncreased":   "resistance",
+    "resistanceDecreased":   "resistance",
+    "countryMoneyTransfer":  "money",
+    "newPresident":          "president",
+    "revolutionStarted":     "revolution",
+    "revolutionEnded":       "revolution",
+    "financedRevolt":        "revolt",
+}
+
+
+def _seconds_until_aligned(interval_minutes: int) -> float:
+    """Seconds to sleep until the next clock-aligned interval boundary (UTC)."""
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    total_min = now.hour * 60 + now.minute
+    next_slot = ((total_min // interval_minutes) + 1) * interval_minutes
+    delta_min = next_slot - total_min
+    delay = delta_min * 60 - now.second - now.microsecond / 1_000_000
+    return max(1.0, delay)
+
+
+def _seconds_until_hour(target_hour: int) -> float:
+    """Seconds to sleep until the next target_hour:00:00 UTC."""
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    target = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return max(1.0, (target - now).total_seconds())
 
 
 def _calc_luck_pct(counts: dict, total: int) -> float:
@@ -89,6 +164,7 @@ class ProductionChecker(commands.Cog, name="production_checker"):
         self.daily_citizen_refresh.cancel()
         self.daily_luck_refresh.cancel()
         self.event_poll.cancel()
+        self.resistance_poll.cancel()
         if self._client:
             asyncio.create_task(self._client.close())
         if self._db:
@@ -117,6 +193,50 @@ class ProductionChecker(commands.Cog, name="production_checker"):
         self.daily_citizen_refresh.start()
         self.daily_luck_refresh.start()
         self.event_poll.start()
+        self.resistance_poll.start()
+
+        # If citizen_levels is empty for NL (fresh DB), kick off an immediate
+        # background refresh so /paraatheid and related commands work right away
+        # without waiting up to one hour for the first scheduled tick.
+        asyncio.create_task(self._initial_citizen_fill_if_needed())
+
+    async def _initial_citizen_fill_if_needed(self) -> None:
+        """Run a full citizen refresh immediately if the NL cache is empty."""
+        await self.bot.wait_until_ready()
+        try:
+            nl_country_id = self.config.get("nl_country_id")
+            if not nl_country_id:
+                return
+            # Check whether we have any NL citizens in the cache
+            counts, _, _ = await self._db.get_level_distribution(nl_country_id)
+            if counts:
+                return  # already populated — nothing to do
+            self.bot.logger.info(
+                "citizen_cache: DB empty on startup — running initial fill now"
+            )
+        except Exception:
+            self.bot.logger.exception("_initial_citizen_fill_if_needed: DB check failed")
+            return
+        try:
+            all_countries = await self._client.get("/country.getAllCountries")
+            country_list = extract_country_list(all_countries)
+            async with self._heavy_api_lock:
+                for country in country_list:
+                    cid = cid_of(country)
+                    name = country.get("name", cid)
+                    try:
+                        await self._citizen_cache.refresh_country(cid, name)
+                    except Exception:
+                        self.bot.logger.exception(
+                            "_initial_citizen_fill_if_needed: error for %s", name
+                        )
+            await self._db.set_poll_state(
+                "citizen_refresh_last_run",
+                datetime.now(timezone.utc).isoformat(),
+            )
+            self.bot.logger.info("citizen_cache: initial fill complete")
+        except Exception:
+            self.bot.logger.exception("_initial_citizen_fill_if_needed: fill failed")
 
     # ------------------------------------------------------------------ #
     # Hourly production poll                                               #
@@ -142,7 +262,7 @@ class ProductionChecker(commands.Cog, name="production_checker"):
             self.bot.logger.info("[production poll] done in %.1fs — no changes", elapsed)
         if self.bot.testing:
             channels = self.config.get("channels", {})
-            cid = channels.get("testing-area") or channels.get("production")
+            cid = channels.get("testing-area") or channels.get("bot_mededelingen")
             if cid:
                 for guild in self.bot.guilds:
                     ch = guild.get_channel(cid)
@@ -161,13 +281,8 @@ class ProductionChecker(commands.Cog, name="production_checker"):
     @hourly_production_check.before_loop
     async def before_hourly_production_check(self):
         await self.bot.wait_until_ready()
-        # Skip the immediate first fire — wait one full interval before polling
-        interval = (
-            self.hourly_production_check.hours * 3600
-            + self.hourly_production_check.minutes * 60
-            + self.hourly_production_check.seconds
-        )
-        await asyncio.sleep(interval)
+        # Align to next :00 / :15 / :30 / :45 boundary.
+        await asyncio.sleep(_seconds_until_aligned(15))
 
     async def _run_poll_once(self) -> list[tuple[str, str, str]]:
         """Perform a single production poll using getRecommendedRegionIdsByItemCode.
@@ -182,9 +297,9 @@ class ProductionChecker(commands.Cog, name="production_checker"):
         try:
             channels = self.config.get("channels", {})
             if self.bot.testing:
-                market_channel_id = channels.get("testing-area") or channels.get("production")
+                market_channel_id = channels.get("testing-area") or channels.get("bot_mededelingen")
             else:
-                market_channel_id = channels.get("production")
+                market_channel_id = channels.get("bot_mededelingen")
             if not market_channel_id:
                 self.bot.logger.warning("Market channel ID not configured")
                 return []
@@ -558,7 +673,7 @@ class ProductionChecker(commands.Cog, name="production_checker"):
 
         if self.bot.testing:
             channels = self.config.get("channels", {})
-            cid = channels.get("testing-area") or channels.get("production")
+            cid = channels.get("testing-area") or channels.get("bot_mededelingen")
             if cid:
                 for guild in self.bot.guilds:
                     ch = guild.get_channel(cid)
@@ -577,6 +692,8 @@ class ProductionChecker(commands.Cog, name="production_checker"):
     @daily_citizen_refresh.before_loop
     async def before_daily_citizen_refresh(self):
         await self.bot.wait_until_ready()
+        # Align to the next full clock-hour boundary (:00).
+        await asyncio.sleep(_seconds_until_aligned(60))
 
     # ------------------------------------------------------------------ #
     # Daily luck score cache                                               #
@@ -754,7 +871,7 @@ class ProductionChecker(commands.Cog, name="production_checker"):
 
         if self.bot.testing:
             channels = self.config.get("channels", {})
-            ch_id = channels.get("testing-area") or channels.get("production")
+            ch_id = channels.get("testing-area") or channels.get("bot_mededelingen")
             if ch_id:
                 for guild in self.bot.guilds:
                     ch = guild.get_channel(ch_id)
@@ -773,12 +890,14 @@ class ProductionChecker(commands.Cog, name="production_checker"):
     @daily_luck_refresh.before_loop
     async def before_daily_luck_refresh(self):
         await self.bot.wait_until_ready()
+        # Align to next 09:00 UTC (10:00 NL) so the heavy sweep runs once per day.
+        await asyncio.sleep(_seconds_until_hour(9))
 
     # ------------------------------------------------------------------ #
     # Event poll (battleOpened, warDeclared, peaceMade)                   #
     # ------------------------------------------------------------------ #
 
-    @tasks.loop(minutes=5)
+    @tasks.loop(minutes=1)
     async def event_poll(self) -> None:
         """Poll for new war/battle events and post them to the events channel."""
         if not self._client or not self._db:
@@ -792,6 +911,9 @@ class ProductionChecker(commands.Cog, name="production_checker"):
     @event_poll.before_loop
     async def before_event_poll(self) -> None:
         await self.bot.wait_until_ready()
+        # Align to the next full minute boundary.
+        now = datetime.now(timezone.utc)
+        await asyncio.sleep(max(1.0, 60 - now.second - now.microsecond / 1_000_000))
 
     @staticmethod
     def _extract_event_type(event: dict) -> str:
@@ -812,11 +934,29 @@ class ProductionChecker(commands.Cog, name="production_checker"):
         return _EVENT_TYPE_ALIASES.get(key, normalized)
 
     async def _run_event_poll(self) -> None:
-        from datetime import timezone
         channel_id = self.config.get("channels", {}).get("events")
         if not channel_id:
             return
         nl_country_id = self.config.get("nl_country_id")
+
+        # ── Build country_id → name lookup once per tick ──────────────────
+        country_names: dict[str, str] = {}
+        try:
+            c_resp = await self._client.get("/country.getAllCountries")
+            c_data: list = []
+            if isinstance(c_resp, dict):
+                c_inner = c_resp.get("result", c_resp)
+                c_data  = c_inner.get("data", c_inner) if isinstance(c_inner, dict) else c_resp
+            if isinstance(c_data, list):
+                for c in c_data:
+                    if isinstance(c, dict):
+                        cid = c.get("_id") or c.get("id")
+                        cname = c.get("name") or c.get("shortName")
+                        if cid and cname:
+                            country_names[str(cid)] = str(cname)
+        except Exception:
+            self.bot.logger.debug("event_poll: could not build country name cache")
+
         try:
             resp = await self._client.get(
                 "/event.getEventsPaginated",
@@ -839,14 +979,44 @@ class ProductionChecker(commands.Cog, name="production_checker"):
         if not items:
             return
 
-        # On the very first tick, mark everything seen to avoid spamming on restart.
-        if self.event_poll.current_loop == 0:
-            for event in items:
-                eid = str(event.get("id") or event.get("_id") or "")
-                if eid:
-                    await self._db.mark_event_seen(eid)
+        # Startup / catch-up block: for each event-type category that has no
+        # init key yet, post the most-recent event regardless of seen status.
+        # This fires on the real first boot AND whenever init keys have been
+        # manually cleared (e.g. via !reset_events + !peil_events_nu).
+        category_latest: dict[str, tuple[dict, str]] = {}
+        all_eids: list[str] = []
+        for event in items:
+            eid = str(event.get("id") or event.get("_id") or "")
+            if not eid:
+                continue
+            event_type = self._extract_event_type(event)
+            cat = _EVENT_TYPE_TO_CATEGORY.get(event_type)
+            # items are returned newest-first; first occurrence per category = most recent
+            if cat and cat not in category_latest and event_type in _EVENT_LABELS:
+                category_latest[cat] = (event, eid)
+            all_eids.append(eid)
+
+        # Check whether any category still needs its first announcement.
+        uninit_cats = {
+            cat for cat in category_latest
+            if not await self._db.get_poll_state(f"event_cat_init_{cat}")
+        }
+
+        if uninit_cats:
+            posted = 0
+            for cat, (event, eid) in category_latest.items():
+                if cat not in uninit_cats:
+                    continue
+                await self._post_event(event, eid, channel_id, country_names)
+                await self._db.set_poll_state(f"event_cat_init_{cat}", "1")
+                posted += 1
+                await asyncio.sleep(0.5)
+            # Mark every fetched event as seen so normal ticks don't re-post them.
+            for eid in all_eids:
+                await self._db.mark_event_seen(eid)
             self.bot.logger.info(
-                "event_poll: startup — marked %d events as seen", len(items)
+                "event_poll: catch-up — %d events found, %d categories announced",
+                len(all_eids), posted,
             )
             return
 
@@ -863,141 +1033,107 @@ class ProductionChecker(commands.Cog, name="production_checker"):
                 )
                 await self._db.mark_event_seen(eid)
                 continue
-            await self._post_event(event, eid, channel_id)
+            await self._post_event(event, eid, channel_id, country_names)
             await self._db.mark_event_seen(eid)
             await asyncio.sleep(0.5)
 
-    async def _post_event(self, event: dict, event_id: str, channel_id: int) -> None:
-        """Build and post an embed for a single game event and store it in the DB."""
-        from datetime import timezone
+    async def _post_event(
+        self,
+        event: dict,
+        event_id: str,
+        channel_id: int,
+        country_names: dict[str, str] | None = None,
+    ) -> None:
+        """Build and post an embed for a single game event."""
         event_type = self._extract_event_type(event)
-        label = _EVENT_LABELS.get(event_type, f"🔔 {event_type}")
+        label      = _EVENT_LABELS.get(event_type, f"🔔 {event_type}")
+        cn         = country_names or {}
+        nl_id      = self.config.get("nl_country_id", "")
 
-        # ── Field extraction ─────────────────────────────────────────────
-        # The API may place payload fields at the root level OR in a nested
-        # "data" / "eventData" / "payload" sub-object.  Probe all levels.
-        sub_dicts: list[dict] = [event]
-        for _key in ("data", "eventData", "payload", "battleData"):
-            _v = event.get(_key)
-            if isinstance(_v, dict):
-                sub_dicts.append(_v)
+        # ── Extract fields from the real API structure ────────────────────
+        # Real events: IDs are bare strings inside event["data"].
+        # Fake test events: nested objects at root level (fallback below).
+        edata: dict = event.get("data") or {}
+        if not isinstance(edata, dict):
+            edata = {}
 
-        def _first(*keys: str) -> str | None:
-            for d in sub_dicts:
-                for k in keys:
-                    v = d.get(k)
-                    if v:
+        def _s(*keys: str) -> str | None:
+            """First non-empty string value from edata then root event."""
+            for k in keys:
+                for src in (edata, event):
+                    v = src.get(k)
+                    if v and isinstance(v, str):
+                        return v
+            return None
+
+        def _num(*keys: str) -> str | None:
+            """First numeric value (returned as string) from edata then root."""
+            for k in keys:
+                for src in (edata, event):
+                    v = src.get(k)
+                    if v is not None and v != "":
                         return str(v)
             return None
 
-        def _first_obj(*keys: str) -> dict:
-            for d in sub_dicts:
-                for k in keys:
-                    v = d.get(k)
-                    if isinstance(v, dict):
-                        return v
-            return {}
+        def _obj_name(key: str) -> str | None:
+            """Name from a nested dict in root event (fake test events)."""
+            obj = event.get(key)
+            if isinstance(obj, dict):
+                return obj.get("name") or obj.get("shortName")
+            return None
 
-        battle_id = _first("battleId", "battle_id", "battleID")
-        war_id    = _first("warId", "war_id", "warID")
+        # Country lists
+        c_list: list[str] = [str(c) for c in (edata.get("countries") or event.get("countries") or []) if c]
 
-        attacker_obj = _first_obj("attackerCountry", "attacker", "attackerCountryData")
-        defender_obj = _first_obj("defenderCountry", "defender", "defenderCountryData")
-        region_obj   = _first_obj("region", "regionData")
+        # Battle / war IDs
+        battle_id = _s("battle", "battleId", "battleID")
+        wars_raw  = edata.get("wars") or []
+        war_id    = _s("war", "warId", "warID") or (str(wars_raw[0]) if wars_raw else None)
 
-        attacker_id: str | None = (
-            _first("attackerCountryId", "attackerId", "attacker_country_id")
-            or attacker_obj.get("_id") or attacker_obj.get("id")
-        )
-        defender_id: str | None = (
-            _first("defenderCountryId", "defenderId", "defender_country_id")
-            or defender_obj.get("_id") or defender_obj.get("id")
-        )
-        region_id: str | None = (
-            _first("regionId", "region_id", "regionID")
-            or region_obj.get("_id") or region_obj.get("id")
+        # Country IDs
+        atk_id  = _s("attackerCountry", "attackerCountryId") or (c_list[0] if c_list else None)
+        dfn_id  = _s("defenderCountry", "defenderCountryId") or (c_list[1] if len(c_list) > 1 else None)
+        pres_country_id = _s("country", "countryId")  # newPresident
+
+        # Country names (dict lookup; fallback to nested-object name for fake events)
+        atk_name  = _obj_name("attackerCountry") or cn.get(atk_id or "")
+        dfn_name  = _obj_name("defenderCountry") or cn.get(dfn_id or "")
+
+        # Region ID
+        regions_raw = edata.get("regions") or []
+        region_id   = (
+            _s("region", "regionId", "defenderRegion", "attackerRegion")
+            or (str(regions_raw[0]) if regions_raw else None)
         )
 
-        attacker_name: str | None = attacker_obj.get("name") or attacker_obj.get("shortName")
-        defender_name: str | None = defender_obj.get("name") or defender_obj.get("shortName")
-        region_name:   str | None = (
-            region_obj.get("name")
-            or _first("regionName", "region_name")
-        )
+        # Region name — try nested object (fake events), then API lookup
+        region_name: str | None = _obj_name("region")
+        if not region_name and region_id and not event_id.startswith("fake_"):
+            try:
+                rr = await self._client.get(
+                    "/region.getById",
+                    params={"input": json.dumps({"regionId": region_id})},
+                )
+                if isinstance(rr, dict):
+                    ri = rr.get("result") or rr
+                    rd = ri.get("data", ri) if isinstance(ri, dict) else rr
+                    if isinstance(rd, dict):
+                        region_name = rd.get("name") or rd.get("regionName")
+            except Exception:
+                self.bot.logger.debug("event_poll: region lookup failed for %s", region_id)
+
+        # Convenience labels
+        atk = atk_name or atk_id or "?"
+        dfn = dfn_name or dfn_id or "?"
+        rgn = region_name or region_id or "?"
 
         self.bot.logger.debug(
-            "event_poll _post_event: type=%s battle=%s war=%s atk=%s dfn=%s rgn=%s",
-            event_type, battle_id, war_id, attacker_id, defender_id, region_id,
+            "_post_event: type=%s atk=%s dfn=%s rgn=%s battle=%s war=%s",
+            event_type, atk, dfn, rgn, battle_id, war_id,
         )
 
-        # ── Enrich battleOpened via /battle.getById ───────────────────────
-        if event_type == "battleOpened" and battle_id:
-            try:
-                b_resp = await self._client.get(
-                    "/battle.getById",
-                    params={"input": json.dumps({"battleId": battle_id})},
-                )
-                b_data: dict = {}
-                if isinstance(b_resp, dict):
-                    b_inner = b_resp.get("result") or b_resp
-                    b_data = b_inner.get("data", b_inner) if isinstance(b_inner, dict) else b_resp
-                self.bot.logger.debug("event_poll battle enrich keys: %s", list(b_data.keys()) if isinstance(b_data, dict) else type(b_data))
-                if isinstance(b_data, dict):
-                    # Try to extract country objects directly from battle response
-                    b_atk = b_data.get("attackerCountry") or b_data.get("attacker") or {}
-                    b_dfn = b_data.get("defenderCountry") or b_data.get("defender") or {}
-                    b_rgn = b_data.get("region") or {}
-                    if isinstance(b_atk, dict):
-                        attacker_id   = attacker_id   or b_atk.get("_id") or b_atk.get("id")
-                        attacker_name = attacker_name or b_atk.get("name") or b_atk.get("shortName")
-                    if isinstance(b_dfn, dict):
-                        defender_id   = defender_id   or b_dfn.get("_id") or b_dfn.get("id")
-                        defender_name = defender_name or b_dfn.get("name") or b_dfn.get("shortName")
-                    if isinstance(b_rgn, dict) and not region_name:
-                        region_name = b_rgn.get("name")
-                    if isinstance(b_rgn, dict) and not region_id:
-                        region_id = b_rgn.get("_id") or b_rgn.get("id")
-                    # Flat field fallbacks
-                    attacker_id   = attacker_id   or b_data.get("attackerCountryId") or b_data.get("attackerId")
-                    defender_id   = defender_id   or b_data.get("defenderCountryId") or b_data.get("defenderId")
-                    region_id     = region_id     or b_data.get("regionId")
-                    region_name   = region_name   or b_data.get("regionName")
-            except Exception:
-                self.bot.logger.debug("event_poll: could not enrich battle %s", battle_id)
-
-        # ── Resolve country names via API (only if name is still unknown) ─
-        for c_id, slot in [(attacker_id, "attacker"), (defender_id, "defender")]:
-            if not c_id:
-                continue
-            if slot == "attacker" and attacker_name:
-                continue
-            if slot == "defender" and defender_name:
-                continue
-            try:
-                c_resp = await self._client.get(
-                    "/country.getCountryById",
-                    params={"input": json.dumps({"countryId": c_id})},
-                )
-                c_data: dict = {}
-                if isinstance(c_resp, dict):
-                    c_inner = c_resp.get("result") or c_resp
-                    c_data = c_inner.get("data", c_inner) if isinstance(c_inner, dict) else c_resp
-                name = (c_data.get("name") or c_data.get("shortName")) if isinstance(c_data, dict) else None
-                if name:
-                    if slot == "attacker":
-                        attacker_name = name
-                    else:
-                        defender_name = name
-            except Exception:
-                self.bot.logger.debug("event_poll: could not resolve country %s", c_id)
-
-        # Timestamp
-        ts_str = (
-            event.get("createdAt")
-            or event.get("date")
-            or event.get("timestamp")
-            or (edata.get("createdAt") if isinstance(edata, dict) else None)
-        )
+        # ── Timestamp ──────────────────────────────────────────────────────
+        ts_str = event.get("createdAt") or event.get("date") or event.get("timestamp")
         timestamp: datetime | None = None
         if ts_str:
             try:
@@ -1005,46 +1141,110 @@ class ProductionChecker(commands.Cog, name="production_checker"):
             except Exception:
                 pass
 
-        # Store in DB
+        # ── Store in DB ────────────────────────────────────────────────────
         try:
             await self._db.store_war_event(
                 event_id=event_id,
                 event_type=event_type,
                 battle_id=battle_id,
                 war_id=war_id,
-                attacker_country_id=attacker_id,
-                defender_country_id=defender_id,
+                attacker_country_id=atk_id,
+                defender_country_id=dfn_id,
                 region_id=region_id,
                 region_name=region_name,
-                attacker_name=attacker_name,
-                defender_name=defender_name,
+                attacker_name=atk_name,
+                defender_name=dfn_name,
                 created_at=ts_str,
                 raw_json=json.dumps(event, ensure_ascii=False),
             )
         except Exception:
             self.bot.logger.exception("event_poll: failed to store event %s", event_id)
 
-        # Build embed
-        atk = attacker_name or attacker_id or "?"
-        dfn = defender_name or defender_id or "?"
-        rgn = region_name   or region_id   or "?"
+        # ── Build embed description ────────────────────────────────────────
+        url: str | None = None
 
         if event_type == "battleOpened":
             color = discord.Color.red()
             description = f"**{atk}** valt **{dfn}** aan in regio **{rgn}**"
             url = _BATTLE_URL.format(battle_id=battle_id) if battle_id else None
+
         elif event_type == "warDeclared":
             color = discord.Color.dark_red()
             description = f"**{atk}** heeft oorlog verklaard aan **{dfn}**"
             url = _WAR_URL.format(war_id=war_id) if war_id else None
+
         elif event_type in ("peaceMade", "peace_agreement"):
             color = discord.Color.green()
             description = f"**{atk}** en **{dfn}** hebben vrede gesloten"
             url = _WAR_URL.format(war_id=war_id) if war_id else None
+
+        elif event_type == "regionTransfer":
+            amount = _num("amount")
+            amount_str = f" voor **{amount}** munt" if amount else ""
+            # countries[0] = new owner / buyer, countries[1] = previous owner / seller
+            description = f"**{atk}** heeft regio **{rgn}** overgenomen van **{dfn}**{amount_str}"
+            color = discord.Color.orange()
+
+        elif event_type == "depositDiscovered":
+            item   = _s("itemCode", "item", "itemName", "resource") or "onbekend"
+            bonus  = _num("bonusPercent", "bonus", "bonusValue")
+            days   = _num("durationDays", "days", "duration")
+            b_str  = f" +{bonus}%" if bonus else ""
+            d_str  = f" voor {days} dagen" if days else ""
+            description = f"Deposit **{item}{b_str}** ontdekt in regio **{rgn}**{d_str}"
+            color = discord.Color.gold()
+
+        elif event_type == "depositDepleted":
+            description = f"Het deposit in regio **{rgn}** is uitgeput"
+            color = discord.Color.dark_grey()
+
+        elif event_type == "allianceBroken":
+            color = discord.Color.dark_orange()
+            description = f"De alliantie tussen **{atk}** en **{dfn}** is verbroken"
+
+        elif event_type == "allianceFormed":
+            color = discord.Color.teal()
+            description = f"**{atk}** en **{dfn}** hebben een alliantie gesloten"
+
+        elif event_type == "regionLiberated":
+            color = discord.Color.green()
+            description = f"Regio **{rgn}** is bevrijd door **{atk}** van **{dfn}**"
+
+        elif event_type in ("resistanceIncreased", "resistanceDecreased"):
+            color = discord.Color.orange() if event_type == "resistanceIncreased" else discord.Color.greyple()
+            arrow = "📈" if event_type == "resistanceIncreased" else "📉"
+            res   = _num("resistanceValue", "resistance", "currentResistance", "value")
+            val   = f" — verzet: **{res}**" if res else ""
+            description = f"{arrow} Verzet in regio **{rgn}**{val}"
+
+        elif event_type == "countryMoneyTransfer":
+            amount = _num("money", "amount", "coins", "gold")
+            amt_str = f" **{amount}** munten" if amount else ""
+            description = f"**{atk}** heeft{amt_str} overgemaakt aan **{dfn}**"
+            color = discord.Color.yellow()
+
+        elif event_type == "newPresident":
+            pres_name  = _s("presidentName", "president", "citizenName", "name")
+            country    = cn.get(pres_country_id or "") or pres_country_id or atk or dfn or "Nederland"
+            pres_str   = f" **{pres_name}**" if pres_name else ""
+            description = f"Nieuwe president{pres_str} heeft de macht overgenomen in **{country}**"
+            color = discord.Color.blue()
+
+        elif event_type == "revolutionStarted":
+            description = f"**{atk}** is een revolte gestart in regio **{rgn}** (bezet door **{dfn}**)"
+            color = discord.Color.red()
+
+        elif event_type == "revolutionEnded":
+            description = f"De revolte in regio **{rgn}** is beëindigd"
+            color = discord.Color.greyple()
+
+        elif event_type == "financedRevolt":
+            description = f"**{atk}** heeft een revolte gefinancierd in regio **{rgn}**"
+            color = discord.Color.dark_red()
+
         else:
             color = discord.Color.blurple()
             description = "Nieuw event ontvangen."
-            url = None
 
         embed = discord.Embed(
             title=label,
@@ -1075,6 +1275,136 @@ class ProductionChecker(commands.Cog, name="production_checker"):
                     )
 
     # ------------------------------------------------------------------ #
+    # Resistance poll (hourly — NL-occupied regions)                      #
+    # ------------------------------------------------------------------ #
+
+    @tasks.loop(hours=24)
+    async def resistance_poll(self) -> None:
+        """Daily overview: resistance in NL-controlled foreign regions."""
+        if not self._client or not self._db:
+            return
+        try:
+            await self._run_resistance_poll()
+        except Exception:
+            self.bot.logger.exception("resistance_poll: unexpected error")
+
+    @resistance_poll.before_loop
+    async def before_resistance_poll(self) -> None:
+        await self.bot.wait_until_ready()
+        await asyncio.sleep(_seconds_until_hour(9))  # run daily at 09:00 UTC (10:00 NL)
+
+    async def _run_resistance_poll(self) -> None:
+        """Fetch all regions, find NL originals occupied by others, report resistance."""
+        nl_country_id = self.config.get("nl_country_id")
+        channels = self.config.get("channels", {})
+        channel_id = (
+            channels.get("bot_mededelingen")
+            or channels.get("testing-area")
+        )
+        if not channel_id or not nl_country_id:
+            return
+
+        try:
+            resp = await self._client.get(
+                "/region.getRegionsObject",
+                params={"input": "{}"},
+            )
+        except Exception as exc:
+            self.bot.logger.warning("resistance_poll: failed to fetch regions: %s", exc)
+            return
+
+        # Unwrap tRPC envelope and convert to a flat list of region dicts.
+        data: dict | list = {}
+        if isinstance(resp, dict):
+            inner = resp.get("result", {})
+            data = inner.get("data", inner) if isinstance(inner, dict) else resp
+        regions: list[dict] = []
+        if isinstance(data, dict):
+            regions = [v for v in data.values() if isinstance(v, dict)]
+        elif isinstance(data, list):
+            regions = [r for r in data if isinstance(r, dict)]
+
+        # Build country name lookup
+        country_names: dict[str, str] = {}
+        try:
+            c_resp = await self._client.get("/country.getAllCountries")
+            c_inner = c_resp.get("result", c_resp) if isinstance(c_resp, dict) else {}
+            c_data = c_inner.get("data", c_inner) if isinstance(c_inner, dict) else c_resp
+            if isinstance(c_data, list):
+                for c in c_data:
+                    if isinstance(c, dict):
+                        cid = c.get("_id") or c.get("id")
+                        cname = c.get("name") or c.get("shortName")
+                        if cid and cname:
+                            country_names[str(cid)] = str(cname)
+        except Exception:
+            self.bot.logger.debug("resistance_poll: could not build country name cache")
+
+        # Filter for regions currently controlled by NL but originally belonging to another country.
+        # Those original citizens are the ones giving resistance.
+        # Real API fields: "initialCountry" = original owner ID, "country" = current controller ID.
+        occupied: list[dict] = []
+        for r in regions:
+            orig_id = r.get("initialCountry")
+            curr_id = r.get("country")
+            if curr_id == nl_country_id and orig_id and orig_id != nl_country_id:
+                occupied.append(r)
+
+        if not occupied:
+            self.bot.logger.info("resistance_poll: NL controls no foreign regions (no resistance active)")
+            return
+
+        # Assemble current state: (region_id, region_name, original_country_name, resistance, max_resistance)
+        # "original_country" = whose citizens are resisting NL control.
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        current: list[tuple[str, str, str, float, float]] = []
+        for r in occupied:
+            rid      = r.get("_id") or r.get("id") or ""
+            rname    = r.get("name") or r.get("regionName") or rid
+            orig_id  = r.get("initialCountry") or ""
+            orig_name = country_names.get(orig_id) or orig_id or "?"
+            res      = float(r.get("resistance") or 0)
+            maxr     = float(r.get("resistanceMax") or 100.0)
+            current.append((rid, rname, orig_name, res, maxr))
+
+        def _region_field(res: float, maxr: float, delta: float | None = None) -> str:
+            pct      = (res / maxr * 100) if maxr else 0
+            filled   = int(pct / 10)
+            bar      = "█" * filled + "░" * (10 - filled)
+            delta_str = ""
+            if delta is not None and abs(delta) > 0.01:
+                arrow = "📈" if delta > 0 else "📉"
+                delta_str = f" ({arrow} {delta:+.0f})"
+            return f"Verzet: `{bar}` {res:.0f}/{maxr:.0f} ({pct:.0f}%){delta_str}"
+
+        # Load previous values for delta arrows, then update stored state.
+        fields: list[tuple[str, str]] = []  # (field_name, field_value)
+        for (rid, rname, orig, res, maxr) in current:
+            stored = await self._db.get_resistance_state(rid)
+            old_val: float | None = stored["resistance_value"] if stored else None
+            delta = (res - old_val) if old_val is not None else None
+            fields.append((f"{rname} ({orig})", _region_field(res, maxr, delta)))
+            await self._db.upsert_resistance_state(rid, rname, orig, res, now_str)
+
+        # Always post the full daily overview.
+        embed = discord.Embed(
+            title="⚔️ Door NL bezette regio's — dagelijks verzetsoverzicht",
+            description="Regio's die NL beheert maar oorspronkelijk aan een ander land toebehoren.",
+            color=discord.Color.orange(),
+            timestamp=datetime.now(timezone.utc),
+        )
+        for (rname, field_val) in fields:
+            embed.add_field(name=rname, value=field_val, inline=False)
+        embed.set_footer(text="WarEra — verzetspeiling")
+        for guild in self.bot.guilds:
+            ch = guild.get_channel(channel_id)
+            if ch:
+                try:
+                    await ch.send(embed=embed)
+                except Exception:
+                    self.bot.logger.exception("resistance_poll: failed to post daily overview")
+
+    # ------------------------------------------------------------------ #
     # Commands — production                                                #
     # ------------------------------------------------------------------ #
 
@@ -1101,7 +1431,7 @@ class ProductionChecker(commands.Cog, name="production_checker"):
                     self.bot.logger.exception("Failed to send poll completion message")
                 if self.bot.testing:
                     channels = self.config.get("channels", {})
-                    cid = channels.get("testing-area") or channels.get("production")
+                    cid = channels.get("testing-area") or channels.get("bot_mededelingen")
                     if cid:
                         for guild in self.bot.guilds:
                             ch = guild.get_channel(cid)
@@ -1159,6 +1489,117 @@ class ProductionChecker(commands.Cog, name="production_checker"):
         except Exception:
             self.bot.logger.exception("fake_leader: failed to update DB")
             await ctx.send("DB-update mislukt; zie logs.")
+
+    @commands.command(name="test_event")
+    @commands.is_owner()
+    async def test_event(self, ctx: Context, event_type: str = "battleOpened"):
+        """Simulate a war/battle/peace event notification (testing mode only).
+
+        Usage:
+            !test_event                   — simulates a battleOpened
+            !test_event warDeclared       — simulates a war declaration
+            !test_event peaceMade         — simulates a peace announcement
+            !test_event peace_agreement   — simulates a peace agreement
+
+        The embed is posted to the configured events channel, exactly as the
+        real poller would do it.  No database entry is written.
+        """
+        if not getattr(self.bot, "testing", False):
+            await ctx.send("❌ Dit commando werkt alleen in testmodus (`--testing`).")
+            return
+
+        # Normalize alias
+        normalized = _EVENT_TYPE_ALIASES.get(event_type.lower(), event_type)
+        if normalized not in _EVENT_LABELS:
+            valid = ", ".join(_EVENT_LABELS.keys())
+            await ctx.send(
+                f"❌ Onbekend event-type `{event_type}`.\nGeldige opties: `{valid}`"
+            )
+            return
+
+        channel_id = self.config.get("channels", {}).get("events")
+        if not channel_id:
+            await ctx.send("❌ Geen events-kanaal geconfigureerd (`channels.events`).")
+            return
+
+        # Build a synthetic event payload that mirrors what the real API returns.
+        fake_event: dict = {
+            "id": "fake_test_event_001",
+            "type": normalized,
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "attackerCountry": {"_id": "fake_atk_id", "name": "Nederland"},
+            "defenderCountry": {"_id": "fake_dfn_id", "name": "België"},
+            "region":          {"_id": "fake_rgn_id", "name": "Zeeland"},
+            "battleId":  "fake_battle_001" if normalized == "battleOpened" else None,
+            "warId":     "fake_war_001"    if normalized != "battleOpened" else None,
+        }
+
+        try:
+            await self._post_event(fake_event, "fake_test_event_001", channel_id)
+            await ctx.send(
+                f"✅ Nep-event **{normalized}** gepost naar <#{channel_id}>."
+            )
+        except Exception:
+            self.bot.logger.exception("test_event: failed to post synthetic event")
+            await ctx.send("❌ Posten mislukt; zie logs.")
+
+    @commands.command(name="peil_events_nu")
+    @commands.is_owner()
+    async def poll_events_now(self, ctx: Context):
+        """Trigger an event-poll tick immediately, re-posting the latest event per category."""
+        if not self._client or not self._db:
+            await ctx.send("❌ API-client of database niet geïnitialiseerd.")
+            return
+        # Clear init keys so the catch-up block fires and re-posts latest per category.
+        try:
+            await self._db._conn.execute(
+                "DELETE FROM poll_state WHERE key LIKE 'event_cat_init_%'"
+            )
+            await self._db._conn.commit()
+        except Exception as exc:
+            await ctx.send(f"❌ Kon init-sleutels niet wissen: {exc}")
+            return
+        await ctx.send("🔄 Event-peiling gestart...")
+        try:
+            await self._run_event_poll()
+            await ctx.send("✅ Event-peiling voltooid.")
+        except Exception as exc:
+            self.bot.logger.exception("poll_events_now: error")
+            await ctx.send(f"❌ Event-peiling mislukt: {exc}")
+
+    @commands.command(name="peil_verzet_nu")
+    @commands.is_owner()
+    async def poll_resistance_now(self, ctx: Context):
+        """Trigger a resistance poll immediately and post the current overview."""
+        if not self._client or not self._db:
+            await ctx.send("❌ API-client of database niet geïnitialiseerd.")
+            return
+        await ctx.send("🔄 Verzetspeiling gestart...")
+        try:
+            await self._run_resistance_poll()
+            await ctx.send("✅ Verzetspeiling voltooid.")
+        except Exception as exc:
+            self.bot.logger.exception("poll_resistance_now: error")
+            await ctx.send(f"❌ Verzetspeiling mislukt: {exc}")
+
+    @commands.command(name="reset_events")
+    @commands.is_owner()
+    async def reset_events(self, ctx: Context):
+        """Clear all event_cat_init_* keys so startup re-announces the latest event per category."""
+        if not self._db:
+            await ctx.send("❌ Database niet geïnitialiseerd.")
+            return
+        try:
+            await self._db._conn.execute(
+                "DELETE FROM poll_state WHERE key LIKE 'event_cat_init_%'"
+            )
+            await self._db._conn.commit()
+            await ctx.send(
+                "✅ `event_cat_init_*` sleutels gewist. Bij de volgende opstart of `!peil_events_nu` wordt per categorie het meest recente event opnieuw gepost."
+            )
+        except Exception as exc:
+            self.bot.logger.exception("reset_events: DB error")
+            await ctx.send(f"❌ Mislukt: {exc}")
 
     # ------------------------------------------------------------------ #
     # Helper — primary colour for embeds                                   #

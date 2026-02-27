@@ -531,6 +531,16 @@ if __name__ == "__main__":
     else:
         config_path = "testing_config.json" if args.testing else "config.json"
 
+    # Auto-detect testing mode from config file when --testing flag wasn't given
+    if not args.testing:
+        try:
+            with open(config_path) as _f:
+                import json as _json
+                if _json.load(_f).get("test"):
+                    args.testing = True
+        except Exception:
+            pass
+
     if args.testing:
         load_dotenv(".env_test", override=True)
     else:
@@ -546,7 +556,6 @@ if __name__ == "__main__":
     # instantiate bot with chosen config
     bot = DiscordBot(config_path=config_path)
     bot.testing = args.testing
-    print(os.getenv(os.environ.get("BOT_TOKEN_ENV")))
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
