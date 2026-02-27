@@ -136,6 +136,18 @@ class Database:
             await self._conn.commit()
         except Exception:
             pass  # column already exists
+        # migration: add mu_id column if missing
+        try:
+            await self._conn.execute("ALTER TABLE citizen_levels ADD COLUMN mu_id TEXT")
+            await self._conn.commit()
+        except Exception:
+            pass  # column already exists
+        # migration: add mu_name column if missing
+        try:
+            await self._conn.execute("ALTER TABLE citizen_levels ADD COLUMN mu_name TEXT")
+            await self._conn.commit()
+        except Exception:
+            pass  # column already exists
         # track which articles have already been posted to Discord
         await self._conn.execute(
             """
@@ -317,13 +329,32 @@ class Database:
         )
         await self._conn.commit()
 
-    async def upsert_citizen_level(self, user_id: str, country_id: str, level: int, updated_at: str, skill_mode: str | None = None, last_skills_reset_at: str | None = None, citizen_name: str | None = None, last_login_at: str | None = None) -> None:
+    async def upsert_citizen_level(self, user_id: str, country_id: str, level: int, updated_at: str, skill_mode: str | None = None, last_skills_reset_at: str | None = None, citizen_name: str | None = None, last_login_at: str | None = None, mu_id: str | None = None, mu_name: str | None = None) -> None:
         if not self._conn:
             raise RuntimeError("Database not initialized; call setup() first")
         await self._conn.execute(
-            "INSERT OR REPLACE INTO citizen_levels(user_id, country_id, level, skill_mode, last_skills_reset_at, citizen_name, last_login_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-            (user_id, country_id, level, skill_mode, last_skills_reset_at, citizen_name, last_login_at, updated_at),
+            "INSERT OR REPLACE INTO citizen_levels(user_id, country_id, level, skill_mode, last_skills_reset_at, citizen_name, last_login_at, mu_id, mu_name, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, country_id, level, skill_mode, last_skills_reset_at, citizen_name, last_login_at, mu_id, mu_name, updated_at),
         )
+
+    async def update_citizen_mu(self, user_id: str, mu_id: str | None, mu_name: str | None) -> None:
+        """Update only the mu_id and mu_name fields for an existing citizen row."""
+        if not self._conn:
+            raise RuntimeError("Database not initialized; call setup() first")
+        await self._conn.execute(
+            "UPDATE citizen_levels SET mu_id = ?, mu_name = ? WHERE user_id = ?",
+            (mu_id, mu_name, user_id),
+        )
+
+    async def clear_citizen_mus_for_country(self, country_id: str) -> None:
+        """Reset mu_id and mu_name to NULL for all citizens of a country (before re-assigning)."""
+        if not self._conn:
+            raise RuntimeError("Database not initialized; call setup() first")
+        await self._conn.execute(
+            "UPDATE citizen_levels SET mu_id = NULL, mu_name = NULL WHERE country_id = ?",
+            (country_id,),
+        )
+        await self._conn.commit()
 
     async def flush_citizen_levels(self) -> None:
         """Commit any pending citizen level upserts."""
@@ -432,6 +463,111 @@ class Database:
                     last_updated = upd
         return buckets, last_updated
 
+    async def get_skill_mode_by_mu(
+        self, country_id: str | None
+    ) -> dict[str, dict]:
+        """Return eco/war/unknown counts + per-player rows grouped by MU name.
+
+        Returns a dict keyed by mu_name (None key → players without an MU).
+        Each entry: {"eco": n, "war": n, "unknown": n,
+                     "players": [{"citizen_name", "level", "skill_mode"}, …]}
+        Players within each MU are sorted by level DESC.
+        """
+        if not self._conn:
+            raise RuntimeError("Database not initialized; call setup() first")
+        if country_id:
+            sql = (
+                "SELECT mu_name, citizen_name, level, skill_mode "
+                "FROM citizen_levels WHERE country_id = ? "
+                "ORDER BY mu_name, level DESC"
+            )
+            params: tuple = (country_id,)
+        else:
+            sql = (
+                "SELECT mu_name, citizen_name, level, skill_mode "
+                "FROM citizen_levels ORDER BY mu_name, level DESC"
+            )
+            params = ()
+        mus: dict[str, dict] = {}
+        async with self._conn.execute(sql, params) as cur:
+            async for row in cur:
+                mu, name, level, mode = row
+                key = mu or ""
+                if key not in mus:
+                    mus[key] = {"eco": 0, "war": 0, "unknown": 0, "players": []}
+                if mode == "eco":
+                    mus[key]["eco"] += 1
+                elif mode == "war":
+                    mus[key]["war"] += 1
+                else:
+                    mus[key]["unknown"] += 1
+                mus[key]["players"].append({
+                    "citizen_name": name or "?",
+                    "level": level,
+                    "skill_mode": mode,
+                })
+        return mus
+
+    async def get_citizen_cooldowns_by_mu(
+        self, country_id: str | None
+    ) -> dict[str, dict]:
+        """Return skill-reset cooldown stats + per-player rows grouped by MU name.
+
+        Returns a dict keyed by mu_name ("" → players without an MU).
+        Each entry: {"count": n_with_reset_data, "sum_days": float,
+                     "available": n_can_reset, "no_data": n,
+                     "players": [{"citizen_name", "level", "days_ago", "can_reset"}, …]}
+        Players within each MU are sorted by level DESC.
+        """
+        if not self._conn:
+            raise RuntimeError("Database not initialized; call setup() first")
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        if country_id:
+            sql = (
+                "SELECT mu_name, citizen_name, level, last_skills_reset_at "
+                "FROM citizen_levels WHERE country_id = ? "
+                "ORDER BY mu_name, level DESC"
+            )
+            params: tuple = (country_id,)
+        else:
+            sql = (
+                "SELECT mu_name, citizen_name, level, last_skills_reset_at "
+                "FROM citizen_levels ORDER BY mu_name, level DESC"
+            )
+            params = ()
+        mus: dict[str, dict] = {}
+        async with self._conn.execute(sql, params) as cur:
+            async for row in cur:
+                mu, name, level, reset_at = row
+                key = mu or ""
+                if key not in mus:
+                    mus[key] = {"count": 0, "sum_days": 0.0, "available": 0, "no_data": 0, "players": []}
+                b = mus[key]
+                days_ago: float | None = None
+                can_reset = True
+                if reset_at:
+                    try:
+                        ts = datetime.fromisoformat(reset_at.replace("Z", "+00:00"))
+                        days_ago = (now - ts).total_seconds() / 86400
+                        can_reset = days_ago >= 7
+                        b["count"] += 1
+                        b["sum_days"] += days_ago
+                        if can_reset:
+                            b["available"] += 1
+                    except Exception:
+                        b["no_data"] += 1
+                        b["available"] += 1
+                else:
+                    b["no_data"] += 1
+                    b["available"] += 1
+                b["players"].append({
+                    "citizen_name": name or "?",
+                    "level": level,
+                    "days_ago": days_ago,
+                    "can_reset": can_reset,
+                })
+        return mus
 
     async def get_skill_reset_cooldown_by_level_buckets(
         self, country_id: str | None
@@ -445,11 +581,19 @@ class Database:
         """
         if not self._conn:
             raise RuntimeError("Database not initialized; call setup() first")
+        # Only count eco-mode (or unknown) players — war-mode players can already fight
+        # and don't need to reset, so their cooldown is irrelevant for readiness purposes.
         if country_id:
-            sql = "SELECT level, last_skills_reset_at, updated_at FROM citizen_levels WHERE country_id = ?"
+            sql = (
+                "SELECT level, last_skills_reset_at, updated_at FROM citizen_levels "
+                "WHERE country_id = ? AND (skill_mode IS NULL OR skill_mode != 'war')"
+            )
             params: tuple = (country_id,)
         else:
-            sql = "SELECT level, last_skills_reset_at, updated_at FROM citizen_levels"
+            sql = (
+                "SELECT level, last_skills_reset_at, updated_at FROM citizen_levels "
+                "WHERE skill_mode IS NULL OR skill_mode != 'war'"
+            )
             params = ()
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
@@ -572,6 +716,191 @@ class Database:
                 })
         return rows
 
+    async def find_citizen_readiness(self, query: str) -> list[dict]:
+        """Search for a citizen by name (partial, case-insensitive) or exact user_id.
+
+        Returns up to 10 matches ordered by level DESC.
+        Each dict: user_id, citizen_name, level, country_id, skill_mode,
+                   last_skills_reset_at, days_ago, can_reset
+        """
+        if not self._conn:
+            raise RuntimeError("Database not initialized; call setup() first")
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        sql = """
+            SELECT user_id, citizen_name, level, country_id, skill_mode, last_skills_reset_at
+            FROM citizen_levels
+            WHERE user_id = ? OR lower(citizen_name) LIKE lower(?)
+            ORDER BY level DESC
+            LIMIT 10
+        """
+        rows: list[dict] = []
+        async with self._conn.execute(sql, (query, f"%{query}%")) as cur:
+            async for row in cur:
+                uid, name, level, country_id, mode, reset_at = row
+                days_ago: float | None = None
+                can_reset = True
+                if reset_at:
+                    try:
+                        ts = datetime.fromisoformat(reset_at.replace("Z", "+00:00"))
+                        days_ago = (now - ts).total_seconds() / 86400
+                        can_reset = days_ago >= 7
+                    except Exception:
+                        pass
+                rows.append({
+                    "user_id": uid,
+                    "citizen_name": name or uid,
+                    "level": level,
+                    "country_id": country_id,
+                    "skill_mode": mode,
+                    "last_skills_reset_at": reset_at,
+                    "days_ago": days_ago,
+                    "can_reset": can_reset,
+                })
+        return rows
+
+    async def get_mu_readiness_players(
+        self, mu_query: str, country_id: str | None = None
+    ) -> tuple[str | None, list[dict]]:
+        """Return (matched_mu_name, players) for the best-matching MU name.
+
+        mu_query is matched case-insensitively; exact match is preferred over partial.
+        Each player dict: citizen_name, level, skill_mode, days_ago, can_reset
+        """
+        if not self._conn:
+            raise RuntimeError("Database not initialized; call setup() first")
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        # Find all matching MU names
+        if country_id:
+            sql_mu = (
+                "SELECT DISTINCT mu_name FROM citizen_levels "
+                "WHERE country_id = ? AND lower(mu_name) LIKE lower(?) AND mu_name IS NOT NULL"
+            )
+            params_mu: tuple = (country_id, f"%{mu_query}%")
+        else:
+            sql_mu = (
+                "SELECT DISTINCT mu_name FROM citizen_levels "
+                "WHERE lower(mu_name) LIKE lower(?) AND mu_name IS NOT NULL"
+            )
+            params_mu = (f"%{mu_query}%",)
+        mu_names: list[str] = []
+        async with self._conn.execute(sql_mu, params_mu) as cur:
+            async for row in cur:
+                if row[0]:
+                    mu_names.append(row[0])
+        if not mu_names:
+            return None, []
+        # Prefer exact match over partial
+        exact = next((m for m in mu_names if m.lower() == mu_query.lower()), None)
+        mu_name = exact or mu_names[0]
+        # Fetch all players in that MU
+        if country_id:
+            sql = (
+                "SELECT citizen_name, level, skill_mode, last_skills_reset_at "
+                "FROM citizen_levels WHERE mu_name = ? AND country_id = ? "
+                "ORDER BY level DESC"
+            )
+            params2: tuple = (mu_name, country_id)
+        else:
+            sql = (
+                "SELECT citizen_name, level, skill_mode, last_skills_reset_at "
+                "FROM citizen_levels WHERE mu_name = ? ORDER BY level DESC"
+            )
+            params2 = (mu_name,)
+        players: list[dict] = []
+        async with self._conn.execute(sql, params2) as cur:
+            async for row in cur:
+                name, level, mode, reset_at = row
+                days_ago: float | None = None
+                can_reset = True
+                if reset_at:
+                    try:
+                        ts = datetime.fromisoformat(reset_at.replace("Z", "+00:00"))
+                        days_ago = (now - ts).total_seconds() / 86400
+                        can_reset = days_ago >= 7
+                    except Exception:
+                        pass
+                players.append({
+                    "citizen_name": name or "?",
+                    "level": level,
+                    "skill_mode": mode,
+                    "days_ago": days_ago,
+                    "can_reset": can_reset,
+                })
+        return mu_name, players
+
+    async def get_distinct_mu_names(self, country_id: str | None = None) -> list[str]:
+        """Return all distinct non-null MU names, optionally filtered by country."""
+        if not self._conn:
+            raise RuntimeError("Database not initialized; call setup() first")
+        if country_id:
+            sql = (
+                "SELECT DISTINCT mu_name FROM citizen_levels "
+                "WHERE country_id = ? AND mu_name IS NOT NULL ORDER BY mu_name"
+            )
+            params: tuple = (country_id,)
+        else:
+            sql = "SELECT DISTINCT mu_name FROM citizen_levels WHERE mu_name IS NOT NULL ORDER BY mu_name"
+            params = ()
+        names: list[str] = []
+        async with self._conn.execute(sql, params) as cur:
+            async for row in cur:
+                if row[0]:
+                    names.append(row[0])
+        return names
+
+
+    async def get_all_mu_readiness(self, country_id: str | None = None) -> dict[str, dict]:
+        """Return readiness stats for every distinct MU, keyed by mu_name.
+
+        Each value dict:
+          war          – players in war mode
+          total        – all players in that MU
+          can_reset    – eco players who can reset right now
+          waiting_days – list of days_ago values for eco players still in cooldown
+        """
+        if not self._conn:
+            raise RuntimeError("Database not initialized; call setup() first")
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        if country_id:
+            sql = (
+                "SELECT mu_name, skill_mode, last_skills_reset_at "
+                "FROM citizen_levels WHERE country_id = ? AND mu_name IS NOT NULL"
+            )
+            params: tuple = (country_id,)
+        else:
+            sql = (
+                "SELECT mu_name, skill_mode, last_skills_reset_at "
+                "FROM citizen_levels WHERE mu_name IS NOT NULL"
+            )
+            params = ()
+        mus: dict[str, dict] = {}
+        async with self._conn.execute(sql, params) as cur:
+            async for row in cur:
+                mu_name, mode, reset_at = row
+                if mu_name not in mus:
+                    mus[mu_name] = {"war": 0, "total": 0, "can_reset": 0, "waiting_days": []}
+                m = mus[mu_name]
+                m["total"] += 1
+                if mode == "war":
+                    m["war"] += 1
+                else:
+                    # eco / unknown — compute cooldown
+                    can_reset = True
+                    if reset_at:
+                        try:
+                            ts = datetime.fromisoformat(reset_at.replace("Z", "+00:00"))
+                            days_ago = (now - ts).total_seconds() / 86400
+                            can_reset = days_ago >= 7
+                            if not can_reset:
+                                m["waiting_days"].append(days_ago)
+                        except Exception:
+                            pass
+                    if can_reset:
+                        m["can_reset"] += 1
+        return mus
 
     async def has_seen_article(self, article_id: str) -> bool:
         """Return True if this article has already been posted to Discord."""

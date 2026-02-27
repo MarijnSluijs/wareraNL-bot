@@ -3,6 +3,12 @@
   "description": "Geef aan bij welke MU je zit. Als je niet in een Nederlandse MU zit, kies dan voor 'Overige MU'. Wil je in de toekomst een MU-lid worden? Kies dan voor 'Wachtlijst' zodat we je kunnen pinggen als er een plek vrijkomt!",
   "buttons": [
     {
+      "label": "De Heeren XVII",
+      "role_id": 1475464742209327204,
+      "style": "primary",
+      "row": 0
+    },
+    {
       "label": "Korps Mariniers",
       "role_id": 1475465021491380298,
       "style": "primary",
@@ -11,12 +17,6 @@
     {
       "label": "Korps Commando's",
       "role_id": 1475465823685443604,
-      "style": "primary",
-      "row": 0
-    },
-    {
-      "label": "De Heeren XVII",
-      "role_id": 1475464742209327204,
       "style": "primary",
       "row": 0
     },
@@ -57,5 +57,5 @@
       "row": 2
     }
   ],
-  "button_message_id": 1475475559478984905
+  "button_message_id": 1476533999735279687
 }

@@ -3,6 +3,7 @@
 import json
 import logging
 import asyncio
+import difflib
 from typing import Optional
 
 import discord
@@ -241,6 +242,37 @@ class Geluk(commands.Cog, name="geluk"):
                 await self._db.setup()
         return self._db
 
+    async def _resolve_user_from_query(self, query: str) -> tuple[Optional[str], Optional[dict]]:
+        """Resolve user by query: exact username first, closest search candidate as fallback."""
+        s_low = query.lower().strip()
+        user_ids = await self._search_user(query)
+        if not user_ids:
+            return None, None
+
+        candidates: list[tuple[str, dict]] = []
+        for uid in user_ids:
+            p = await self._get_user_profile(uid)
+            if p is not None:
+                candidates.append((uid, p))
+
+        for uid, p in candidates:
+            if (p.get("username") or "").lower().strip() == s_low:
+                return uid, p
+
+        best_uid: Optional[str] = None
+        best_profile: Optional[dict] = None
+        best_ratio = -1.0
+        for uid, p in candidates:
+            ratio = difflib.SequenceMatcher(
+                None, s_low, (p.get("username") or "").lower().strip()
+            ).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_uid = uid
+                best_profile = p
+
+        return best_uid, best_profile
+
     async def _fetch_all_case_transactions(
         self,
         user_id: str,
@@ -330,57 +362,47 @@ class Geluk(commands.Cog, name="geluk"):
         name="geluk",
         description="Controleer het geluk van een speler bij het openen van cases",
     )
-    @app_commands.describe(speler="De gebruikersnaam van de speler om te controleren")
-    async def geluk(self, interaction: discord.Interaction, speler: str) -> None:
+    @app_commands.describe(
+        speler="De gebruikersnaam van de speler om te controleren",
+        user_id="Optioneel: WarEra user ID van de speler",
+    )
+    async def geluk(
+        self,
+        interaction: discord.Interaction,
+        speler: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
         await interaction.response.defer(thinking=True)
 
-        # 1. Find player — exact match first, closest match as fallback
-        import difflib
-        s_low = speler.lower().strip()
-        user_ids = await self._search_user(speler)
-        if not user_ids:
+        if not speler and not user_id:
             await interaction.followup.send(
-                f"❌ Speler **{discord.utils.escape_markdown(speler)}** niet gevonden.",
+                "❌ Geef een **speler** of **user_id** op.",
                 ephemeral=True,
             )
             return
 
-        # Fetch all candidate profiles once
-        candidates: list[tuple[str, dict]] = []  # (uid, profile)
-        for uid in user_ids:
-            p = await self._get_user_profile(uid)
-            if p is not None:
-                candidates.append((uid, p))
-
-        # Exact match
-        user_id: Optional[str] = None
+        # 1. Find player — by user_id if provided, otherwise by username.
         profile: Optional[dict] = None
-        for uid, p in candidates:
-            if (p.get("username") or "").lower().strip() == s_low:
-                user_id = uid
+        resolved_user_id: Optional[str] = None
+        if user_id:
+            p = await self._get_user_profile(user_id)
+            if p is not None:
                 profile = p
-                break
+                resolved_user_id = user_id
+            elif speler:
+                resolved_user_id, profile = await self._resolve_user_from_query(speler)
+        elif speler:
+            resolved_user_id, profile = await self._resolve_user_from_query(speler)
 
-        # Closest match fallback
-        if user_id is None and candidates:
-            best_ratio = -1.0
-            for uid, p in candidates:
-                ratio = difflib.SequenceMatcher(
-                    None, s_low, (p.get("username") or "").lower().strip()
-                ).ratio()
-                if ratio > best_ratio:
-                    best_ratio = ratio
-                    user_id = uid
-                    profile = p
-
-        if user_id is None or profile is None:
+        lookup_label = user_id or speler or "?"
+        if resolved_user_id is None or profile is None:
             await interaction.followup.send(
-                f"❌ Speler **{discord.utils.escape_markdown(speler)}** niet gevonden.",
+                f"❌ Speler **{discord.utils.escape_markdown(lookup_label)}** niet gevonden.",
                 ephemeral=True,
             )
             return
 
-        username: str = profile.get("username") or speler
+        username: str = profile.get("username") or speler or user_id or "?"
         avatar_url: str = profile.get("avatarUrl") or ""
         rankings: dict = profile.get("rankings") or {}
         cases_ranking: dict = rankings.get("userCasesOpened") or {}
@@ -391,7 +413,7 @@ class Geluk(commands.Cog, name="geluk"):
         item_rarities = await self._get_item_rarities()
 
         # 4. Try to fetch actual transaction history
-        counts = await self._fetch_all_case_transactions(user_id, item_rarities)
+        counts = await self._fetch_all_case_transactions(resolved_user_id, item_rarities)
         can_show_actual = counts is not None
 
         # 5. Build embed
@@ -469,12 +491,12 @@ class Geluk(commands.Cog, name="geluk"):
                     _now = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                     _db = await self._get_db()
                     await _db.upsert_luck_score(
-                        user_id, _nl_cid, username, _luck, _tc, _now
+                        resolved_user_id, _nl_cid, username, _luck, _tc, _now
                     )
                     await _db.flush_luck_scores()
                     logger.info("Geluk: auto-upserted luck score for %s (%+.1f%%)", username, _luck)
                 except Exception:
-                    logger.exception("Geluk: failed to auto-upsert luck score for %s", user_id)
+                    logger.exception("Geluk: failed to auto-upsert luck score for %s", resolved_user_id)
 
         # -- Gelukranking section --
         try:
@@ -492,7 +514,7 @@ class Geluk(commands.Cog, name="geluk"):
                         rank_total = len(ranking)
                     rank_target_idx: int | None = None
                     for idx, entry in enumerate(ranking):
-                        if entry["user_id"] == user_id:
+                        if entry["user_id"] == resolved_user_id:
                             rank_target_idx = idx
                             break
                     # Name fallback (in case user_id differs between search and DB)
@@ -534,7 +556,7 @@ class Geluk(commands.Cog, name="geluk"):
 
                     rank_block = "```\n" + "\n".join(rank_lines) + "\n```"
 
-                    updated_at = (ranking[0].get("updated_at") or "")[:10]
+                    updated_at = (ranking[0].get("updated_at") or "")[:16].replace("T", " ")
                     if rank_target_idx is not None:
                         rp = rank_target_idx + 1
                         rpct = ranking[rank_target_idx]["luck_score"]
@@ -554,6 +576,103 @@ class Geluk(commands.Cog, name="geluk"):
             logger.exception("Geluk: failed to load ranking for /geluk")
 
         embed.set_footer(text=footer_base)
+        await interaction.followup.send(embed=embed)
+
+    @app_commands.command(
+        name="caserang",
+        description="Toon de NL top 5 op cases + de rang van een speler",
+    )
+    @app_commands.describe(
+        speler="De gebruikersnaam van de speler",
+        user_id="Optioneel: WarEra user ID van de speler",
+    )
+    async def caserang(
+        self,
+        interaction: discord.Interaction,
+        speler: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
+        await interaction.response.defer(thinking=True)
+
+        if not speler and not user_id:
+            await interaction.followup.send(
+                "❌ Geef een **speler** of **user_id** op.",
+                ephemeral=True,
+            )
+            return
+
+        nl_country_id = self.config.get("nl_country_id")
+        if not nl_country_id:
+            await interaction.followup.send("❌ `nl_country_id` is niet geconfigureerd.", ephemeral=True)
+            return
+
+        db = await self._get_db()
+        ranking = await db.get_luck_ranking(nl_country_id)
+        if not ranking:
+            await interaction.followup.send(
+                "⚠️ Geen gecachete case-data gevonden. Voer eerst `!pollgeluk` uit.",
+                ephemeral=True,
+            )
+            return
+
+        rows: list[dict] = [
+            {
+                "user_id": r.get("user_id") or "",
+                "username": (r.get("citizen_name") or r.get("user_id") or "?").strip(),
+                "cases": int(r.get("opens_count") or 0),
+            }
+            for r in ranking
+        ]
+        rows.sort(key=lambda r: (-r["cases"], r["username"].lower()))
+        for idx, row in enumerate(rows, start=1):
+            row["rank"] = idx
+
+        # Same matching behavior as /geluk: exact first, closest fallback
+        target_row: Optional[dict] = None
+        if user_id:
+            target_row = next((r for r in rows if r["user_id"] == user_id), None)
+        if target_row is None and speler:
+            s_low = speler.lower().strip()
+            target_row = next((r for r in rows if r["username"].lower().strip() == s_low), None)
+            if target_row is None:
+                best_ratio = -1.0
+                for r in rows:
+                    ratio = difflib.SequenceMatcher(None, s_low, r["username"].lower().strip()).ratio()
+                    if ratio > best_ratio:
+                        best_ratio = ratio
+                        target_row = r
+
+        if target_row is None:
+            lookup_label = user_id or speler or "?"
+            await interaction.followup.send(
+                f"❌ Speler **{discord.utils.escape_markdown(lookup_label)}** niet gevonden in de cache.",
+                ephemeral=True,
+            )
+            return
+
+        def _fmt_row(r: dict) -> str:
+            name = (r["username"] or "?")[:16]
+            return f"#{r['rank']:<4} {name:<16} {r['cases']:>8,}"
+
+        top5 = rows[:5]
+        lines = [f"{'rang':<5} {'naam':<16} {'cases':>8}", "─" * 34]
+        for r in top5:
+            lines.append(_fmt_row(r))
+
+        if target_row and target_row["rank"] > 5:
+            lines.append("    • • •")
+            lines.append(_fmt_row(target_row))
+
+        block = "```\n" + "\n".join(lines) + "\n```"
+
+        resolved_name = target_row["username"]
+        embed = discord.Embed(
+            title="🎟️ NL case-rang",
+            description=f"Speler: **{discord.utils.escape_markdown(resolved_name)}**",
+            color=discord.Color.gold(),
+        )
+        embed.add_field(name="Top 5 + gevraagde speler", value=block, inline=False)
+        embed.set_footer(text=f"Cache-bron: citizen_luck • NL spelers: {len(rows)}")
         await interaction.followup.send(embed=embed)
 
 

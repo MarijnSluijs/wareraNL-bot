@@ -55,11 +55,13 @@ class CitizenCache:
             reset_at = self._extract_last_skills_reset_at(obj)
             last_login = self._extract_last_login_at(obj)
             name = self._extract_name(obj)
+            mu_id, mu_name = self._extract_mu_info(obj)
             if lvl is not None:
                 await self._db.upsert_citizen_level(
                     uid, country_id, lvl, updated_at,
                     skill_mode=mode, last_skills_reset_at=reset_at,
                     citizen_name=name, last_login_at=last_login,
+                    mu_id=mu_id, mu_name=mu_name,
                 )
                 recorded += 1
 
@@ -81,9 +83,106 @@ class CitizenCache:
         await self._db.flush_citizen_levels()
         return recorded
 
+    async def refresh_mu_memberships(self, country_id: str, mus_json_path: str) -> int:
+        """Fetch MU member lists from the API and write mu_id/mu_name to citizen_levels.
+
+        Reads MU IDs from *mus_json_path* (the templates/mus.json file), paginates
+        /mu.getById for each MU to get the member user IDs, then bulk-updates the DB.
+
+        Only citizens already present in citizen_levels for *country_id* are updated —
+        foreign players in an NL MU are silently skipped.
+
+        Returns the number of citizen rows updated.
+        """
+        # Load MU list from mus.json
+        try:
+            with open(mus_json_path, encoding="utf-8") as f:
+                mus_data = json.load(f)
+        except Exception as exc:
+            logger.warning("refresh_mu_memberships: failed to load %s: %s", mus_json_path, exc)
+            return 0
+
+        embeds = mus_data.get("embeds", [])
+        if not embeds:
+            return 0
+
+        # Extract mu_id from the URL in each embed's description
+        # e.g. "[**Elite MU**](https://app.warera.io/mu/695c10139cddbde0503e0d36)"
+        import re
+        mu_entries: list[tuple[str, str]] = []  # (mu_id, mu_name)
+        for embed in embeds:
+            title = embed.get("title", "?")
+            description = embed.get("description", "")
+            m = re.search(r'/mu/([a-f0-9]+)', description)
+            if m:
+                mu_entries.append((m.group(1), title))
+
+        if not mu_entries:
+            logger.warning("refresh_mu_memberships: no MU IDs found in %s", mus_json_path)
+            return 0
+
+        # Reset all MU assignments for this country first
+        await self._db.clear_citizen_mus_for_country(country_id)
+
+        updated = 0
+        for mu_id, mu_name in mu_entries:
+            member_ids = await self._fetch_mu_member_ids(mu_id)
+            for uid in member_ids:
+                await self._db.update_citizen_mu(uid, mu_id, mu_name)
+                updated += 1
+            await self._db.flush_citizen_levels()
+            logger.debug("refresh_mu_memberships: %s → %d members", mu_name, len(member_ids))
+
+        return updated
+
     # ------------------------------------------------------------------ #
     # Private helpers                                                      #
     # ------------------------------------------------------------------ #
+
+    async def _fetch_mu_member_ids(self, mu_id: str) -> list[str]:
+        """Paginate /mu.getById and return all member user IDs for a given MU."""
+        user_ids: list[str] = []
+        # mu.getById returns the full MU including its members list
+        try:
+            resp = await self._client.get(
+                "/mu.getById",
+                params={"input": json.dumps({"muId": mu_id})},
+            )
+        except Exception as exc:
+            logger.warning("_fetch_mu_member_ids(%s): request failed: %s", mu_id, exc)
+            return user_ids
+
+        # Navigate the response to find the members list
+        data = resp
+        if isinstance(resp, dict):
+            for key in ("result", "data"):
+                v = resp.get(key)
+                if isinstance(v, dict):
+                    data = v.get("data", v)
+                    break
+
+        members: list = []
+        if isinstance(data, dict):
+            for key in ("members", "citizenIds", "userIds", "users"):
+                v = data.get(key)
+                if isinstance(v, list):
+                    members = v
+                    break
+
+        for entry in members:
+            if isinstance(entry, str):
+                user_ids.append(entry)
+            elif isinstance(entry, dict):
+                uid = (
+                    entry.get("userId")
+                    or entry.get("_id")
+                    or entry.get("id")
+                    or entry.get("citizenId")
+                )
+                if uid:
+                    user_ids.append(str(uid))
+
+        return user_ids
 
     async def _fetch_user_ids(self, country_id: str) -> list[str]:
         """Paginate /user.getUsersByCountry and return all user IDs."""
@@ -220,6 +319,38 @@ class CitizenCache:
         if isinstance(val, str) and val:
             return val
         return None
+
+    @staticmethod
+    def _extract_mu_info(obj: Any) -> tuple[str | None, str | None]:
+        """Extract (mu_id, mu_name) from a getUserLite result dict.
+
+        Tries common nested and flat field names so we're resilient to API
+        changes. Returns (None, None) when no MU info is present.
+        """
+        if not isinstance(obj, dict):
+            return None, None
+        # Nested MU object under various keys
+        for mu_key in ("mu", "militaryUnit", "regiment", "unit", "militaryUnits"):
+            mu_obj = obj.get(mu_key)
+            if isinstance(mu_obj, dict):
+                mu_id = (
+                    mu_obj.get("_id") or mu_obj.get("id") or mu_obj.get("muId")
+                )
+                mu_name = (
+                    mu_obj.get("name") or mu_obj.get("title") or mu_obj.get("muName")
+                )
+                if mu_id:
+                    return str(mu_id), str(mu_name) if mu_name else None
+        # Flat fields at root level
+        mu_id_flat = (
+            obj.get("muId") or obj.get("militaryUnitId") or obj.get("regimentId")
+        )
+        mu_name_flat = (
+            obj.get("muName") or obj.get("militaryUnitName") or obj.get("regimentName")
+        )
+        if mu_id_flat:
+            return str(mu_id_flat), str(mu_name_flat) if mu_name_flat else None
+        return None, None
 
     @staticmethod
     def _extract_last_login_at(obj: Any) -> str | None:
