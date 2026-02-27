@@ -655,24 +655,6 @@ class ProductionChecker(commands.Cog, name="production_checker"):
                 self.bot.logger.exception("daily_citizen_refresh: error refreshing %s", name)
         self.bot.logger.info("daily_citizen_refresh: complete (%d countries)", total)
 
-        if self.bot.testing:
-            channels = self.config.get("channels", {})
-            cid = channels.get("testing-area") or channels.get("bot_mededelingen")
-            if cid:
-                for guild in self.bot.guilds:
-                    ch = guild.get_channel(cid)
-                    if ch:
-                        try:
-                            _elapsed = _time.monotonic() - _t0_citizen
-                            _m, _s = divmod(int(_elapsed), 60)
-                            _dur = f"{_m}m {_s}s" if _m else f"{_elapsed:.1f}s"
-                            await ch.send(
-                                f"✅ Burgersniveau-verversing klaar ({_dur}) — {total} landen verwerkt"
-                            )
-                        except Exception:
-                            pass
-                        break
-
     @daily_citizen_refresh.before_loop
     async def before_daily_citizen_refresh(self):
         await self.bot.wait_until_ready()
