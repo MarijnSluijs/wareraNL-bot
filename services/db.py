@@ -878,26 +878,31 @@ class Database:
         now = datetime.now(timezone.utc)
         if country_id:
             sql = (
-                "SELECT mu_name, skill_mode, last_skills_reset_at "
+                "SELECT mu_name, skill_mode, last_skills_reset_at, level "
                 "FROM citizen_levels WHERE country_id = ? AND mu_name IS NOT NULL"
             )
             params: tuple = (country_id,)
         else:
             sql = (
-                "SELECT mu_name, skill_mode, last_skills_reset_at "
+                "SELECT mu_name, skill_mode, last_skills_reset_at, level "
                 "FROM citizen_levels WHERE mu_name IS NOT NULL"
             )
             params = ()
         mus: dict[str, dict] = {}
         async with self._conn.execute(sql, params) as cur:
             async for row in cur:
-                mu_name, mode, reset_at = row
+                mu_name, mode, reset_at, level = row
+                level_int = int(level) if level is not None else 0
                 if mu_name not in mus:
-                    mus[mu_name] = {"war": 0, "total": 0, "can_reset": 0, "waiting_days": []}
+                    mus[mu_name] = {"war": 0, "total": 0, "can_reset": 0, "waiting_days": [], "war_15": 0, "war_20": 0}
                 m = mus[mu_name]
                 m["total"] += 1
                 if mode == "war":
                     m["war"] += 1
+                    if level_int >= 15:
+                        m["war_15"] += 1
+                    if level_int >= 20:
+                        m["war_20"] += 1
                 else:
                     # eco / unknown — compute cooldown
                     can_reset = True

@@ -204,14 +204,15 @@ class MU(commands.Cog, name="mu"):
         rows.sort(key=lambda r: (-r[3], r[0].lower()))
 
         # Build monospace table
-        col1 = max(len(r[0]) for r in rows)
+        MAX_MU_NAME = 20
+        col1 = min(max(len(r[0]) for r in rows), MAX_MU_NAME)
         col1 = max(col1, len("MU"))
         header = f"{'MU':<{col1}}  Leden  Max  Vrij"
         separator = "-" * len(header)
         lines = [header, separator]
         for name, members, capacity, free in rows:
             free_str = f"+{free}" if free > 0 else " 0"
-            lines.append(f"{name:<{col1}}  {members:>5}  {capacity:>3}  {free_str:>4}")
+            lines.append(f"{name[:col1]:<{col1}}  {members:>5}  {capacity:>3}  {free_str:>4}")
         lines.append(separator)
         lines.append(
             f"{'TOTAAL':<{col1}}  {total_members:>5}  {total_capacity:>3}  +{total_free:>3}"
