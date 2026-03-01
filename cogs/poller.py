@@ -869,7 +869,7 @@ class ProductionChecker(commands.Cog, name="production_checker"):
         if not self._client or not self._db:
             return
         try:
-            self.bot.logger.info("Starting event poll...")
+            # self.bot.logger.info("Starting event poll...")
             await self._run_event_poll()
         except Exception:
             self.bot.logger.exception("event_poll: unexpected error")
@@ -902,6 +902,7 @@ class ProductionChecker(commands.Cog, name="production_checker"):
     async def _run_event_poll(self) -> None:
         channel_id = self.config.get("channels", {}).get("events")
         if not channel_id:
+            self.bot.logger.warning("event_poll: events channel ID not configured")
             return
         nl_country_id = self.config.get("nl_country_id")
 
@@ -942,6 +943,7 @@ class ProductionChecker(commands.Cog, name="production_checker"):
             data = inner.get("data", inner) if isinstance(inner, dict) else resp
         items: list = data.get("items") or data.get("events") or []
         if not items:
+            self.bot.logger.warning("event_poll: no events returned from API")
             return
 
         # Startup / catch-up block: for each event-type category that has no
@@ -989,6 +991,10 @@ class ProductionChecker(commands.Cog, name="production_checker"):
         for event in reversed(items):  # oldest-first so we post in chronological order
             eid = str(event.get("id") or event.get("_id") or "")
             if not eid or await self._db.has_seen_event(eid):
+                if not eid:
+                    self.bot.logger.warning("event_poll: skipping event with no ID: %s", event)
+                else:
+                    self.bot.logger.debug("event_poll: skipping already-seen event %s (id=%s)", self._extract_event_type(event), eid)
                 continue
             if not self._event_involves_nl(event, nl_country_id):
                 await self._db.mark_event_seen(eid)
