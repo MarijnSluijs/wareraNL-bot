@@ -143,7 +143,7 @@ class MUs(GenerateEmbeds, name="mus"):
             key=lambda e: _mu_type(e.get("description", "")),
         )
 
-        poller = self.bot.cogs.get("poller")
+        poller = self.bot.cogs.get("production_checker")
         if poller:
             mu_ids = []
             # Get new thumbnail URLs for each MU type from the first embed of that type, if available
@@ -163,6 +163,8 @@ class MUs(GenerateEmbeds, name="mus"):
                     json.dump(self.json_data, f, indent=4, ensure_ascii=False)
             except Exception as e:
                 self.bot.logger.error(f"Failed to update MU thumbnails in JSON: {e}")
+        else:
+            self.bot.logger.warning("Poller cog not found, skipping MU thumbnail update")
                 
 
         # Use exact embed position as button sort key so button order = embed order
