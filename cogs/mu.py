@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import aiosqlite
@@ -32,6 +32,27 @@ DORM_CAPACITY: dict[int, int] = {
     5: 25,
 }
 INACTIVITY_HOURS = 72
+
+def _get_eco_mus() -> list[str]:
+    """Load the list of eco MUs from the template file."""
+    try:
+        with open("templates/mus.json") as f:
+            mus_data = json.load(f)
+            mus_list = mus_data.get("embeds", [])
+
+            mu_ids = []
+            if mus_list and isinstance(mus_list, list):
+                for embed in mus_list:
+                    if isinstance(embed, dict):
+                        title = embed.get("title", "")
+                        description = embed.get("description", "")
+                        if "Eco" in description:
+                            mu_id = description.split("/")[-1].strip(")")
+                            mu_ids.append({"title": title, "mu_id": mu_id})
+            return mu_ids
+    except Exception as exc:
+        logger.warning("_get_eco_mus: error loading eco MUs: %s", exc)
+        return []
 
 
 def _unwrap(resp: object) -> object:
@@ -315,6 +336,201 @@ class MU(commands.Cog, name="mu"):
         embed.set_footer(text=f"{len(all_member_ids)} leden gecontroleerd in {len(mus)} MU's")
         await interaction.followup.send(embed=embed)
 
+    @app_commands.command(
+        name="eco_donaties",
+        description="Laat eco-donaties sinds gespecifieerd aantal uur zien.",
+    )
+    @app_commands.describe(
+        hours="Aantal uur terug om te controleren (standaard: 24)",
+    )
+    async def eco_donations(self, interaction: discord.Interaction, hours: int = 24):
+        await interaction.response.defer()
+
+        eco_mus = _get_eco_mus()
+        if not eco_mus:
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    description="Geen eco-MU's gevonden in template.",
+                    color=discord.Color.red(),
+                )
+            )
+            return
+
+        client = await self._get_client()
+        nl_country_id = self.config.get("nl_country_id", "")
+        if not nl_country_id:
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    description="NL country ID niet geconfigureerd.",
+                    color=discord.Color.red(),
+                )
+            )
+            return
+
+        # Fetch MU details and collect members
+        mu_members: dict[str, tuple[str, list[str]]] = {}  # mu_id -> (mu_name, [user_ids])
+        for eco_mu in eco_mus:
+            mu_id = eco_mu["mu_id"]
+            mu_name = eco_mu["title"]
+            try:
+                resp = await client.get(
+                    "/mu.getById",
+                    params={"input": json.dumps({"muId": mu_id})},
+                )
+                data = _unwrap(resp)
+                if isinstance(data, dict):
+                    members = data.get("members", [])
+                    mu_members[mu_id] = (mu_name, members)
+            except Exception as exc:
+                logger.warning("eco_donations: Failed to get MU %s: %s", mu_id, exc)
+
+        if not mu_members:
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    description="Kon geen MU-gegevens of leden ophalen.",
+                    color=discord.Color.red(),
+                )
+            )
+            return
+
+        # Calculate time cutoff
+        now = datetime.now(timezone.utc)
+        cutoff_time = now - timedelta(hours=hours)
+
+        # Collect all unique members
+        all_members = []
+        for _, (_, members) in mu_members.items():
+            all_members.extend(members)
+        all_members = list(set(all_members))  # deduplicate
+
+        if not all_members:
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    description="Geen leden gevonden in eco-MU's.",
+                    color=discord.Color.orange(),
+                )
+            )
+            return
+
+        # Build set of eco MU member IDs for fast lookup
+        eco_member_set = set(all_members)
+        # Build user_id -> mu_id mapping
+        user_to_mu: dict[str, str] = {}
+        for mu_id, (_, members) in mu_members.items():
+            for user_id in members:
+                user_to_mu[user_id] = mu_id
+
+        # Fetch transactions for the country with donation type
+        # Note: API treats parameters as OR, so we fetch by countryId and filter locally
+        # We paginate through all results until we reach the cutoff_time
+        mu_donations: dict[str, float] = {}  # mu_id -> total donations
+        cursor: Optional[str] = None
+        reached_cutoff = False
+
+        while not reached_cutoff:
+            try:
+                payload = {
+                    "countryId": nl_country_id,
+                    "transactionType": "donation",
+                    "limit": 100,
+                }
+                if cursor:
+                    payload["cursor"] = cursor
+
+                resp = await client.get(
+                    "/transaction.getPaginatedTransactions",
+                    params={"input": json.dumps(payload)},
+                )
+                data = _unwrap(resp)
+                transactions = data.get("items", []) if isinstance(data, dict) else []
+
+                # Filter and accumulate
+                for txn in transactions:
+                    try:
+                        user_id = txn.get("buyerId")
+                        if not user_id or user_id not in eco_member_set:
+                            continue
+
+                        created_at_str = txn.get("createdAt")
+                        if not created_at_str:
+                            continue
+
+                        # Parse ISO format timestamp
+                        created_at = datetime.fromisoformat(
+                            created_at_str.replace("Z", "+00:00")
+                        )
+
+                        # If we hit a transaction older than cutoff, we can stop paging
+                        # (assuming transactions are ordered newest first)
+                        if created_at < cutoff_time:
+                            reached_cutoff = True
+                            continue
+
+                        amount = float(txn.get("money", 0))
+                        mu_id = user_to_mu.get(user_id)
+                        if mu_id:
+                            mu_donations[mu_id] = mu_donations.get(mu_id, 0) + amount
+                    except Exception:
+                        continue
+
+                # Check for next page
+                cursor = data.get("nextCursor") if isinstance(data, dict) else None
+                if not cursor:
+                    break
+
+                # Small delay to avoid rate limiting
+                # await asyncio.sleep(0.2)
+
+            except Exception as exc:
+                logger.warning("eco_donations: Failed to get transactions: %s", exc)
+                break
+
+        if not mu_donations:
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    description=f"Geen donaties gevonden in de afgelopen {hours} uur.",
+                    color=discord.Color.orange(),
+                    timestamp=now,
+                )
+            )
+            return
+
+        # Build table data
+        rows: list[tuple[str, float]] = []
+        for mu_id, total in mu_donations.items():
+            mu_name = mu_members[mu_id][0]
+            rows.append((mu_name, total))
+
+        # Sort by donations descending
+        rows.sort(key=lambda r: -r[1])
+
+        total_donations = sum(r[1] for r in rows)
+
+        # Format as monospace table
+        col_name = max(len(r[0]) for r in rows)
+        col_name = max(col_name, len("MU"))
+        header = f"{'MU':<{col_name}}  Donaties"
+        separator = "-" * (col_name + 20)
+        lines = [header, separator]
+
+        for name, amount in rows:
+            lines.append(f"{name:<{col_name}}  €{amount:,.0f}")
+
+        lines.append(separator)
+        lines.append(f"{'TOTAAL':<{col_name}}  €{total_donations:,.0f}")
+        table = "\n".join(lines)
+
+        color = int(self.config.get("colors", {}).get("primary", "0x154273"), 16)
+        embed = discord.Embed(
+            title=f"💰 Eco-donaties – Laatste {hours} uur",
+            description=f"**Totaal: €{total_donations:,.0f}**\n\n```\n{table}\n```",
+            color=color,
+            timestamp=now,
+        )
+        embed.set_footer(
+            text=f"{len(rows)} MU's • {len(all_members)} leden gecontroleerd"
+        )
+        await interaction.followup.send(embed=embed)
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(MU(bot))

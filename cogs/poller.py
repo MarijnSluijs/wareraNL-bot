@@ -1029,8 +1029,8 @@ class ProductionChecker(commands.Cog, name="production_checker"):
             if not eid or await self._db.has_seen_event(eid):
                 if not eid:
                     self.bot.logger.warning("event_poll: skipping event with no ID: %s", event)
-                else:
-                    self.bot.logger.debug("event_poll: skipping already-seen event %s (id=%s)", self._extract_event_type(event), eid)
+                # else:
+                #     self.bot.logger.debug("event_poll: skipping already-seen event %s (id=%s)", self._extract_event_type(event), eid)
                 continue
             event_type = self._extract_event_type(event)
             if event_type not in _EVENT_LABELS:

@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, Sequence
 
 import aiohttp
 
-logger = logging.getLogger("services.api_client")
+logger = logging.getLogger("discord_bot")
 
 
 class APIClient:
@@ -125,6 +125,14 @@ class APIClient:
 							logger.warning("Server error %s on %s - retrying after %s seconds", status, url, backoff)
 							await asyncio.sleep(backoff)
 							backoff = min(backoff * 2, 30.0)
+							continue
+
+						if status == 400:
+							try:
+								error_data = await resp.json()
+								logger.error("Bad request to %s: %s", url, error_data)
+							except Exception:
+							 	logger.error("Bad request to %s with status 400 and non-JSON response", url)
 							continue
 
 						# otherwise raise the status error

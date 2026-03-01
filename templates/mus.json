@@ -58,28 +58,52 @@
         {
             "title": "MIVD",
             "description": "[**Standaard MU**](https://app.warera.io/mu/699bf0f5b232a1efde5b9aed)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-699bf0f5b232a1efde5b9aed-1771828191040-h1uvx1ml.png"
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-699bf0f5b232a1efde5b9aed-1772095865354-sivps2wd.png"
         },
         {
             "title": "EBITDA Compagnie",
             "description": "[**Eco MU**](https://app.warera.io/mu/699f7d14c629e138fa86ec9c)",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-699f7d14c629e138fa86ec9c-1772060619432-cjil4teg.png"
+        },
+        {
+            "title": "Baronie Wachteenheid",
+            "description": "[**Standaard MU**](https://app.warera.io/mu/69a42247cedfd3ae87863a6c)",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69a42247cedfd3ae87863a6c-1772373581444-2h980quq.png"
+        },
+        {
+            "title": "Het Noordzee-verbond",
+            "description": "[**Standaard MU**](https://app.warera.io/mu/69a41cd5cedfd3ae877c2def)",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69a41cd5cedfd3ae877c2def-1772370042271-86cx1iqf.webp"
+        },
+        {
+            "title": "Pannekoekenoffensief",
+            "description": "[**Standaard MU**](https://app.warera.io/mu/69a420a143600f560ccb9570)",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69a420a143600f560ccb9570-1772366910693-gzfmpsfl.png"
+        },
+        {
+            "title": "De Mobiele Eenheid",
+            "description": "[**Standaard MU**](https://app.warera.io/mu/69a41d7b75b50126c381cca5)",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69a41d7b75b50126c381cca5-1772364368968-apawnpc0.png"
         }
     ],
     "posted_message_ids": [
-        1477371492944838869,
-        1477371494438015128,
-        1477371495998292190,
-        1477371496962719826,
-        1477371498871132200,
-        1477371500284608746,
-        1477371518970499165,
-        1477371521381957632,
-        1477371523332444210,
-        1477371524729278576,
-        1477371527098798161,
-        1477371528348831867,
-        1477371529728757861,
-        1477371550431842566
+        1477675646586064956,
+        1477675647978700832,
+        1477675650256207995,
+        1477675652244177058,
+        1477675653993074891,
+        1477675655268401152,
+        1477675656153403607,
+        1477675677137502290,
+        1477675678563307672,
+        1477675679771398346,
+        1477675681218560071,
+        1477675683118448844,
+        1477675684368482354,
+        1477675703439851541,
+        1477675704601542708,
+        1477675706354761818,
+        1477675707499938054,
+        1477675708557033493
     ]
 }
