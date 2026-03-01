@@ -1012,6 +1012,32 @@ class ProductionChecker(commands.Cog, name="production_checker"):
             await self._db.mark_event_seen(eid)
             await asyncio.sleep(0.5)
 
+    async def _get_mu_thumbnails(self, mu_ids: list[str]) -> dict[str, str]:
+        """Return a dict mapping MU IDs to their avatar URLs."""
+        if not mu_ids or not self._client:
+            return {}
+        
+        inputs = [{"muId": mu_id} for mu_id in mu_ids]
+        try:
+            results = await self._client.batch_get(
+                "/mu.getById",
+                inputs,
+                batch_size=30,
+                chunk_sleep=0.5,
+            )
+        except Exception as exc:
+            self.bot.logger.warning("_get_mu_thumbnails: batch_get failed: %s", exc)
+            return {}
+        
+        thumbnails = {}
+        for mu_id, data in zip(mu_ids, results):
+            if isinstance(data, dict):
+                avatar_url = data.get("avatarUrl")
+                if avatar_url:
+                    thumbnails[mu_id] = avatar_url
+        
+        return thumbnails
+
     def _event_involves_nl(self, event: dict, nl_id: str) -> bool:
         """Return True if nl_id appears in any country field of the event."""
         if not nl_id:

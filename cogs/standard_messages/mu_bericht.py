@@ -143,6 +143,28 @@ class MUs(GenerateEmbeds, name="mus"):
             key=lambda e: _mu_type(e.get("description", "")),
         )
 
+        poller = self.bot.cogs.get("poller")
+        if poller:
+            mu_ids = []
+            # Get new thumbnail URLs for each MU type from the first embed of that type, if available
+            for embed in embeds_sorted:
+                mu_id = embed.get("description", "").split("/")[-1].strip(")")  # Extract MU ID from description URL
+                mu_ids.append(mu_id)
+            thumbnails = await poller._get_mu_thumbnails(mu_ids)
+            for embed in embeds_sorted:
+                mu_id = embed.get("description", "").split("/")[-1].strip(")")  # Extract MU ID from description URL
+                if mu_id in thumbnails:
+                    embed["thumbnail"] = thumbnails[mu_id]
+
+            # Update json with new thumbnail URLs so they persist for future reloads
+            try:
+                self.json_data["embeds"] = embeds_sorted
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(self.json_data, f, indent=4, ensure_ascii=False)
+            except Exception as e:
+                self.bot.logger.error(f"Failed to update MU thumbnails in JSON: {e}")
+                
+
         # Use exact embed position as button sort key so button order = embed order
         embed_position: dict[str, int] = {e["title"]: i for i, e in enumerate(embeds_sorted)}
 
@@ -262,6 +284,17 @@ class MUs(GenerateEmbeds, name="mus"):
                 json.dump(self.json_data, f, indent=4, ensure_ascii=False)
         except Exception as e:
             self.bot.logger.error(f"Failed to save posted_message_ids: {e}")
+
+    @app_commands.command(name="repostmu", description="Voeg een nieuwe MU toe aan mus.json en herplaats de MU-lijst.")
+    async def repostmu(self, interaction: discord.Interaction) -> None:
+        """Repost the MU list without changes, to refresh the channel."""
+        await interaction.response.defer(ephemeral=True)
+        channel = await self._mu_channel(interaction.channel)
+        try:
+            await self._repost_mu_list(channel)
+            await interaction.followup.send(f"✅ MU-lijst herplaatst in {channel.mention}.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Fout bij herplaatsen: {e}", ephemeral=True)
 
     async def _mu_name_autocomplete(
         self, interaction: discord.Interaction, current: str

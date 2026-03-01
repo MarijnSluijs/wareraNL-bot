@@ -427,36 +427,34 @@ class Roles(commands.Cog, name="roles"):
             return
 
         # ── Repost full MU list via the MUs cog ───────────────────────────
+        try:
+            await self._repost_mus(self, interaction,)
+        except Exception as e:
+            await interaction.followup.send(
+                f"✅ MU **{label}** (rol: {rol.mention}) toegevoegd, maar herposten mislukt: {e}",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.followup.send(
+            f"✅ **{label}** (rol: {rol.mention}, rij {row}) toegevoegd en MU-lijst herplaatst in {target_channel.mention}.",
+            ephemeral=True,
+        )
+
+    async def _repost_mus(self, interaction: discord.Interaction, mus_json_path: str, data: dict, path: str, label: str, rol: discord.Role) -> None:
         mu_channel_id = self.bot.config.get("channels", {}).get("military_unit")
         target_channel = (interaction.guild.get_channel(mu_channel_id) if mu_channel_id else None) or interaction.channel
 
         mus_cog = self.bot.cogs.get("mus")
         if mus_cog:
             mus_cog.load_json(mus_json_path)  # reload with the new entry
-            try:
-                await mus_cog._repost_mu_list(target_channel)
-            except Exception as e:
-                await interaction.followup.send(
-                    f"✅ MU **{label}** (rol: {rol.mention}) toegevoegd, maar herposten mislukt: {e}",
-                    ephemeral=True,
-                )
-                return
+            await mus_cog._repost_mu_list(target_channel)
+            
         else:
             # Fallback: just update the buttons message
             color = int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16)
-            try:
-                await post_or_edit_buttons(target_channel, data, path, color)
-            except Exception as e:
-                await interaction.followup.send(
-                    f"✅ MU **{label}** (rol: {rol.mention}) toegevoegd, maar posten mislukt: {e}",
-                    ephemeral=True,
-                )
-                return
-
-        await interaction.followup.send(
-            f"✅ **{label}** (rol: {rol.mention}, rij {row}) toegevoegd en MU-lijst herplaatst in {target_channel.mention}.",
-            ephemeral=True,
-        )
+            await post_or_edit_buttons(target_channel, data, path, color)
+        
 
     @app_commands.command(name="verwijdermu", description="Verwijder een MU uit de MU-rolselector.")
     @app_commands.describe(

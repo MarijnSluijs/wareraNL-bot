@@ -21,26 +21,26 @@
       "row": 0
     },
     {
-      "label": "The Flying Dutchman",
-      "role_id": 1475466801730158707,
-      "style": "primary",
-      "row": 0
-    },
-    {
       "label": "De Nederlandse Bank",
       "role_id": 1475470788957175943,
       "style": "primary",
       "row": 0
     },
     {
-      "label": "Van Speijk Eskader",
-      "role_id": 1475470591472435221,
+      "label": "The Flying Dutchman",
+      "role_id": 1475466801730158707,
       "style": "primary",
-      "row": 1
+      "row": 0
     },
     {
       "label": "Regiment Huzaren",
       "role_id": 1475471406186889236,
+      "style": "primary",
+      "row": 1
+    },
+    {
+      "label": "Van Speijk Eskader",
+      "role_id": 1475470591472435221,
       "style": "primary",
       "row": 1
     },
@@ -57,5 +57,5 @@
       "row": 2
     }
   ],
-  "button_message_id": 1476533999735279687
+  "button_message_id": 1477715961019764898
 }
