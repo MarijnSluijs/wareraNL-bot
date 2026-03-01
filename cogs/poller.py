@@ -260,24 +260,6 @@ class ProductionChecker(commands.Cog, name="production_checker"):
             )
         else:
             self.bot.logger.info("[production poll] done in %.1fs — no changes", elapsed)
-        if self.bot.testing:
-            channels = self.config.get("channels", {})
-            cid = channels.get("testing-area") or channels.get("bot_mededelingen")
-            if cid:
-                for guild in self.bot.guilds:
-                    ch = guild.get_channel(cid)
-                    if ch:
-                        try:
-                            m, s = divmod(int(elapsed), 60)
-                            dur = f"{m}m {s}s" if m else f"{elapsed:.1f}s"
-                            if changes:
-                                await ch.send(f"✅ Productiepeiling klaar ({dur}) — {len(changes)} wijziging(en)")
-                            else:
-                                await ch.send(f"✅ Productiepeiling klaar ({dur}) — geen wijzigingen")
-                        except Exception:
-                            pass
-                        break
-
     @hourly_production_check.before_loop
     async def before_hourly_production_check(self):
         await self.bot.wait_until_ready()
@@ -673,24 +655,6 @@ class ProductionChecker(commands.Cog, name="production_checker"):
                 self.bot.logger.exception("daily_citizen_refresh: error refreshing %s", name)
         self.bot.logger.info("daily_citizen_refresh: complete (%d countries)", total)
 
-        if self.bot.testing:
-            channels = self.config.get("channels", {})
-            cid = channels.get("testing-area") or channels.get("bot_mededelingen")
-            if cid:
-                for guild in self.bot.guilds:
-                    ch = guild.get_channel(cid)
-                    if ch:
-                        try:
-                            _elapsed = _time.monotonic() - _t0_citizen
-                            _m, _s = divmod(int(_elapsed), 60)
-                            _dur = f"{_m}m {_s}s" if _m else f"{_elapsed:.1f}s"
-                            await ch.send(
-                                f"✅ Burgersniveau-verversing klaar ({_dur}) — {total} landen verwerkt"
-                            )
-                        except Exception:
-                            pass
-                        break
-
     @daily_citizen_refresh.before_loop
     async def before_daily_citizen_refresh(self):
         await self.bot.wait_until_ready()
@@ -965,7 +929,6 @@ class ProductionChecker(commands.Cog, name="production_checker"):
                 "/event.getEventsPaginated",
                 params={"input": json.dumps({
                     "limit": 20,
-                    "countryId": nl_country_id,
                     "eventTypes": _EVENT_POLL_TYPES,
                 })},
             )
@@ -997,7 +960,8 @@ class ProductionChecker(commands.Cog, name="production_checker"):
             cat = _EVENT_TYPE_TO_CATEGORY.get(event_type)
             # items are returned newest-first; first occurrence per category = most recent
             if cat and cat not in category_latest and event_type in _EVENT_LABELS:
-                category_latest[cat] = (event, eid)
+                if self._event_involves_nl(event, nl_country_id):
+                    category_latest[cat] = (event, eid)
             all_eids.append(eid)
 
         # Check whether any category still needs its first announcement.
@@ -1032,6 +996,9 @@ class ProductionChecker(commands.Cog, name="production_checker"):
                 else:
                     self.bot.logger.debug("event_poll: skipping already-seen event %s (id=%s)", self._extract_event_type(event), eid)
                 continue
+            if not self._event_involves_nl(event, nl_country_id):
+                await self._db.mark_event_seen(eid)
+                continue
             event_type = self._extract_event_type(event)
             if event_type not in _EVENT_LABELS:
                 self.bot.logger.warning(
@@ -1045,7 +1012,31 @@ class ProductionChecker(commands.Cog, name="production_checker"):
             await self._db.mark_event_seen(eid)
             await asyncio.sleep(0.5)
 
-        # self.bot.logger.info("event_poll: processed %d events", len(all_eids))
+    def _event_involves_nl(self, event: dict, nl_id: str) -> bool:
+        """Return True if nl_id appears in any country field of the event."""
+        if not nl_id:
+            return True  # no filter configured → post everything
+        edata: dict = event.get("data") or {}
+        if not isinstance(edata, dict):
+            edata = {}
+        country_keys = (
+            "attackerCountry", "attackerCountryId",
+            "defenderCountry", "defenderCountryId",
+            "country", "countryId",
+        )
+        for src in (edata, event):
+            for key in country_keys:
+                val = src.get(key)
+                if isinstance(val, str) and val == nl_id:
+                    return True
+                if isinstance(val, dict):
+                    cid = val.get("_id") or val.get("id")
+                    if cid and str(cid) == nl_id:
+                        return True
+            for c in (src.get("countries") or []):
+                if str(c) == nl_id:
+                    return True
+        return False
 
     async def _post_event(
         self,
@@ -1674,13 +1665,11 @@ class ProductionChecker(commands.Cog, name="production_checker"):
             wi = max(max(len(item) for item, _ in long_rows), 4)
             wc = max(max(len(t.get("country_name") or "") for _, t in long_rows), 7)
             wb = max(max(len(self._pct(t.get("production_bonus"))) for _, t in long_rows), 5)
-            bds_l = [self._long_bd(t) for _, t in long_rows]
-            wbd = max(max(len(bd) for bd in bds_l), 9)
-            hdr_l = f"  {'Item':<{wi}}  {'Land':<{wc}}  {'Bonus':>{wb}}  {'Specificatie':<{wbd}}"
+            hdr_l = f"  {'Item':<{wi}}  {'Land':<{wc}}  {'Bonus':>{wb}}"
             sep_l = "  " + "-" * (len(hdr_l) - 2)
             rows_l = [
-                f"{'>' if i == best_l_idx else ' '} {item:<{wi}}  {(t.get('country_name') or 'Onbekend'):<{wc}}  {self._pct(t.get('production_bonus')):>{wb}}  {bd:<{wbd}}"
-                for i, ((item, t), bd) in enumerate(zip(long_rows, bds_l))
+                f"{'>' if i == best_l_idx else ' '} {item:<{wi}}  {(t.get('country_name') or 'Onbekend'):<{wc}}  {self._pct(t.get('production_bonus')):>{wb}}"
+                for i, (item, t) in enumerate(long_rows)
             ]
             table_l = "\n".join([hdr_l, sep_l] + rows_l)
         else:
@@ -1690,15 +1679,13 @@ class ProductionChecker(commands.Cog, name="production_checker"):
             wi2 = max(max(len(item) for item, _ in short_rows), 4)
             wr = max(max(len(d.get("region_name") or d.get("region_id") or "") for _, d in short_rows), 6)
             wb2 = max(max(len(self._pct(d.get("bonus"))) for _, d in short_rows), 5)
-            bds_s = [self._short_bd(d) for _, d in short_rows]
             durs = [self._format_duration(d.get("deposit_end_at") or "") or "" for _, d in short_rows]
-            wbd2 = max(max(len(bd) for bd in bds_s), 9)
             wdur = max(max(len(dur) for dur in durs), 7)
-            hdr_s = f"  {'Item':<{wi2}}  {'Regio':<{wr}}  {'Bonus':>{wb2}}  {'Specificatie':<{wbd2}}  {'Verloopt':<{wdur}}"
+            hdr_s = f"  {'Item':<{wi2}}  {'Regio':<{wr}}  {'Bonus':>{wb2}}  {'Verloopt':<{wdur}}"
             sep_s = "  " + "-" * (len(hdr_s) - 2)
             rows_s = [
-                f"{'>' if i == best_s_idx else ' '} {item:<{wi2}}  {(d.get('region_name') or d.get('region_id') or '?'):<{wr}}  {self._pct(d.get('bonus')):>{wb2}}  {bd:<{wbd2}}  {dur:<{wdur}}"
-                for i, ((item, d), bd, dur) in enumerate(zip(short_rows, bds_s, durs))
+                f"{'>' if i == best_s_idx else ' '} {item:<{wi2}}  {(d.get('region_name') or d.get('region_id') or '?'):<{wr}}  {self._pct(d.get('bonus')):>{wb2}}  {dur:<{wdur}}"
+                for i, ((item, d), dur) in enumerate(zip(short_rows, durs))
             ]
             table_s = "\n".join([hdr_s, sep_s] + rows_s)
         else:
@@ -2403,7 +2390,7 @@ class ProductionChecker(commands.Cog, name="production_checker"):
             # Per-player list — monospace code block so cooldown column aligns
             EMBED_LIMIT_MU = 3900
             # Fixed column widths (emoji counts as ~1 char in code block math)
-            NAME_W = 20
+            NAME_W = 16
             LVL_W  = 2
 
             async def _flush_mu(lines: list[str]) -> None:
@@ -2467,8 +2454,8 @@ class ProductionChecker(commands.Cog, name="production_checker"):
                 return
 
             # Column widths
-            NAME_W_ALL = 22
-            HDR = f"{'naam':<{NAME_W_ALL}}  {'par':>5}  {'kan':>3}  {'avg':>5}"
+            NAME_W_ALL = 16
+            HDR = f"{'naam':<{NAME_W_ALL}}  {'par':>5}  {'kan':>3}  {'≥15':>3}  {'≥20':>3}  {'avg':>5}"
             SEP = "─" * len(HDR)
 
             # Category config: (type key, emoji, field label) — order matches mu_bericht.py
@@ -2480,7 +2467,7 @@ class ProductionChecker(commands.Cog, name="production_checker"):
 
             emb = discord.Embed(
                 title="Paraatheid — Alle NL MUs",
-                description="par = paraat / totaal  •  kan = kan nu resetten  •  avg = gem. wachttijd eco-spelers",
+                description="par = paraat / totaal  •  kan = kan nu resetten  •  ≥15/≥20 = paraat op lvl ≥15/≥20  •  avg = gem. wachttijd eco-spelers",
                 colour=discord.Color.gold(),
             )
             has_data = False
@@ -2491,24 +2478,28 @@ class ProductionChecker(commands.Cog, name="production_checker"):
                     continue
 
                 rows: list[str] = []
-                total_par = total_total = total_kan = 0
+                total_par = total_total = total_kan = total_w15 = total_w20 = 0
                 all_waiting: list[float] = []
                 for mu_name in mu_names_of_type:
                     stats = mu_stats.get(mu_name)
                     if stats is None:
-                        row = f"{mu_name[:NAME_W_ALL]:<{NAME_W_ALL}}  {'?':>5}  {'?':>3}  {'?':>5}"
+                        row = f"{mu_name[:NAME_W_ALL]:<{NAME_W_ALL}}  {'?':>5}  {'?':>3}  {'?':>3}  {'?':>3}  {'?':>5}"
                     else:
                         par_str = f"{stats['war']}/{stats['total']}"
                         kan_str = str(stats["can_reset"])
+                        w15_str = str(stats.get("war_15", 0))
+                        w20_str = str(stats.get("war_20", 0))
                         if stats["waiting_days"]:
                             avg_rem = max(0.0, 7 - sum(stats["waiting_days"]) / len(stats["waiting_days"]))
                             avg_str = f"{avg_rem:.1f}d"
                         else:
                             avg_str = "—"
-                        row = f"{mu_name[:NAME_W_ALL]:<{NAME_W_ALL}}  {par_str:>5}  {kan_str:>3}  {avg_str:>5}"
+                        row = f"{mu_name[:NAME_W_ALL]:<{NAME_W_ALL}}  {par_str:>5}  {kan_str:>3}  {w15_str:>3}  {w20_str:>3}  {avg_str:>5}"
                         total_par   += stats["war"]
                         total_total += stats["total"]
                         total_kan   += stats["can_reset"]
+                        total_w15   += stats.get("war_15", 0)
+                        total_w20   += stats.get("war_20", 0)
                         all_waiting.extend(stats["waiting_days"])
                     rows.append(row)
 
@@ -2516,13 +2507,15 @@ class ProductionChecker(commands.Cog, name="production_checker"):
                 if total_total:
                     tot_par_str = f"{total_par}/{total_total}"
                     tot_kan_str = str(total_kan)
+                    tot_w15_str = str(total_w15)
+                    tot_w20_str = str(total_w20)
                     if all_waiting:
                         tot_avg_rem = max(0.0, 7 - sum(all_waiting) / len(all_waiting))
                         tot_avg_str = f"{tot_avg_rem:.1f}d"
                     else:
                         tot_avg_str = "—"
                     rows.append("─" * len(HDR))
-                    rows.append(f"{'totaal':<{NAME_W_ALL}}  {tot_par_str:>5}  {tot_kan_str:>3}  {tot_avg_str:>5}")
+                    rows.append(f"{'totaal':<{NAME_W_ALL}}  {tot_par_str:>5}  {tot_kan_str:>3}  {tot_w15_str:>3}  {tot_w20_str:>3}  {tot_avg_str:>5}")
 
                 block_text = "```\n" + HDR + "\n" + SEP + "\n" + "\n".join(rows) + "\n```"
                 emb.add_field(name=field_label, value=block_text, inline=False)

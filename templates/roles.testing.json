@@ -19,66 +19,6 @@
       ]
     },
     {
-      "title": "Kanalen",
-      "description": "Kies met onderstaande knoppen je toegang tot kanalen.",
-      "buttons": [
-        {
-          "label": "Memes",
-          "role_id": 1475489952346407106,
-          "style": "primary",
-          "row": 0
-        },
-        {
-          "label": "Vacatures",
-          "role_id": 1475489953361301515,
-          "style": "primary",
-          "row": 0
-        },
-        {
-          "label": "Reddit posts",
-          "role_id": 1475489954233716879,
-          "style": "primary",
-          "row": 0
-        },
-        {
-          "label": "In-game artikelen",
-          "role_id": 1475489955198271801,
-          "style": "primary",
-          "row": 1
-        },
-        {
-          "label": "WarEra Aankondigingen",
-          "role_id": 1475489955731083388,
-          "style": "primary",
-          "row": 1
-        }
-      ]
-    },
-    {
-      "title": "Bot kanalen",
-      "description": "Kies met onderstaande knoppen je toegang tot de bot kanalen.\n\n**WarEra Bot**: Voor allerlei in-game informatie.\n**Rob Jetten**: Voor handige economische tools.\n**Rijksoverheid**: Voor production bonus veranderingen.",
-      "buttons": [
-        {
-          "label": "WarEra Bot",
-          "role_id": 1475489958054723637,
-          "style": "primary",
-          "row": 0
-        },
-        {
-          "label": "Rob Jetten",
-          "role_id": 1475489958960693421,
-          "style": "primary",
-          "row": 0
-        },
-        {
-          "label": "Rijksoverheid",
-          "role_id": 1475489959812137240,
-          "style": "primary",
-          "row": 0
-        }
-      ]
-    },
-    {
       "title": "Verkiezingen",
       "description": "Kies met onderstaande knoppen je toegang tot de campagnekanalen.\n\n**Kandidaat-President**: Voor deelname aan de presidentsverkiezingen.\n**Kandidaat-Congreslid**: Voor deelname aan de congresverkiezingen.",
       "buttons": [
