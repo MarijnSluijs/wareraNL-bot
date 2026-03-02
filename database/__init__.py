@@ -1,15 +1,12 @@
 """
-Copyright © Krypton 2019-Present - https://github.com/kkrypt0nn (https://krypton.ninja)
-Description:
-🐍 A simple template to start to code your own and personalized Discord bot in Python
-
-Version: 6.5.0
+This module contains the DatabaseManager class, which is responsible for managing database operations related to warnings in the bot. 
 """
 
 import aiosqlite
 
 
 class DatabaseManager:
+    """Manager for database operations related to warnings."""
     def __init__(self, *, connection: aiosqlite.Connection) -> None:
         self.connection = connection
 

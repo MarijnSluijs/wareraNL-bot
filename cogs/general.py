@@ -1,28 +1,22 @@
 """
-Copyright © Krypton 2019-Present - https://github.com/kkrypt0nn (https://krypton.ninja)
-Description:
-🐍 A simple template to start to code your own and personalized Discord bot in Python
-
-Version: 6.5.0
+General bot commands — /help, /botinfo, /serverinfo, /ping, /invite,
+/eight_ball (question), and /feedback.
 """
 
-import json
-import os
 import platform
 import random
-import pytz
 
-import aiohttp
 import discord
-from discord import app_commands, datetime
+import pytz
+from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
-
 
 # Configuration is provided by the bot at runtime via `bot.config`.
 
 
 class FeedbackForm(discord.ui.Modal, title="Feedback"):
+    """Modal dialog for submitting feedback to the bot owners."""
     feedback = discord.ui.TextInput(
         label="Wat vind je van deze bot?",
         style=discord.TextStyle.long,
@@ -38,6 +32,7 @@ class FeedbackForm(discord.ui.Modal, title="Feedback"):
 
 
 class General(commands.Cog, name="general"):
+    """Cog for general-purpose commands like /help, /botinfo, /serverinfo, /ping, /invite, and /feedback."""
     def __init__(self, bot) -> None:
         self.bot = bot
         self.context_menu_user = app_commands.ContextMenu(
@@ -48,7 +43,9 @@ class General(commands.Cog, name="general"):
             name="Remove spoilers", callback=self.remove_spoilers
         )
         self.bot.tree.add_command(self.context_menu_message)
-        self.color = int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16)
+        self.color = int(
+            self.bot.config.get("colors", {}).get("primary", "0x154273"), 16
+        )
         self.config = getattr(self.bot, "config", {}) or {}
 
     @commands.Cog.listener()
@@ -65,9 +62,13 @@ class General(commands.Cog, name="general"):
             return
         try:
             await message.edit(suppress=True)
-            self.bot.logger.info(f"Suppressed embeds for message {message.id} in {getattr(message.channel, 'id', 'DM')}")
+            self.bot.logger.info(
+                f"Suppressed embeds for message {message.id} in {getattr(message.channel, 'id', 'DM')}"
+            )
         except (discord.Forbidden, discord.HTTPException) as e:
-            self.bot.logger.error(f"Failed to suppress embeds for message {message.id}: {e}")
+            self.bot.logger.error(
+                f"Failed to suppress embeds for message {message.id}: {e}"
+            )
 
     # Message context menu command
     async def remove_spoilers(
@@ -113,8 +114,11 @@ class General(commands.Cog, name="general"):
         name="help", description="Toon alle commands die de bot heeft geladen."
     )
     async def help(self, context: Context) -> None:
+        """Show all commands that the bot has loaded."""
         embed = discord.Embed(
-            title="Help", description="Lijst van beschikbare commands:", color=self.color
+            title="Help",
+            description="Lijst van beschikbare commands:",
+            color=self.color,
         )
         for i in self.bot.cogs:
             if i == "owner" and not (await self.bot.is_owner(context.author)):
@@ -321,6 +325,7 @@ class General(commands.Cog, name="general"):
     @app_commands.command(
         name="feedback", description="Dien feedback in voor de eigenaars van de bot."
     )
+    @app_commands.checks.cooldown(1, 60.0, key=lambda i: i.user.id)
     async def feedback(self, interaction: discord.Interaction) -> None:
         """
         Submit a feedback for the owners of the bot.
@@ -350,6 +355,7 @@ class General(commands.Cog, name="general"):
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
+        """Log when a member leaves the server."""
         self.bot.logger.info(f"{member} has left the server.")
         log_channel_id = self.bot.config.get("channels", {}).get("logs")
         if log_channel_id:
@@ -359,19 +365,26 @@ class General(commands.Cog, name="general"):
                     log_embed = discord.Embed(
                         # title="Gebruiker heeft de server verlaten",
                         description=f"**{member.mention if member else 'Unknown'} "
-                                f"({member.name if member else 'Unknown'}) heeft de server verlaten**\n",  
+                        f"({member.name if member else 'Unknown'}) heeft de server verlaten**\n",
                         color=discord.Color.red(),
-                        timestamp=discord.datetime.now(pytz.timezone('Europe/Amsterdam'))
+                        timestamp=discord.datetime.now(
+                            pytz.timezone("Europe/Amsterdam")
+                        ),
                     )
                     if member:
-                        log_embed.set_author(name=member.name, icon_url=member.display_avatar.url)
+                        log_embed.set_author(
+                            name=member.name, icon_url=member.display_avatar.url
+                        )
                         log_embed.set_thumbnail(url=member.display_avatar.url)
                     await log_channel.send(embed=log_embed)
                 except (discord.Forbidden, discord.HTTPException) as e:
                     self.bot.logger.error(f"Failed to post to log channel: {e}")
 
     @commands.Cog.listener()
-    async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
+    async def on_member_update(
+        self, before: discord.Member, after: discord.Member
+    ) -> None:
+        """Log when a member is updated, specifically for role changes."""
         self.bot.logger.info(f"{before} has been updated.")
         log_channel_id = self.bot.config.get("channels", {}).get("logs")
         if log_channel_id:
@@ -380,22 +393,35 @@ class General(commands.Cog, name="general"):
                 try:
                     role_changes = []
                     if before.roles != after.roles:
-                        added_roles = [role for role in after.roles if role not in before.roles]
-                        removed_roles = [role for role in before.roles if role not in after.roles]
+                        added_roles = [
+                            role for role in after.roles if role not in before.roles
+                        ]
+                        removed_roles = [
+                            role for role in before.roles if role not in after.roles
+                        ]
                         if added_roles:
-                            role_changes.append(f":white_check_mark: {', '.join(role.name for role in added_roles)}")
+                            role_changes.append(
+                                f":white_check_mark: {', '.join(role.name for role in added_roles)}"
+                            )
                         if removed_roles:
-                            role_changes.append(f":no_entry: {', '.join(role.name for role in removed_roles)}")
+                            role_changes.append(
+                                f":no_entry: {', '.join(role.name for role in removed_roles)}"
+                            )
                     else:
                         return
                     log_embed = discord.Embed(
                         # title=f"{before.name}",
                         description=f"**:writing_hand: {before.mention if before else 'Unknown'} is bijgewerkt.** \n"
-                                f"**Rollen:**\n{chr(10).join(role_changes) if role_changes else 'Geen veranderingen in rollen.'}",  
+                        f"**Rollen:**\n{chr(10).join(role_changes) if role_changes else 'Geen veranderingen in rollen.'}",
                         color=discord.Color.orange(),
-                        timestamp=discord.datetime.now(pytz.timezone('Europe/Amsterdam'))
+                        timestamp=discord.datetime.now(
+                            pytz.timezone("Europe/Amsterdam")
+                        ),
                     )
-                    log_embed.set_author(name=before.name, icon_url=before.display_avatar.url if before else None)
+                    log_embed.set_author(
+                        name=before.name,
+                        icon_url=before.display_avatar.url if before else None,
+                    )
                     if before:
                         log_embed.set_thumbnail(url=before.display_avatar.url)
                     await log_channel.send(embed=log_embed)
@@ -408,6 +434,19 @@ class General(commands.Cog, name="general"):
         """Test command to simulate a member leaving the server."""
         await self.on_member_remove(context.author)
 
+    async def cog_app_command_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ) -> None:
+        """Handle app command errors, including cooldown messages."""
+        if isinstance(error, app_commands.CommandOnCooldown):
+            await interaction.response.send_message(
+                f"⏳ Je kunt dit commando pas weer gebruiken over **{error.retry_after:.0f} seconden**.",
+                ephemeral=True,
+            )
+        else:
+            raise error
+
 
 async def setup(bot) -> None:
+    """Add the General cog to the bot."""
     await bot.add_cog(General(bot))

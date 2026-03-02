@@ -9,7 +9,8 @@ logger = logging.getLogger("discord_bot")
 
 
 class APIClient:
-	"""Async API client with retries, exponential backoff and API-key rotation.
+	"""
+	Async API client with retries, exponential backoff and API-key rotation.
 
 	- Supports passing an ordered list of API keys (`api_keys`) which will be rotated
 	  when the server returns rate-limit / auth errors.
@@ -169,8 +170,8 @@ class APIClient:
 		procedure: str,
 		inputs: list[Dict[str, Any]],
 		*,
-		batch_size: int = 30,
-		chunk_sleep: float = 1.0,
+		batch_size: int = 100,
+		chunk_sleep: float = 0.0,
 	) -> list[Any]:
 		"""Call one tRPC procedure for many inputs using tRPC HTTP batching.
 
@@ -180,7 +181,8 @@ class APIClient:
 		falls back to individual ``get()`` calls automatically.
 
 		Returns a flat list of unwrapped results in the same order as *inputs*.
-		*chunk_sleep* seconds are awaited between HTTP requests.
+		*chunk_sleep* seconds are awaited between HTTP requests (default 0 — rely
+		on 429 backoff instead of artificial delays).
 		"""
 		proc = procedure.lstrip("/")
 		all_results: list[Any] = []
