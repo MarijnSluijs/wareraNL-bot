@@ -8,7 +8,6 @@ Commands
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -32,6 +31,7 @@ DORM_CAPACITY: dict[int, int] = {
     5: 25,
 }
 INACTIVITY_HOURS = 72
+
 
 def _get_eco_mus() -> list[str]:
     """Load the list of eco MUs from the template file."""
@@ -175,6 +175,7 @@ class MU(commands.Cog, name="mu"):
         description="Laat zien hoeveel plekken er vrij zijn in de Nederlandse MU's.",
     )
     async def muplek(self, interaction: discord.Interaction) -> None:
+        """Show how many free spots are available in Dutch MUs."""
         await interaction.response.defer()
 
         mus = await self._get_all_dutch_mus()
@@ -204,15 +205,17 @@ class MU(commands.Cog, name="mu"):
         rows.sort(key=lambda r: (-r[3], r[0].lower()))
 
         # Build monospace table
-        MAX_MU_NAME = 20
-        col1 = min(max(len(r[0]) for r in rows), MAX_MU_NAME)
+        max_mu_name = 20
+        col1 = min(max(len(r[0]) for r in rows), max_mu_name)
         col1 = max(col1, len("MU"))
         header = f"{'MU':<{col1}}  Leden  Max  Vrij"
         separator = "-" * len(header)
         lines = [header, separator]
         for name, members, capacity, free in rows:
             free_str = f"+{free}" if free > 0 else " 0"
-            lines.append(f"{name[:col1]:<{col1}}  {members:>5}  {capacity:>3}  {free_str:>4}")
+            lines.append(
+                f"{name[:col1]:<{col1}}  {members:>5}  {capacity:>3}  {free_str:>4}"
+            )
         lines.append(separator)
         lines.append(
             f"{'TOTAAL':<{col1}}  {total_members:>5}  {total_capacity:>3}  +{total_free:>3}"
@@ -226,7 +229,9 @@ class MU(commands.Cog, name="mu"):
             color=color,
             timestamp=datetime.now(timezone.utc),
         )
-        embed.set_footer(text=f"{len(mus)} MU's • Capaciteit gebaseerd op kazernesniveau")
+        embed.set_footer(
+            text=f"{len(mus)} MU's • Capaciteit gebaseerd op kazernesniveau"
+        )
         await interaction.followup.send(embed=embed)
 
     # ------------------------------------------------------------------ #
@@ -238,6 +243,7 @@ class MU(commands.Cog, name="mu"):
         description=f"Laat inactieve leden zien in Nederlandse MU's (geen login in {INACTIVITY_HOURS}u).",
     )
     async def mu_inactiviteit(self, interaction: discord.Interaction) -> None:
+        """Show inactive members in Dutch MUs (no login in the last 72 hours)."""
         await interaction.response.defer()
 
         mus = await self._get_all_dutch_mus()
@@ -277,7 +283,9 @@ class MU(commands.Cog, name="mu"):
         )
 
         now = datetime.now(timezone.utc)
-        inactive: list[tuple[float, str, str, str]] = []  # (hours_ago, uid, name, mu_name)
+        inactive: list[
+            tuple[float, str, str, str]
+        ] = []  # (hours_ago, uid, name, mu_name)
 
         for uid, obj in zip(all_member_ids, results):
             last_conn = _last_connection(obj)
@@ -310,7 +318,9 @@ class MU(commands.Cog, name="mu"):
             return
 
         # Sort: longest inactive first (inf last)
-        inactive.sort(key=lambda x: (x[0] != float("inf"), -x[0] if x[0] != float("inf") else 0))
+        inactive.sort(
+            key=lambda x: (x[0] != float("inf"), -x[0] if x[0] != float("inf") else 0)
+        )
 
         # Build table
         col_name = max(len(r[2]) for r in inactive)
@@ -326,7 +336,7 @@ class MU(commands.Cog, name="mu"):
         table = "\n".join(lines)
 
         embed = discord.Embed(
-            title=f"💤 Inactieve leden – Nederlandse MU's",
+            title="💤 Inactieve leden – Nederlandse MU's",
             description=(
                 f"**{len(inactive)} leden** hebben meer dan **{INACTIVITY_HOURS} uur** niet ingelogd.\n\n"
                 f"```\n{table}\n```"
@@ -334,7 +344,9 @@ class MU(commands.Cog, name="mu"):
             color=color,
             timestamp=now,
         )
-        embed.set_footer(text=f"{len(all_member_ids)} leden gecontroleerd in {len(mus)} MU's")
+        embed.set_footer(
+            text=f"{len(all_member_ids)} leden gecontroleerd in {len(mus)} MU's"
+        )
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(
@@ -345,6 +357,7 @@ class MU(commands.Cog, name="mu"):
         hours="Aantal uur terug om te controleren (standaard: 24)",
     )
     async def eco_donations(self, interaction: discord.Interaction, hours: int = 24):
+        """Show eco donations in the last specified hours."""
         await interaction.response.defer()
 
         eco_mus = _get_eco_mus()
@@ -369,7 +382,9 @@ class MU(commands.Cog, name="mu"):
             return
 
         # Fetch MU details and collect members
-        mu_members: dict[str, tuple[str, list[str]]] = {}  # mu_id -> (mu_name, [user_ids])
+        mu_members: dict[
+            str, tuple[str, list[str]]
+        ] = {}  # mu_id -> (mu_name, [user_ids])
         for eco_mu in eco_mus:
             mu_id = eco_mu["mu_id"]
             mu_name = eco_mu["title"]
@@ -533,5 +548,7 @@ class MU(commands.Cog, name="mu"):
         )
         await interaction.followup.send(embed=embed)
 
+
 async def setup(bot: commands.Bot) -> None:
+    """Add the MU cog to the bot."""
     await bot.add_cog(MU(bot))

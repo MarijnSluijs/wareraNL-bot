@@ -1,9 +1,12 @@
-"""Article scanner cog — polls for new Dutch-language articles and posts them to Discord."""
+"""
+This module defines the ArticleScanner cog, which periodically polls the WarEra API for 
+new Dutch-language articles and posts them to a Discord channel as embeds. 
+"""
 
+import asyncio
+import json
 import logging
 import re
-import json
-import asyncio
 from datetime import datetime, timezone
 
 import discord
@@ -29,9 +32,14 @@ def _html_to_markdown(html: str, max_chars: int = 800) -> str:
         return ""
     text = html
     # Remove img tags (and any inline wrapper like <em><img/></em> that would leave orphan markers)
-    text = re.sub(r"(<(?:em|i|b|strong|u)>\s*)?<img[^>]*>\s*(</(?:em|i|b|strong|u)>)?", "", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"(<(?:em|i|b|strong|u)>\s*)?<img[^>]*>\s*(</(?:em|i|b|strong|u)>)?",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
     # Block elements → newlines first
-    text = re.sub(r"<br\s*/?>" , "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"</p>\s*", "\n\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<p[^>]*>", "", text, flags=re.IGNORECASE)
     text = re.sub(r"</(h[1-6]|li|tr|div|blockquote)>", "\n", text, flags=re.IGNORECASE)
@@ -71,7 +79,7 @@ def _extract_sentences(html: str, n: int = 4, max_chars: int = 800) -> str:
         m = re.search(r"[.!?](?:\s|$)", remaining)
         if m:
             sentences.append(remaining[: m.start() + 1].strip())
-            remaining = remaining[m.end():].strip()
+            remaining = remaining[m.end() :].strip()
         else:
             if remaining:
                 sentences.append(remaining.strip())
@@ -84,7 +92,16 @@ def _extract_sentences(html: str, n: int = 4, max_chars: int = 800) -> str:
 
 def _extract_avatar(user_data: dict) -> str | None:
     """Try common field names for a player profile picture URL."""
-    for key in ("avatarUrl", "profilePicture", "imageUrl", "image", "avatar", "photo", "picture", "thumbnailUrl"):
+    for key in (
+        "avatarUrl",
+        "profilePicture",
+        "imageUrl",
+        "image",
+        "avatar",
+        "photo",
+        "picture",
+        "thumbnailUrl",
+    ):
         val = user_data.get(key)
         if isinstance(val, str) and val.startswith("http"):
             return val
@@ -166,7 +183,9 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
         try:
             resp = await self._client.get(
                 "/article.getArticlesPaginated",
-                params={"input": json.dumps({"type": "last", "limit": 20})},  # no language filter — filter by author citizenship instead
+                params={
+                    "input": json.dumps({"type": "last", "limit": 20})
+                },  # no language filter — filter by author citizenship instead
             )
         except Exception as exc:
             logger.warning("Failed to fetch articles: %s", exc)
@@ -189,7 +208,8 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
                 if channel:
                     try:
                         history = [
-                            m async for m in channel.history(limit=50)
+                            m
+                            async for m in channel.history(limit=50)
                             if m.author == self.bot.user
                         ]
                         if history:
@@ -215,14 +235,19 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
                     if success:
                         posted_count += 1
                     await asyncio.sleep(1)
-                logger.info("Article poll: startup scan complete — posted %d article(s)", posted_count)
+                logger.info(
+                    "Article poll: startup scan complete — posted %d article(s)",
+                    posted_count,
+                )
 
             # Mark all fetched articles as seen to avoid re-posting on next tick.
             for article in items:
                 aid = str(article.get("id") or article.get("_id") or "")
                 if aid:
                     await self._db.mark_article_seen(aid)
-            logger.info("Article poll: initial run — marked %d articles as seen", len(items))
+            logger.info(
+                "Article poll: initial run — marked %d articles as seen", len(items)
+            )
             return
 
         # Process newest-first; items are typically newest-first from the API
@@ -262,8 +287,10 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
 
         # ---- author: the field is a user ID string ----
         raw_author = full.get("author") or lite.get("author") or ""
-        author_id = raw_author if isinstance(raw_author, str) else (
-            raw_author.get("id") or raw_author.get("_id") or ""
+        author_id = (
+            raw_author
+            if isinstance(raw_author, str)
+            else (raw_author.get("id") or raw_author.get("_id") or "")
         )
 
         player_name = "Onbekend"
@@ -283,7 +310,9 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
                         if author_country != nl_country_id:
                             logger.debug(
                                 "Skipping article %s — author %s is from country %s (not NL)",
-                                article_id, author_id, author_country,
+                                article_id,
+                                author_id,
+                                author_country,
                             )
                             return False
 
@@ -346,11 +375,13 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
 
         # ---- "Lees meer" button ----
         view = discord.ui.View()
-        view.add_item(discord.ui.Button(
-            label="Lees meer",
-            url=article_url,
-            style=discord.ButtonStyle.link,
-        ))
+        view.add_item(
+            discord.ui.Button(
+                label="Lees meer",
+                url=article_url,
+                style=discord.ButtonStyle.link,
+            )
+        )
 
         # Post to all guilds that have this channel
         posted = False
@@ -362,7 +393,10 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
                     posted = True
                     logger.info(
                         "Posted article %s ('%s' by %s) to guild %s",
-                        article_id, title, player_name, guild.name,
+                        article_id,
+                        title,
+                        player_name,
+                        guild.name,
                     )
                 except Exception:
                     logger.exception(
@@ -372,7 +406,8 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
         if not posted:
             logger.warning(
                 "Article %s not posted — channel %d not found in any guild",
-                article_id, channel_id,
+                article_id,
+                channel_id,
             )
 
         return posted
@@ -396,7 +431,8 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
 
         if not self._client or not self._db:
             await interaction.response.send_message(
-                "Services zijn nog niet gereed, probeer het later opnieuw.", ephemeral=True
+                "Services zijn nog niet gereed, probeer het later opnieuw.",
+                ephemeral=True,
             )
             return
 
@@ -405,7 +441,9 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
         try:
             resp = await self._client.get(
                 "/article.getArticlesPaginated",
-                params={"input": json.dumps({"type": "last", "limit": 1})},  # no language filter
+                params={
+                    "input": json.dumps({"type": "last", "limit": 1})
+                },  # no language filter
             )
         except Exception as exc:
             await interaction.followup.send(f"API-fout: {exc}", ephemeral=True)
@@ -419,7 +457,9 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
 
         channel_id = self.config.get("channels", {}).get("articles")
         if not channel_id:
-            await interaction.followup.send("Geen artikelkanaal geconfigureerd.", ephemeral=True)
+            await interaction.followup.send(
+                "Geen artikelkanaal geconfigureerd.", ephemeral=True
+            )
             return
 
         article = items[0]
@@ -431,4 +471,5 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
 
 
 async def setup(bot) -> None:
+    """Add the ArticleScanner cog to the bot."""
     await bot.add_cog(ArticleScanner(bot))

@@ -1,9 +1,14 @@
-"""Geluk cog — /geluk command to analyse a player's case-opening luck."""
+"""
+This module defines the GelukCog, which provides the /geluk command to analyze a player's case-opening luck in the WarEraNL bot.
+- /geluk speler:naam — check het geluk van een speler bij het openen van cases (op basis van username of user ID)
+- /caserang speler:naam - toon ranking op bases van aantal geopende cases
+"""
 
 import json
 import logging
 import asyncio
 import difflib
+import math as _luck_math
 from typing import Optional
 
 import discord
@@ -14,8 +19,6 @@ from services.api_client import APIClient
 
 logger = logging.getLogger("discord_bot")
 
-import math as _luck_math
-
 # ---------------------------------------------------------------------------
 # Luck score calculation (shared with /geluk and used by /gelukranking)
 # ---------------------------------------------------------------------------
@@ -23,8 +26,12 @@ import math as _luck_math
 _LUCK_WEIGHTS_G: dict[str, float] = {
     r: -_luck_math.log2(p)
     for r, p in {
-        "mythic": 0.0001, "legendary": 0.0004, "epic": 0.0085,
-        "rare": 0.071,    "uncommon": 0.30,    "common": 0.62,
+        "mythic": 0.0001,
+        "legendary": 0.0004,
+        "epic": 0.0085,
+        "rare": 0.071,
+        "uncommon": 0.30,
+        "common": 0.62,
     }.items()
 }
 _LUCK_WEIGHT_TOTAL_G: float = sum(_LUCK_WEIGHTS_G.values())
@@ -54,10 +61,14 @@ def _luck_indicator_overall(luck_pct: float) -> str:
     Calibrated for raw Poisson z-score scale (~±300% range).
     Being above average for rare loots pushes the score well above +50%.
     """
-    if luck_pct >= 50:   return "🍀🍀"
-    if luck_pct >= 15:   return "🍀"
-    if luck_pct >= -15:  return "➖"
-    if luck_pct >= -50:  return "💀"
+    if luck_pct >= 50:
+        return "🍀🍀"
+    if luck_pct >= 15:
+        return "🍀"
+    if luck_pct >= -15:
+        return "➖"
+    if luck_pct >= -50:
+        return "💀"
     return "💀💀"
 
 
@@ -67,42 +78,42 @@ def _luck_indicator_overall(luck_pct: float) -> str:
 RARITY_ORDER = ["mythic", "legendary", "epic", "rare", "uncommon", "common"]
 
 EXPECTED_RATES: dict[str, float] = {
-    "mythic":    0.0001,   # 0.01 %
-    "legendary": 0.0004,   # 0.04 %
-    "epic":      0.0085,   # 0.85 %
-    "rare":      0.071,    # 7.1  %
-    "uncommon":  0.30,     # 30   %
-    "common":    0.62,     # 62   %
+    "mythic": 0.0001,  # 0.01 %
+    "legendary": 0.0004,  # 0.04 %
+    "epic": 0.0085,  # 0.85 %
+    "rare": 0.071,  # 7.1  %
+    "uncommon": 0.30,  # 30   %
+    "common": 0.62,  # 62   %
 }
 
 # Display labels (in Dutch / in-game naming)
 RARITY_LABELS: dict[str, str] = {
-    "mythic":    "Mythic",
+    "mythic": "Mythic",
     "legendary": "Legendary",
-    "epic":      "Epic",
-    "rare":      "Rare",
-    "uncommon":  "Uncommon",
-    "common":    "Common",
+    "epic": "Epic",
+    "rare": "Rare",
+    "uncommon": "Uncommon",
+    "common": "Common",
 }
 
 # ANSI colour codes for each rarity (Discord ansi code block)
 _ANSI_RARITY: dict[str, str] = {
-    "mythic":    "\033[31m",   # red
-    "legendary": "\033[33m",   # yellow
-    "epic":      "\033[35m",   # purple (magenta)
-    "rare":      "\033[34m",   # blue
-    "uncommon":  "\033[32m",   # green
-    "common":    "\033[90m",   # grey
+    "mythic": "\033[31m",  # red
+    "legendary": "\033[33m",  # yellow
+    "epic": "\033[35m",  # purple (magenta)
+    "rare": "\033[34m",  # blue
+    "uncommon": "\033[32m",  # green
+    "common": "\033[90m",  # grey
 }
 _ANSI_RST = "\033[0m"
 
 RARITY_COLORS: dict[str, str] = {
-    "mythic":    "🔴",
+    "mythic": "🔴",
     "legendary": "🟠",
-    "epic":      "🟣",
-    "rare":      "🔵",
-    "uncommon":  "🟢",
-    "common":    "⚪",
+    "epic": "🟣",
+    "rare": "🔵",
+    "uncommon": "🟢",
+    "common": "⚪",
 }
 
 
@@ -151,7 +162,7 @@ def _build_luck_table(
         label = RARITY_LABELS[rarity]
         color = _ANSI_RARITY[rarity]
         rows.append(
-            f"{color}{label:<14}{_ANSI_RST} {expected_n:>6.1f} {actual_n:>5d}  {actual_rate*100:>5.2f}%  {luck}"
+            f"{color}{label:<14}{_ANSI_RST} {expected_n:>6.1f} {actual_n:>5d}  {actual_rate * 100:>5.2f}%  {luck}"
         )
     rows.append(sep)
     rows.append(f"{'Total':<14} {total:>6d} {sum(counts.values()):>5d}")
@@ -194,7 +205,10 @@ class Geluk(commands.Cog, name="geluk"):
                 rarity = item.get("rarity")
                 if rarity:
                     self._item_rarity_cache[code] = rarity
-            logger.info("Geluk: loaded %d item rarities from gameConfig", len(self._item_rarity_cache))
+            logger.info(
+                "Geluk: loaded %d item rarities from gameConfig",
+                len(self._item_rarity_cache),
+            )
         except Exception as exc:
             logger.warning("Geluk: could not load item rarities: %s", exc)
         return self._item_rarity_cache
@@ -237,16 +251,32 @@ class Geluk(commands.Cog, name="geluk"):
                 self._db = shared
             else:
                 from services.db import Database
+
                 db_path = self.config.get("external_db_path", "database/external.db")
                 self._db = Database(db_path)
                 await self._db.setup()
         return self._db
 
-    async def _resolve_user_from_query(self, query: str) -> tuple[Optional[str], Optional[dict]]:
-        """Resolve user by query: exact username first, closest search candidate as fallback."""
+    async def _resolve_user_from_query(
+        self, query: str
+    ) -> tuple[Optional[str], Optional[dict]]:
+        """Resolve user by query: exact username first, closest search candidate as fallback.
+
+        Falls back to local DB fuzzy name match when the API search returns nothing.
+        """
         s_low = query.lower().strip()
         user_ids = await self._search_user(query)
+
         if not user_ids:
+            # API returned nothing — try fuzzy match against local citizen_levels cache
+            db = await self._get_db()
+            nl_country_id = self.config.get("nl_country_id")
+            match = await db.fuzzy_citizen_by_name(query, country_id=nl_country_id)
+            if match:
+                uid, _ = match
+                p = await self._get_user_profile(uid)
+                if p is not None:
+                    return uid, p
             return None, None
 
         candidates: list[tuple[str, dict]] = []
@@ -309,7 +339,8 @@ class Geluk(commands.Cog, name="geluk"):
                 if "401" in err or "Unauthorized" in err:
                     logger.info(
                         "Geluk: transaction endpoint requires session auth — "
-                        "cannot retrieve case history for %s", user_id
+                        "cannot retrieve case history for %s",
+                        user_id,
                     )
                     return None
                 logger.warning("Geluk: transaction fetch error page %d: %s", page, exc)
@@ -318,7 +349,12 @@ class Geluk(commands.Cog, name="geluk"):
             data = _unwrap(raw) if isinstance(raw, dict) else {}
             items = []
             if isinstance(data, dict):
-                items = data.get("items") or data.get("transactions") or data.get("results") or []
+                items = (
+                    data.get("items")
+                    or data.get("transactions")
+                    or data.get("results")
+                    or []
+                )
                 cursor = data.get("nextCursor") or data.get("cursor")
             elif isinstance(data, list):
                 items = data
@@ -335,7 +371,9 @@ class Geluk(commands.Cog, name="geluk"):
                 # "itemCode" is the *case* that was opened; the *received* drop is in item.code
                 received_item = tx.get("item") or {}
                 item_code = (
-                    received_item.get("code") if isinstance(received_item, dict) else received_item
+                    received_item.get("code")
+                    if isinstance(received_item, dict)
+                    else received_item
                 ) or ""
                 rarity = item_rarities.get(item_code, "common")
                 counts[rarity] = counts.get(rarity, 0) + 1
@@ -350,7 +388,9 @@ class Geluk(commands.Cog, name="geluk"):
 
         logger.info(
             "Geluk: fetched %d case transactions for %s across %d pages",
-            total_fetched, user_id, page,
+            total_fetched,
+            user_id,
+            page,
         )
         return counts
 
@@ -364,37 +404,33 @@ class Geluk(commands.Cog, name="geluk"):
     )
     @app_commands.describe(
         speler="De gebruikersnaam van de speler om te controleren",
-        user_id="Optioneel: WarEra user ID van de speler",
+        gebruiker_id="Optioneel: WarEra user ID van de speler",
     )
     async def geluk(
         self,
         interaction: discord.Interaction,
         speler: Optional[str] = None,
-        user_id: Optional[str] = None,
+        gebruiker_id: Optional[str] = None,
     ) -> None:
         await interaction.response.defer(thinking=True)
 
-        if not speler and not user_id:
-            await interaction.followup.send(
-                "❌ Geef een **speler** of **user_id** op.",
-                ephemeral=True,
-            )
-            return
+        if not speler and not gebruiker_id:
+            speler = interaction.user.display_name
 
-        # 1. Find player — by user_id if provided, otherwise by username.
+        # 1. Find player — by gebruiker_id if provided, otherwise by username.
         profile: Optional[dict] = None
         resolved_user_id: Optional[str] = None
-        if user_id:
-            p = await self._get_user_profile(user_id)
+        if gebruiker_id:
+            p = await self._get_user_profile(gebruiker_id)
             if p is not None:
                 profile = p
-                resolved_user_id = user_id
+                resolved_user_id = gebruiker_id
             elif speler:
                 resolved_user_id, profile = await self._resolve_user_from_query(speler)
         elif speler:
             resolved_user_id, profile = await self._resolve_user_from_query(speler)
 
-        lookup_label = user_id or speler or "?"
+        lookup_label = gebruiker_id or speler or "?"
         if resolved_user_id is None or profile is None:
             await interaction.followup.send(
                 f"❌ Speler **{discord.utils.escape_markdown(lookup_label)}** niet gevonden.",
@@ -402,7 +438,7 @@ class Geluk(commands.Cog, name="geluk"):
             )
             return
 
-        username: str = profile.get("username") or speler or user_id or "?"
+        username: str = profile.get("username") or speler or gebruiker_id or "?"
         avatar_url: str = profile.get("avatarUrl") or ""
         rankings: dict = profile.get("rankings") or {}
         cases_ranking: dict = rankings.get("userCasesOpened") or {}
@@ -413,7 +449,9 @@ class Geluk(commands.Cog, name="geluk"):
         item_rarities = await self._get_item_rarities()
 
         # 4. Try to fetch actual transaction history
-        counts = await self._fetch_all_case_transactions(resolved_user_id, item_rarities)
+        counts = await self._fetch_all_case_transactions(
+            resolved_user_id, item_rarities
+        )
         can_show_actual = counts is not None
 
         # 5. Build embed
@@ -449,7 +487,9 @@ class Geluk(commands.Cog, name="geluk"):
                     expected_n = total_cases_opened * rate
                     label = RARITY_LABELS[rarity]
                     color = _ANSI_RARITY[rarity]
-                    lines.append(f"{color}{label:<14}{_ANSI_RST} {expected_n:>8.1f}  {rate*100:>6.2f}%")
+                    lines.append(
+                        f"{color}{label:<14}{_ANSI_RST} {expected_n:>8.1f}  {rate * 100:>6.2f}%"
+                    )
                 lines.append("─" * 35)
                 lines.append(f"{'Total':<14} {total_cases_opened:>8,}")
                 lines.append("```")
@@ -473,7 +513,11 @@ class Geluk(commands.Cog, name="geluk"):
             else:
                 analysed_note = f"_{total_counted:,} case openings gevonden_"
                 table = _build_luck_table(total_counted, counts)
-                embed.add_field(name="Geluksanalyse", value=f"{analysed_note}\n```ansi\n{table}\n```", inline=False)
+                embed.add_field(
+                    name="Geluksanalyse",
+                    value=f"{analysed_note}\n```ansi\n{table}\n```",
+                    inline=False,
+                )
 
         footer_base = "Odds: mythic 0.01% • legendary 0.04% • epic 0.85% • rare 7.1% • uncommon 30% • common 62%"
 
@@ -487,6 +531,7 @@ class Geluk(commands.Cog, name="geluk"):
             if _tc >= 20:
                 try:
                     from datetime import timezone as _tz, datetime as _dt
+
                     _luck = calc_luck_pct(counts, _tc)
                     _now = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                     _db = await self._get_db()
@@ -494,9 +539,16 @@ class Geluk(commands.Cog, name="geluk"):
                         resolved_user_id, _nl_cid, username, _luck, _tc, _now
                     )
                     await _db.flush_luck_scores()
-                    logger.info("Geluk: auto-upserted luck score for %s (%+.1f%%)", username, _luck)
+                    logger.info(
+                        "Geluk: auto-upserted luck score for %s (%+.1f%%)",
+                        username,
+                        _luck,
+                    )
                 except Exception:
-                    logger.exception("Geluk: failed to auto-upsert luck score for %s", resolved_user_id)
+                    logger.exception(
+                        "Geluk: failed to auto-upsert luck score for %s",
+                        resolved_user_id,
+                    )
 
         # -- Gelukranking section --
         try:
@@ -520,7 +572,9 @@ class Geluk(commands.Cog, name="geluk"):
                     # Name fallback (in case user_id differs between search and DB)
                     if rank_target_idx is None:
                         for idx, entry in enumerate(ranking):
-                            if (entry["citizen_name"] or "").lower() == username.lower():
+                            if (
+                                entry["citizen_name"] or ""
+                            ).lower() == username.lower():
                                 rank_target_idx = idx
                                 break
 
@@ -538,8 +592,14 @@ class Geluk(commands.Cog, name="geluk"):
                     top5 = list(range(min(5, rank_total)))
                     bot5 = list(range(max(0, rank_total - 5), rank_total))
                     ctx_range = (
-                        list(range(max(0, rank_target_idx - 2), min(rank_total, rank_target_idx + 3)))
-                        if rank_target_idx is not None else []
+                        list(
+                            range(
+                                max(0, rank_target_idx - 2),
+                                min(rank_total, rank_target_idx + 3),
+                            )
+                        )
+                        if rank_target_idx is not None
+                        else []
                     )
                     ordered = sorted(set(top5 + bot5 + ctx_range))
 
@@ -551,12 +611,16 @@ class Geluk(commands.Cog, name="geluk"):
                     for idx in ordered:
                         if prev != -1 and idx > prev + 1:
                             rank_lines.append("    • • •")
-                        rank_lines.append(_rank_row(idx, highlight=(idx == rank_target_idx)))
+                        rank_lines.append(
+                            _rank_row(idx, highlight=(idx == rank_target_idx))
+                        )
                         prev = idx
 
                     rank_block = "```\n" + "\n".join(rank_lines) + "\n```"
 
-                    updated_at = (ranking[0].get("updated_at") or "")[:16].replace("T", " ")
+                    updated_at = (ranking[0].get("updated_at") or "")[:16].replace(
+                        "T", " "
+                    )
                     if rank_target_idx is not None:
                         rp = rank_target_idx + 1
                         rpct = ranking[rank_target_idx]["luck_score"]
@@ -584,26 +648,24 @@ class Geluk(commands.Cog, name="geluk"):
     )
     @app_commands.describe(
         speler="De gebruikersnaam van de speler",
-        user_id="Optioneel: WarEra user ID van de speler",
+        gebruiker_id="Optioneel: WarEra user ID van de speler",
     )
     async def caserang(
         self,
         interaction: discord.Interaction,
         speler: Optional[str] = None,
-        user_id: Optional[str] = None,
+        gebruiker_id: Optional[str] = None,
     ) -> None:
         await interaction.response.defer(thinking=True)
 
-        if not speler and not user_id:
-            await interaction.followup.send(
-                "❌ Geef een **speler** of **user_id** op.",
-                ephemeral=True,
-            )
-            return
+        if not speler and not gebruiker_id:
+            speler = interaction.user.display_name
 
         nl_country_id = self.config.get("nl_country_id")
         if not nl_country_id:
-            await interaction.followup.send("❌ `nl_country_id` is niet geconfigureerd.", ephemeral=True)
+            await interaction.followup.send(
+                "❌ `nl_country_id` is niet geconfigureerd.", ephemeral=True
+            )
             return
 
         db = await self._get_db()
@@ -629,21 +691,25 @@ class Geluk(commands.Cog, name="geluk"):
 
         # Same matching behavior as /geluk: exact first, closest fallback
         target_row: Optional[dict] = None
-        if user_id:
-            target_row = next((r for r in rows if r["user_id"] == user_id), None)
+        if gebruiker_id:
+            target_row = next((r for r in rows if r["user_id"] == gebruiker_id), None)
         if target_row is None and speler:
             s_low = speler.lower().strip()
-            target_row = next((r for r in rows if r["username"].lower().strip() == s_low), None)
+            target_row = next(
+                (r for r in rows if r["username"].lower().strip() == s_low), None
+            )
             if target_row is None:
                 best_ratio = -1.0
                 for r in rows:
-                    ratio = difflib.SequenceMatcher(None, s_low, r["username"].lower().strip()).ratio()
+                    ratio = difflib.SequenceMatcher(
+                        None, s_low, r["username"].lower().strip()
+                    ).ratio()
                     if ratio > best_ratio:
                         best_ratio = ratio
                         target_row = r
 
         if target_row is None:
-            lookup_label = user_id or speler or "?"
+            lookup_label = gebruiker_id or speler or "?"
             await interaction.followup.send(
                 f"❌ Speler **{discord.utils.escape_markdown(lookup_label)}** niet gevonden in de cache.",
                 ephemeral=True,
@@ -677,4 +743,5 @@ class Geluk(commands.Cog, name="geluk"):
 
 
 async def setup(bot: commands.Bot) -> None:
+    """Add the Geluk cog to the bot."""
     await bot.add_cog(Geluk(bot))
