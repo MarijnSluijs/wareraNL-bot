@@ -1,0 +1,5 @@
+[lint]
+# BLE001: Do not catch blind exception (`Exception`) — intentionally suppressed;
+# broad catches are used in Discord event handlers and background tasks to prevent
+# the bot from crashing on unexpected errors.
+ignore = ["BLE001"]

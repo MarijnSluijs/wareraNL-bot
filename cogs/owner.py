@@ -1,9 +1,15 @@
 """
-Copyright © Krypton 2019-Present - https://github.com/kkrypt0nn (https://krypton.ninja)
-Description:
-🐍 A simple template to start to code your own and personalized Discord bot in Python
+Owner and administrator commands.
 
-Version: 6.5.0
+Prefix commands (owner-only unless noted):
+  !sync / !unsync (scope)       — sync or remove slash commands globally or for a guild
+  !uptime                       — show how long the bot has been online
+  !load / !unload / !reload (cog) — hot-reload individual cog modules
+  !clearluck                    — clear the luck-score cache
+  !congres_analyse              — generate a congressional analysis report
+  !shutdown                     — gracefully shut down the bot
+  !say (message)                — make the bot send a message
+  /purge (amount)               — delete messages in bulk (requires manage_messages)
 """
 
 import discord
@@ -13,15 +19,20 @@ from discord.ext.commands import Context
 
 
 class Owner(commands.Cog, name="owner"):
+    """Cog for owner-only commands like syncing slash commands, checking uptime, loading/unloading cogs, and other administrative tasks."""
     def __init__(self, bot) -> None:
         self.bot = bot
-        self.color = int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16)
+        self.color = int(
+            self.bot.config.get("colors", {}).get("primary", "0x154273"), 16
+        )
 
     @commands.command(
         name="sync",
         description="Synchroniseert de slash-commands.",
     )
-    @app_commands.describe(scope="Het bereik van de sync. Kan `global` of `guild` zijn.")
+    @app_commands.describe(
+        scope="Het bereik van de sync. Kan `global` of `guild` zijn."
+    )
     @commands.is_owner()
     async def sync(self, context: Context, scope: str) -> None:
         """
@@ -92,7 +103,9 @@ class Owner(commands.Cog, name="owner"):
         )
         await context.send(embed=embed)
 
-    @commands.command(name="uptime", description="Controleer hoe lang de bot al online is.")
+    @commands.command(
+        name="uptime", description="Controleer hoe lang de bot al online is."
+    )
     @commands.is_owner()
     async def uptime(self, context: Context) -> None:
         """
@@ -190,146 +203,16 @@ class Owner(commands.Cog, name="owner"):
         )
         await context.send(embed=embed)
 
-    @commands.command(
-        name="pollgeluk",
-        description="Ververs de gelukscores voor alle NL burgers direct.",
-    )
-    @commands.is_owner()
-    async def pollgeluk(self, context: Context) -> None:
-        poller = self.bot.cogs.get("production_checker")
-        if poller is None or not hasattr(poller, "_daily_luck_refresh_sweep"):
-            embed = discord.Embed(
-                description="❌ De poller cog is niet geladen.", color=self.color
-            )
-            await context.send(embed=embed)
-            return
-        if poller._heavy_api_lock.locked():
-            embed = discord.Embed(
-                description="⏳ Er loopt al een sweep. Wacht tot die klaar is.", color=self.color
-            )
-            await context.send(embed=embed)
-            return
-        embed = discord.Embed(
-            description="🔄 Gelukscores verversing gestart (cooldown omzeild).",
-            color=self.color,
-        )
-        status_msg = await context.send(embed=embed)
-
-        async def _run():
-            from datetime import datetime, timezone
-            import time as _time
-            nl_country_id = poller.config.get("nl_country_id")
-            if not nl_country_id:
-                await status_msg.edit(content="❌ `nl_country_id` niet geconfigureerd.", embed=None)
-                return
-            # Check if the citizen cache has been populated
-            try:
-                citizens = await poller._db.get_citizens_for_luck_refresh(nl_country_id)
-                if not citizens:
-                    await status_msg.edit(
-                        content="⚠️ Geen burgers gevonden in de cache. Voer eerst `!peil_burgers` uit om de burgercache te vullen.",
-                        embed=None,
-                    )
-                    return
-                total_citizens = len(citizens)
-            except Exception as exc:
-                await status_msg.edit(content=f"❌ Kon burgercache niet lezen: {exc}", embed=None)
-                return
-
-            now_utc = datetime.now(timezone.utc)
-            _t0 = _time.monotonic()
-            _last_progress_update = 0.0
-
-            def _fmt_dur(seconds: float) -> str:
-                m, s = divmod(int(seconds), 60)
-                return f"{m}m {s}s" if m else f"{seconds:.1f}s"
-
-            async def _progress(processed: int, total: int, recorded: int) -> None:
-                nonlocal _last_progress_update
-                now = _time.monotonic()
-                if processed not in (0, total) and (now - _last_progress_update) < 4.0:
-                    return
-                _last_progress_update = now
-                await status_msg.edit(
-                    content=(
-                        f"🔄 Gelukssweep bezig... burgers: **{processed}/{total_citizens}**"
-                        f" • gescoord: **{recorded}** • duur: **{_fmt_dur(now - _t0)}**"
-                    ),
-                    embed=None,
-                )
-
-            await status_msg.edit(
-                content=f"⏳ Verwerken van **0/{total_citizens}** NL burgers • duur: **0.0s**",
-                embed=None,
-            )
-
-            try:
-                async with poller._heavy_api_lock:
-                    await poller._daily_luck_refresh_sweep(
-                        now_utc,
-                        nl_country_id,
-                        _t0,
-                        progress_cb=_progress,
-                    )
-            except Exception as exc:
-                await status_msg.edit(content=f"❌ Sweep mislukt: {exc}", embed=None)
-                return
-            _elapsed = _time.monotonic() - _t0
-            _m, _s = divmod(int(_elapsed), 60)
-            _dur = f"{_m}m {_s}s" if _m else f"{_elapsed:.1f}s"
-            await status_msg.edit(
-                content=(
-                    f"✅ Gelukssweep voltooid • burgers: **{total_citizens}/{total_citizens}**"
-                    f" • duur: **{_dur}**"
-                ),
-                embed=None,
-            )
-
-        import asyncio
-        asyncio.create_task(_run())
-
-    @commands.command(
-        name="clearluck",
-        description="Leeg de opgeslagen NL gelukscores zodat je opnieuw kunt pollen.",
-    )
-    @commands.is_owner()
-    async def clearluck(self, context: Context) -> None:
-        poller = self.bot.cogs.get("production_checker")
-        if poller is None or not getattr(poller, "_db", None):
-            embed = discord.Embed(
-                description="❌ De poller/DB is niet beschikbaar.", color=self.color
-            )
-            await context.send(embed=embed)
-            return
-
-        nl_country_id = poller.config.get("nl_country_id")
-        if not nl_country_id:
-            await context.send("❌ `nl_country_id` niet geconfigureerd.")
-            return
-
-        try:
-            await poller._db.delete_luck_scores_for_country(nl_country_id)
-            await poller._db.set_poll_state("luck_ranking_total", "0")
-        except Exception as exc:
-            await context.send(f"❌ Wissen van gelukscores mislukt: {exc}")
-            return
-
-        embed = discord.Embed(
-            description=(
-                "🧹 NL gelukscores gewist.\n"
-                "Gebruik nu `!pollgeluk` om de tabel opnieuw te vullen."
-            ),
-            color=self.color,
-        )
-        await context.send(embed=embed)
-
     @commands.hybrid_command(
         name="shutdown",
         description="Zet de bot uit.",
     )
     @commands.is_owner()
     async def shutdown(self, context: Context) -> None:
-        embed = discord.Embed(description="De bot wordt afgesloten. Tot ziens! :wave:", color=self.color)
+        """Gracefully shut down the bot."""
+        embed = discord.Embed(
+            description="De bot wordt afgesloten. Tot ziens! :wave:", color=self.color
+        )
         await context.send(embed=embed)
         await self.bot.close()
 
@@ -346,7 +229,13 @@ class Owner(commands.Cog, name="owner"):
         :param context: The hybrid command context.
         :param message: The message that should be repeated by the bot.
         """
-        await context.send(message)
+        # Prevent @everyone and @here pings even if the owner accidentally includes them
+        sanitized = (
+            message
+            .replace("@everyone", "@​everyone")
+            .replace("@here", "@​here")
+        )
+        await context.send(sanitized, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False))
 
     @commands.hybrid_command(
         name="purge",
@@ -354,7 +243,7 @@ class Owner(commands.Cog, name="owner"):
     )
     @commands.has_guild_permissions(manage_messages=True)
     @commands.bot_has_permissions(manage_messages=True)
-    @app_commands.describe(amount="The amount of messages that should be deleted.")
+    @app_commands.describe(amount="The amount of messages that should be deleted (max 200).")
     async def purge(self, context: Context, amount: int) -> None:
         """
         Delete a number of messages.
@@ -362,12 +251,13 @@ class Owner(commands.Cog, name="owner"):
         :param context: The hybrid command context.
         :param amount: The number of messages that should be deleted.
         """
+        amount = max(1, min(amount, 200))  # clamp to [1, 200]
         await context.send(
             "Deleting messages..."
         )  # Bit of a hacky way to make sure the bot responds to the interaction and doens't get a "Unknown Interaction" response
         purged_messages = await context.channel.purge(limit=amount + 1)
         embed = discord.Embed(
-            description=f"**{context.author}** cleared **{len(purged_messages)-1}** messages!",
+            description=f"**{context.author}** cleared **{len(purged_messages) - 1}** messages!",
             color=0xBEBEFE,
         )
         await context.channel.send(embed=embed)
@@ -378,9 +268,9 @@ class Owner(commands.Cog, name="owner"):
     )
     @commands.is_owner()
     async def congres_analyse(self, context: Context) -> None:
-        # count messages from each congress member in congress channel over last 30 days
-        from datetime import datetime, timedelta
+        """count messages from each congress member in congress channel over last 30 days"""
         from collections import Counter
+        from datetime import datetime
 
         channel_ids = self.bot.config.get("channels", {})
         congres_channel_id = channel_ids.get("congres")
@@ -390,13 +280,17 @@ class Owner(commands.Cog, name="owner"):
 
         start_time = datetime(2026, 2, 7)  # Get messages from 7 february to today
         message_count = Counter()
-        async for message in self.bot.get_channel(congres_channel_id).history(limit=None, after=start_time):
+        async for message in self.bot.get_channel(congres_channel_id).history(
+            limit=None, after=start_time
+        ):
             if message.author.bot:
                 continue
             message_count[message.author.id] += 1
 
         # Send the results
-        results = "\n".join([f"<@{user_id}>: {count}" for user_id, count in message_count.most_common()])
+        results = "\n".join(
+            [f"<@{user_id}>: {count}" for user_id, count in message_count.most_common()]
+        )
         embed = discord.Embed(
             title="Congresleden Analyse",
             description=f"Berichten in de congres channel over de laatste 30 dagen:\n{results}",
@@ -419,14 +313,18 @@ class Owner(commands.Cog, name="owner"):
                 message_count[message.author.id] += 1
 
         # also count over closed threads
-        async for thread in self.bot.get_channel(debate_channel_id).archived_threads(limit=None):
+        async for thread in self.bot.get_channel(debate_channel_id).archived_threads(
+            limit=None
+        ):
             async for message in thread.history(limit=None, after=start_time):
                 if message.author.bot:
                     continue
                 message_count[message.author.id] += 1
 
         # Send the results
-        results = "\n".join([f"<@{user_id}>: {count}" for user_id, count in message_count.most_common()])
+        results = "\n".join(
+            [f"<@{user_id}>: {count}" for user_id, count in message_count.most_common()]
+        )
         embed = discord.Embed(
             title="Debatleden Analyse",
             description=f"Berichten in de debat channel over de laatste 30 dagen:\n{results}",
@@ -440,7 +338,9 @@ class Owner(commands.Cog, name="owner"):
             await context.send("❌ `stembureau` channel niet geconfigureerd.")
             return
         vote_count = Counter()
-        async for message in self.bot.get_channel(stembureau_channel_id).history(limit=None, after=start_time):
+        async for message in self.bot.get_channel(stembureau_channel_id).history(
+            limit=None, after=start_time
+        ):
             # count reactions as votes
             for reaction in message.reactions:
                 async for user in reaction.users():
@@ -448,7 +348,9 @@ class Owner(commands.Cog, name="owner"):
                         continue
                     vote_count[user.id] += 1
         # Send the results
-        results = "\n".join([f"<@{user_id}>: {count}" for user_id, count in vote_count.most_common()])
+        results = "\n".join(
+            [f"<@{user_id}>: {count}" for user_id, count in vote_count.most_common()]
+        )
         embed = discord.Embed(
             title="Stembureau Analyse",
             description=f"Votes in de stembureau channel over de laatste 30 dagen:\n{results}",
@@ -474,4 +376,5 @@ class Owner(commands.Cog, name="owner"):
 
 
 async def setup(bot) -> None:
+    """Add the Owner cog to the bot."""
     await bot.add_cog(Owner(bot))

@@ -347,6 +347,7 @@ class Moderation(commands.Cog, name="moderation"):
 
         :param limit: The limit of messages that should be archived. Default is 10.
         """
+        limit = max(1, min(limit, 500))
         log_file = f"{context.channel.id}.log"
         with open(log_file, "w", encoding="UTF-8") as f:
             f.write(

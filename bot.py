@@ -1,9 +1,5 @@
 """
-Copyright © Krypton 2019-Present - https://github.com/kkrypt0nn (https://krypton.ninja)
-Description:
-🐍 A simple template to start to code your own and personalized Discord bot in Python
-
-Version: 6.5.0
+The main bot file. This is where the bot is instantiated and run, and where the main events are handled.
 """
 
 import argparse
@@ -27,39 +23,6 @@ from database import DatabaseManager
 
 load_dotenv()
 
-"""	
-Setup bot intents (events restrictions)
-For more information about intents, please go to the following websites:
-https://discordpy.readthedocs.io/en/latest/intents.html
-https://discordpy.readthedocs.io/en/latest/intents.html#privileged-intents
-
-
-Default Intents:
-intents.bans = True
-intents.dm_messages = True
-intents.dm_reactions = True
-intents.dm_typing = True
-intents.emojis = True
-intents.emojis_and_stickers = True
-intents.guild_messages = True
-intents.guild_reactions = True
-intents.guild_scheduled_events = True
-intents.guild_typing = True
-intents.guilds = True
-intents.integrations = True
-intents.invites = True
-intents.messages = True # `message_content` is required to get the content of the messages
-intents.reactions = True
-intents.typing = True
-intents.voice_states = True
-intents.webhooks = True
-
-Privileged Intents (Needs to be enabled on developer portal of Discord), please use them only if you need them:
-intents.members = True
-intents.message_content = True
-intents.presences = True
-"""
-
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True  # Add this line for member join/leave events
@@ -81,6 +44,7 @@ intents.presences = False
 # Setup both of the loggers
 
 class LoggingFormatter(logging.Formatter):
+    """Custom logging formatter with colors and timestamps."""
     # Colors
     black = "\x1b[30m"
     red = "\x1b[31m"
@@ -121,7 +85,7 @@ os.makedirs("logs", exist_ok=True)
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(LoggingFormatter())
 # File handler
-file_handler = logging.FileHandler(filename="logs/discord.log", encoding="utf-8", mode="w")
+file_handler = logging.FileHandler(filename="logs/discord.log", encoding="utf-8", mode="a")
 file_handler_formatter = logging.Formatter(
     "[{asctime}] [{levelname:<8}] {name}: {message}", "%Y-%m-%d %H:%M:%S", style="{"
 )
@@ -137,7 +101,7 @@ class DiscordBot(commands.Bot):
         # Load config early so owner_ids can be passed to the superclass.
         _early_config: dict = {}
         try:
-            _cfg_path = Path(config_path) if config_path else Path("config.json")
+            _cfg_path = Path(config_path) if config_path else Path("config/config.json")
             with _cfg_path.open("r", encoding="utf-8") as _f:
                 _early_config = json.load(_f)
         except Exception:
@@ -151,14 +115,12 @@ class DiscordBot(commands.Bot):
             help_command=None,
             owner_ids=_owner_ids or None,
         )
-        """
-        This creates custom bot variables so that we can access these variables in cogs more easily.
+        # This creates custom bot variables so that we can access these variables in cogs more easily.
 
-        For example, The logger is available using the following code:
-        - self.logger # In this class
-        - bot.logger # In this file
-        - self.bot.logger # In cogs
-        """
+        # For example, The logger is available using the following code:
+        # - self.logger # In this class
+        # - bot.logger # In this file
+        # - self.bot.logger # In cogs
         self.logger = logger
         self.database = None
         self.bot_prefix = os.getenv("PREFIX")
@@ -174,7 +136,7 @@ class DiscordBot(commands.Bot):
         if config_path:
             cfg = Path(config_path)
         else:
-            cfg = Path("config.json")
+            cfg = Path("config/config.json")
 
         try:
             with cfg.open("r", encoding="utf-8") as f:
@@ -191,6 +153,94 @@ class DiscordBot(commands.Bot):
                 await db.executescript(file.read())
             await db.commit()
 
+    async def _write_command_catalogue(self) -> None:
+        """Write all registered commands to website/data/commands.json.
+
+        The website reads this file to display the command reference.
+        Called once during setup_hook after all cogs are loaded.
+        """
+        import discord.app_commands as _app
+        catalogue: dict[str, dict] = {}  # label -> {slash: [], prefix: []}
+
+        _cog_labels: dict[str, str] = {
+            "poller": "📊 Statistieken & Polls",
+            "production_tasks": "📊 Statistieken & Polls",
+            "citizen_tasks": "📊 Statistieken & Polls",
+            "event_tasks": "📊 Statistieken & Polls",
+            "luck_tasks": "📊 Statistieken & Polls",
+            "resistance_tasks": "📊 Statistieken & Polls",
+            "service_coordinator": "📊 Statistieken & Polls",
+            "bonus": "📊 Statistieken & Polls",
+            "paraatheid": "📊 Statistieken & Polls",
+            "niveauverdeling": "📊 Statistieken & Polls",
+            "peil": "📊 Statistieken & Polls",
+            "debug": "🔑 Beheer (owner)",
+            "mus": "🪖 MU Beheer",
+            "mu": "🪖 MU Info",
+            "general": "⚙️ Algemeen",
+            "owner": "🔑 Beheer (owner)",
+            "welcome": "👋 Welkom & Verificatie",
+            "moderation": "🛡️ Moderatie",
+            "battles": "⚔️ Gevechten",
+            "roles": "🎭 Rollen",
+            "help": "📚 Help",
+        }
+
+        def _label(cog_name: str | None) -> str:
+            if not cog_name:
+                return "🔧 Overig"
+            return _cog_labels.get(cog_name.lower(), f"🔧 {cog_name.replace('_', ' ').title()}")
+
+        def _collect_slash(cmd, cog_label: str) -> None:
+            if isinstance(cmd, _app.Group):
+                for child in cmd.commands:
+                    _collect_slash(child, cog_label)
+                return
+            if isinstance(cmd, _app.ContextMenu):
+                return  # context menus have no description, skip them
+            params = []
+            for p in getattr(cmd, "parameters", []):
+                params.append({"name": p.name, "required": p.required,
+                                "description": p.description or ""})
+            parts, parent = [cmd.name], getattr(cmd, "parent", None)
+            while parent and hasattr(parent, "name"):
+                parts.insert(0, parent.name)
+                parent = getattr(parent, "parent", None)
+            entry = {"name": "/" + " ".join(parts), "description": cmd.description or "",
+                     "params": params, "type": "slash"}
+            catalogue.setdefault(cog_label, {"slash": [], "prefix": []})["slash"].append(entry)
+
+        for cmd in self.tree.get_commands():
+            cog_name: str | None = None
+            for cog in self.cogs.values():
+                if cmd.name in [c.name for c in cog.get_app_commands()]:
+                    cog_name = type(cog).__name__
+                    break
+            _collect_slash(cmd, _label(cog_name))
+
+        for cmd in self.commands:
+            if cmd.hidden:
+                continue
+            cog_name = type(cmd.cog).__name__ if cmd.cog else None
+            lbl = _label(cog_name)
+            desc = (cmd.help or cmd.brief or "").strip().split("\n")[0]
+            params = [{"name": p, "required": True, "description": ""} for p in cmd.clean_params]
+            entry = {"name": f"!{cmd.qualified_name}", "description": desc,
+                     "params": params, "type": "prefix"}
+            catalogue.setdefault(lbl, {"slash": [], "prefix": []})["prefix"].append(entry)
+
+        result = [
+            {"category": lbl, "slash": v["slash"], "prefix": v["prefix"]}
+            for lbl, v in sorted(catalogue.items())
+        ]
+
+        out_dir = Path("website/data")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / "commands.json"
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        self.logger.info(f"Command catalogue written to {out_path} ({len(result)} categories)")
+
     async def load_cogs(self) -> None:
         """
         The code in this function is executed whenever the bot will start.
@@ -199,8 +249,13 @@ class DiscordBot(commands.Bot):
         cogs_path = Path("cogs")
 
         for root, dirs, files in os.walk(str(cogs_path)):
+            # Skip __pycache__ directories
+            dirs[:] = [d for d in dirs if d != "__pycache__"]
             for file in files:
                 if file.endswith(".py"):
+                    # Skip private/base files (starting with _)
+                    if file.startswith("_"):
+                        continue
                     # Calculate relative path from cogs directory
                     relative_path = os.path.relpath(os.path.join(root, file), str(cogs_path))
                     # Convert file path to module path (e.g., standard_messages/beginner_handleiding.py -> standard_messages.beginner_handleiding)
@@ -244,6 +299,7 @@ class DiscordBot(commands.Bot):
         self.logger.info("-------------------")
         await self.init_db()
         await self.load_cogs()
+        await self._write_command_catalogue()
         self.status_task.start()
         self.database = DatabaseManager(
             connection=await aiosqlite.connect("database/database.db")
@@ -528,8 +584,14 @@ if __name__ == "__main__":
     # Determine config path
     if args.config:
         config_path = args.config
+        # If the path doesn't exist as-is, try config/<name> as a convenience fallback
+        # so `--config testing_config.json` works the same as `--config config/testing_config.json`
+        if not Path(config_path).exists():
+            candidate = Path("config") / Path(config_path).name
+            if candidate.exists():
+                config_path = str(candidate)
     else:
-        config_path = "testing_config.json" if args.testing else "config.json"
+        config_path = "config/testing_config.json" if args.testing else "config/config.json"
 
     # Auto-detect testing mode from config file when --testing flag wasn't given
     if not args.testing:
