@@ -115,6 +115,13 @@
       "secondary_role_id": 1456723236732534974
     },
     {
+      "label": "WNM",
+      "role_id": 1478014565227823326,
+      "style": "primary",
+      "row": 3,
+      "secondary_role_id": 1456723236732534974
+    },
+    {
       "label": "Luchtmobiele Brigade",
       "role_id": 1469778313261219993,
       "style": "primary",
@@ -136,5 +143,5 @@
       "secondary_role_id": 1456723236732534974
     }
   ],
-  "button_message_id": 1477949810043781203
+  "button_message_id": 1478017620598067250
 }
