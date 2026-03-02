@@ -141,7 +141,7 @@ class MUs(GenerateEmbeds, name="mus"):
             key=lambda e: _mu_type(e.get("description", "")),
         )
 
-        poller = self.bot.cogs.get("production_checker")
+        poller = self.bot.cogs.get("event_tasks")
         if poller:
             mu_ids = []
             # Get new thumbnail URLs for each MU type from the first embed of that type, if available

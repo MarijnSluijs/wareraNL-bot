@@ -33,7 +33,7 @@ class FeedbackForm(discord.ui.Modal, title="Feedback"):
 
 class General(commands.Cog, name="general"):
     """Cog for general-purpose commands like /help, /botinfo, /serverinfo, /ping, /invite, and /feedback."""
-    def __init__(self, bot) -> None:
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.context_menu_user = app_commands.ContextMenu(
             name="Grab ID", callback=self.grab_id
@@ -115,25 +115,65 @@ class General(commands.Cog, name="general"):
     )
     async def help(self, context: Context) -> None:
         """Show all commands that the bot has loaded."""
-        embed = discord.Embed(
-            title="Help",
-            description="Lijst van beschikbare commands:",
-            color=self.color,
-        )
-        for i in self.bot.cogs:
-            if i == "owner" and not (await self.bot.is_owner(context.author)):
+        fields: list[tuple[str, str]] = []
+
+        for cog_name in self.bot.cogs:
+            if cog_name == "owner" and not (await self.bot.is_owner(context.author)):
                 continue
-            cog = self.bot.get_cog(i.lower())
-            commands = cog.get_commands()
+
+            cog = self.bot.get_cog(cog_name.lower())
+            if cog is None:
+                continue
+
+            cog_commands = cog.get_commands()
+            cog_commands.extend(cog.get_app_commands())
             data = []
-            for command in commands:
-                description = command.description.partition("\n")[0]
-                data.append(f"{command.name} - {description}")
-            help_text = "\n".join(data)
-            embed.add_field(
-                name=i.capitalize(), value=f"```{help_text}```", inline=False
+            for command in cog_commands:
+                if not await self._is_visible_to_user(context, command):
+                    continue
+                description = (command.description or "").partition("\n")[0]
+                data.append(f"{command.name} - {description}".strip(" -"))
+
+            if data:
+                fields.append((cog_name.capitalize(), "```" + "\n".join(data) + "```"))
+
+        if not fields:
+            await context.send("Geen beschikbare commands gevonden.")
+            return
+
+        # Discord limit: max 25 fields per embed
+        for idx in range(0, len(fields), 25):
+            embed = discord.Embed(
+                title="Help" if idx == 0 else "Help (vervolg)",
+                description="Lijst van beschikbare commands:",
+                color=self.color,
             )
-        await context.send(embed=embed)
+            for name, value in fields[idx : idx + 25]:
+                embed.add_field(name=name, value=value, inline=False)
+            await context.send(embed=embed)
+
+    async def _is_visible_to_user(self, context: Context, command) -> bool:
+        """Check if a command is visible to the user in the given context."""
+        # Prefix / hybrid command objects
+        if isinstance(command, commands.Command):
+            try:
+                return await command.can_run(context)
+            except Exception:
+                return False
+
+        # Slash / context-menu app commands
+        if isinstance(command, (app_commands.Command, app_commands.ContextMenu)):
+            interaction = context.interaction
+            if interaction is None:
+                # No interaction -> cannot reliably evaluate app_command checks
+                return True
+            try:
+                return await command._check_can_run(interaction)  # private API
+            except Exception:
+                return False
+
+        return False
+    
 
     @commands.hybrid_command(
         name="botinfo",
