@@ -1,17 +1,17 @@
-"""
-This module defines the MUs cog, which provides commands to post and manage a list of Military Units (MU's) in a Discord channel. 
-"""
+"""Manage and post the Military Units list and MU role buttons."""
+
+from __future__ import annotations
 
 import json
 import re
+from typing import Any
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
 
-from cogs.role_selection.roles import (RoleToggleView, load_roles_template,
-                                       mu_roles_path)
+from cogs.role_selection.roles import RoleToggleView, load_roles_template, mu_roles_path
 from cogs.standard_messages.generate import GenerateEmbeds
 from utils.checks import has_privileged_role
 
@@ -21,24 +21,97 @@ def mus_path(testing: bool = False) -> str:
     return "templates/mus.testing.json" if testing else "templates/mus.json"
 
 
+def _normalize_mu_type(value: str | None) -> str:
+    raw = (value or "").strip().lower()
+    if raw in {"elite", "elite mu"}:
+        return "Elite"
+    if raw in {"eco", "eco mu"}:
+        return "Eco"
+    if raw in {"standaard", "standard", "standaard mu", "standard mu"}:
+        return "Standaard"
+    return "Standaard"
+
+
+def _extract_mu_type_from_description(description: str) -> str:
+    match = re.search(r"\*\*(Elite|Eco|Standaard) MU\*\*", description or "")
+    return _normalize_mu_type(match.group(1) if match else None)
+
+
+def _extract_mu_id_from_description(description: str) -> str | None:
+    match = re.search(r"/mu/([A-Za-z0-9]+)", description or "")
+    return match.group(1) if match else None
+
+
 class MUs(GenerateEmbeds, name="mus"):
-    """Cog for managing and posting the Military Units (MU's) list in a designated Discord channel."""
+    """Cog for managing and posting the Military Units list in a Discord channel."""
+
+    _MU_TYPE_ORDER: dict[str, int] = {"Elite": 0, "Eco": 1, "Standaard": 2}
+    _MU_TYPE_COLORS: dict[str, discord.Color] = {
+        "Elite": discord.Color.orange(),
+        "Eco": discord.Color.from_rgb(46, 204, 113),
+        "Standaard": discord.Color.from_rgb(52, 152, 219),
+    }
+
     def __init__(self, bot) -> None:
         super().__init__(bot)
         self.load_json(mus_path(getattr(bot, "testing", False)))
 
-    @commands.hybrid_command(
-        name="mulijst",
-        description="Post de MU lijst in het MU-kanaal.",
-    )
+    def _normalize_mu_entries(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Normalize old and new mus.json entries to {id, type, role_id}."""
+        normalized: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+
+            mu_id = str(entry.get("id") or "").strip() or _extract_mu_id_from_description(
+                str(entry.get("description", ""))
+            )
+            if not mu_id or mu_id in seen_ids:
+                continue
+
+            mu_type = _normalize_mu_type(
+                entry.get("type") or _extract_mu_type_from_description(str(entry.get("description", "")))
+            )
+
+            role_id_raw = entry.get("role_id", 0)
+            try:
+                role_id = int(role_id_raw) if role_id_raw else 0
+            except (TypeError, ValueError):
+                role_id = 0
+
+            normalized_item: dict[str, Any] = {"id": mu_id, "type": mu_type, "role_id": role_id}
+
+            if entry.get("name"):
+                normalized_item["name"] = str(entry.get("name"))
+            elif entry.get("title"):
+                normalized_item["name"] = str(entry.get("title"))
+
+            if entry.get("thumbnail"):
+                normalized_item["thumbnail"] = str(entry.get("thumbnail"))
+
+            normalized.append(normalized_item)
+            seen_ids.add(mu_id)
+
+        return normalized
+
+    def _save_json(self, path: str) -> None:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(self.json_data, f, indent=4, ensure_ascii=False)
+
+    async def _mu_channel(self, fallback: discord.TextChannel) -> discord.TextChannel:
+        """Return the configured military_unit channel, or fallback if not found."""
+        ch_id = self.bot.config.get("channels", {}).get("military_unit")
+        if ch_id:
+            ch = self.bot.get_channel(ch_id)
+            if ch:
+                return ch
+        return fallback
+
+    @commands.hybrid_command(name="mulijst", description="Post de MU lijst in het MU-kanaal.")
     @has_privileged_role()
     async def mulijst(self, context: Context) -> None:
-        """
-        Post de MU lijst als een reeks embeds.
-
-        :param context: The hybrid command context.
-        """
-
         if not self.json_data or not self.json_data.get("embeds"):
             embed = discord.Embed(
                 description="MU data niet gevonden. Gebruik `/reloadmus` om opnieuw te laden.",
@@ -47,68 +120,61 @@ class MUs(GenerateEmbeds, name="mus"):
             await context.send(embed=embed, ephemeral=True)
             return
 
-        # Send confirmation
         await context.send("📚 Bezig met posten van de MU lijst...", ephemeral=True)
-
         channel = await self._mu_channel(context.channel)
         await self._repost_mu_list(channel)
+        self.bot.logger.info("MU lijst posted by %s in %s", context.author, channel.name)
 
-        self.bot.logger.info(f"MU lijst posted by {context.author} in {channel.name}")
-
-    @commands.hybrid_command(
-        name="reloadmus",
-        description="Herlaad de MU JSON file.",
-    )
+    @commands.hybrid_command(name="reloadmus", description="Herlaad de MU JSON file.")
     @commands.is_owner()
     async def reloadmus(self, context: Context) -> None:
-        """
-        Reload the MU from the JSON file.
-        :param context: The hybrid command context.
-        """
         try:
             self.load_json(mus_path(getattr(self.bot, "testing", False)))
-            print(self.json_data)
             embed = discord.Embed(
-                description=f"✅ MU succesvol herladen! ({len(self.json_data.get('embeds', []))} embeds)",
+                description=(
+                    f"✅ MU succesvol herladen! ({len(self.json_data.get('embeds', []))} entries)"
+                ),
                 color=self.get_color("success"),
             )
             await context.send(embed=embed)
-            self.bot.logger.info(f"MU reloaded by {context.author}")
+            self.bot.logger.info("MU reloaded by %s", context.author)
         except Exception as e:
             embed = discord.Embed(
                 description=f"❌ Fout bij herladen: {e}", color=self.get_color("error")
             )
             await context.send(embed=embed)
 
-    async def _mu_channel(self, fallback: discord.TextChannel) -> discord.TextChannel:
-        """Return the configured military_unit channel, or *fallback* if not found."""
-        ch_id = self.bot.config.get("channels", {}).get("military_unit")
-        if ch_id:
-            ch = self.bot.get_channel(ch_id)
-            if ch:
-                return ch
-        return fallback
-
     async def _repost_mu_list(self, channel: discord.TextChannel) -> None:
-        """Delete previously tracked messages, post fresh ones, save new IDs to JSON."""
+        """Delete previous MU posts, refresh MU info, and post embeds + dynamic buttons."""
         path = mus_path(getattr(self.bot, "testing", False))
 
-        # Bulk-delete recent bot messages (≤14 days) — covers the common case
+        mu_tasks = self.bot.get_cog("mu_tasks")
+        if mu_tasks:
+            try:
+                await mu_tasks.refresh_mu_info()
+            except Exception as exc:
+                self.bot.logger.warning("_repost_mu_list: MU refresh failed: %s", exc)
+
+        self.load_json(path)
+
+        entries = self._normalize_mu_entries((self.json_data or {}).get("embeds", []))
+        if not entries:
+            self.bot.logger.warning("_repost_mu_list: no valid MU entries found")
+            return
+
         try:
             await channel.purge(limit=100, check=lambda m: m.author == self.bot.user)
         except (discord.Forbidden, discord.HTTPException):
             pass
 
-        # Also individually delete any tracked IDs that may be older than 14 days
-        old_ids: list[int] = self.json_data.get("posted_message_ids", [])
+        old_ids: list[int] = (self.json_data or {}).get("posted_message_ids", [])
         for msg_id in old_ids:
             try:
                 old_msg = await channel.fetch_message(msg_id)
                 await old_msg.delete()
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                pass  # Already gone or no permission — continue
+                pass
 
-        # Post explanation embed
         explanation = discord.Embed(
             title="MU Soorten",
             description=(
@@ -124,208 +190,174 @@ class MUs(GenerateEmbeds, name="mus"):
             color=discord.Color.gold(),
         )
         new_ids: list[int] = []
-        msg = await channel.send(embed=explanation)
-        new_ids.append(msg.id)
+        explanation_msg = await channel.send(embed=explanation)
+        new_ids.append(explanation_msg.id)
 
-        _pinned_labels = {"Overige MU", "Wachtlijst"}
-        _type_order = {"Elite": 0, "Eco": 1, "Standaard": 2}
-
-        def _mu_type(description: str) -> int:
-            """Return sort key from embed description like '[**Elite MU**](...)'."""
-            m = re.search(r"\*\*(Elite|Eco|Standaard) MU\*\*", description or "")
-            return _type_order.get(m.group(1), 9999) if m else 9999
-
-        # Sort embeds: Elite → Eco → Standaard
-        embeds_sorted = sorted(
-            self.json_data.get("embeds", []),
-            key=lambda e: _mu_type(e.get("description", "")),
+        entries_sorted = sorted(
+            entries,
+            key=lambda e: (
+                self._MU_TYPE_ORDER.get(e["type"], 9999),
+                str(e.get("name") or f"MU {e['id'][:8]}").lower(),
+            ),
         )
 
-        poller = self.bot.cogs.get("event_tasks")
-        if poller:
-            mu_ids = []
-            # Get new thumbnail URLs for each MU type from the first embed of that type, if available
-            for embed in embeds_sorted:
-                mu_id = (
-                    embed.get("description", "").split("/")[-1].strip(")")
-                )  # Extract MU ID from description URL
-                mu_ids.append(mu_id)
-            thumbnails = await poller._get_mu_thumbnails(mu_ids)
-            for embed in embeds_sorted:
-                mu_id = (
-                    embed.get("description", "").split("/")[-1].strip(")")
-                )  # Extract MU ID from description URL
-                if mu_id in thumbnails:
-                    embed["thumbnail"] = thumbnails[mu_id]
+        for entry in entries_sorted:
+            mu_id = entry["id"]
+            mu_type = entry["type"]
+            mu_name = str(entry.get("name") or f"MU {mu_id[:8]}")
+            thumbnail = str(entry.get("thumbnail") or "")
 
-            # Update json with new thumbnail URLs so they persist for future reloads
-            try:
-                self.json_data["embeds"] = embeds_sorted
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(self.json_data, f, indent=4, ensure_ascii=False)
-            except Exception as e:
-                self.bot.logger.error(f"Failed to update MU thumbnails in JSON: {e}")
-        else:
-            self.bot.logger.warning(
-                "Poller cog not found, skipping MU thumbnail update"
-            )
-
-        # Use exact embed position as button sort key so button order = embed order
-        embed_position: dict[str, int] = {
-            e["title"]: i for i, e in enumerate(embeds_sorted)
-        }
-
-        # Colors per MU type
-        _type_colors: dict[str, discord.Color] = {
-            "Elite": discord.Color.orange(),  # #E67E22
-            "Eco": discord.Color.from_rgb(46, 204, 113),  # emerald green
-            "Standaard": discord.Color.from_rgb(52, 152, 219),  # steel blue
-        }
-
-        def _mu_type_str(description: str) -> str | None:
-            """Return the type string (Elite/Eco/Standaard) from an embed description."""
-            m = re.search(r"\*\*(Elite|Eco|Standaard) MU\*\*", description or "")
-            return m.group(1) if m else None
-
-        # One embed per MU (preserves thumbnail), coloured by type, sorted Elite → Eco → Standaard
-        for embed_data in embeds_sorted:
-            mu_type_str = _mu_type_str(embed_data.get("description", ""))
-            color = _type_colors.get(mu_type_str, discord.Color.greyple())
             embed = discord.Embed(
-                title=embed_data.get("title", ""),
-                description=embed_data.get("description", ""),
-                color=color,
+                title=mu_name,
+                description=f"[**{mu_type} MU**](https://app.warera.io/mu/{mu_id})",
+                color=self._MU_TYPE_COLORS.get(mu_type, discord.Color.greyple()),
             )
-            if "thumbnail" in embed_data:
-                embed.set_thumbnail(url=embed_data["thumbnail"])
+            if thumbnail:
+                embed.set_thumbnail(url=thumbnail)
             try:
                 msg = await channel.send(embed=embed)
                 new_ids.append(msg.id)
-            except Exception as e:
-                self.bot.logger.error(
-                    f"Error sending embed for {embed_data.get('title')}: {e}"
-                )
+            except Exception as exc:
+                self.bot.logger.error("Error sending embed for MU %s: %s", mu_id, exc)
 
-        # Post role-selection embed with buttons — order mirrors embeds exactly,
-        # pinned buttons (Overige MU / Wachtlijst) stay last, row numbers recalculated
         try:
             roles_path = mu_roles_path(getattr(self.bot, "testing", False))
             roles_data = load_roles_template(roles_path)
             all_buttons = roles_data.get("buttons", [])
 
-            # Ensure pinned roles exist in the JSON and in Discord
-            _pinned_role_defs = [
+            pinned_labels = {"Overige MU", "Wachtlijst"}
+            pinned_role_defs = [
                 {"label": "Overige MU", "style": "secondary"},
                 {"label": "Wachtlijst", "style": "secondary"},
             ]
-            _secondary_role_id = next(
-                (
-                    b.get("secondary_role_id")
-                    for b in all_buttons
-                    if b.get("secondary_role_id")
-                ),
+
+            secondary_role_id = next(
+                (b.get("secondary_role_id") for b in all_buttons if b.get("secondary_role_id")),
                 None,
             )
-            for pdef in _pinned_role_defs:
-                existing_btn = next(
-                    (b for b in all_buttons if b.get("label") == pdef["label"]), None
-                )
-                discord_role = None
+
+            # Ensure pinned roles exist and have button entries
+            for pdef in pinned_role_defs:
+                existing_btn = next((b for b in all_buttons if b.get("label") == pdef["label"]), None)
+                role = None
+                if existing_btn and existing_btn.get("role_id"):
+                    role = channel.guild.get_role(int(existing_btn["role_id"]))
+
+                if role is None:
+                    role = discord.utils.get(channel.guild.roles, name=pdef["label"])
+                if role is None:
+                    try:
+                        role = await channel.guild.create_role(
+                            name=pdef["label"],
+                            color=discord.Color.orange(),
+                            mentionable=True,
+                            reason="Automatisch aangemaakt door bot (vaste MU-knop)",
+                        )
+                    except Exception as exc:
+                        self.bot.logger.error(
+                            "Failed to create pinned role %s: %s", pdef["label"], exc
+                        )
+                        continue
+
                 if existing_btn:
-                    # Button entry exists — check if the Discord role still exists
-                    discord_role = channel.guild.get_role(int(existing_btn["role_id"]))
-                if discord_role is None:
-                    # Role missing from Discord — look up by name or create it
-                    discord_role = discord.utils.get(
-                        channel.guild.roles, name=pdef["label"]
-                    )
-                    if discord_role is None:
-                        try:
-                            discord_role = await channel.guild.create_role(
-                                name=pdef["label"],
-                                color=discord.Color.orange(),
-                                mentionable=True,
-                                reason="Automatisch aangemaakt door bot (vaste MU-knop)",
-                            )
-                        except Exception as e:
-                            self.bot.logger.error(
-                                "Failed to create pinned role %s: %s", pdef["label"], e
-                            )
-                            continue
-                    # Update or add the button entry with the (new) role ID
-                    if existing_btn:
-                        existing_btn["role_id"] = discord_role.id
-                    else:
-                        entry = {
-                            "label": pdef["label"],
-                            "role_id": discord_role.id,
-                            "style": pdef["style"],
-                            "row": 0,
-                        }
-                        if _secondary_role_id:
-                            entry["secondary_role_id"] = _secondary_role_id
-                        all_buttons.append(entry)
-            roles_data["buttons"] = all_buttons
+                    existing_btn["role_id"] = role.id
+                else:
+                    item = {
+                        "label": pdef["label"],
+                        "role_id": role.id,
+                        "style": pdef["style"],
+                        "row": 0,
+                    }
+                    if secondary_role_id:
+                        item["secondary_role_id"] = secondary_role_id
+                    all_buttons.append(item)
 
-            if all_buttons:
-                normal_btns = [
-                    b for b in all_buttons if b.get("label") not in _pinned_labels
-                ]
-                pinned_btns = [
-                    b for b in all_buttons if b.get("label") in _pinned_labels
-                ]
+            mu_buttons: list[dict[str, Any]] = []
+            for idx, entry in enumerate(entries_sorted):
+                mu_id = entry["id"]
+                mu_name = str(entry.get("name") or f"MU {mu_id[:8]}")
+                role_id = int(entry.get("role_id") or 0)
 
-                normal_btns.sort(
-                    key=lambda b: embed_position.get(b.get("label", ""), 9999)
-                )
+                role = channel.guild.get_role(role_id) if role_id else None
+                if role is None:
+                    role = discord.utils.get(channel.guild.roles, name=mu_name)
+                if role is None:
+                    try:
+                        role = await channel.guild.create_role(
+                            name=mu_name,
+                            color=discord.Color.orange(),
+                            mentionable=False,
+                            reason="Automatisch aangemaakt door MU synchronisatie",
+                        )
+                    except Exception as exc:
+                        self.bot.logger.error(
+                            "Failed to create role for MU %s (%s): %s",
+                            mu_name,
+                            mu_id,
+                            exc,
+                        )
+                        continue
 
-                # Recalculate row numbers after sort (5 per row).
-                # Use ceiling division so pinned buttons always start on a fresh row,
-                # even when the normal button count is not a multiple of 5.
-                for i, b in enumerate(normal_btns):
-                    b["row"] = i // 5
-                pinned_row = (len(normal_btns) + 4) // 5
-                for b in pinned_btns:
-                    b["row"] = pinned_row
+                if role.name != mu_name:
+                    try:
+                        await role.edit(name=mu_name, reason="MU naam gesynchroniseerd via API")
+                    except Exception as exc:
+                        self.bot.logger.warning(
+                            "Failed to rename MU role %s to %s: %s", role.name, mu_name, exc
+                        )
 
-                buttons = normal_btns + pinned_btns
+                entry["role_id"] = role.id
 
-                # Save sorted buttons back to JSON so future reads are consistent
-                roles_data["buttons"] = buttons
-                with open(roles_path, "w", encoding="utf-8") as f:
-                    json.dump(roles_data, f, indent=2, ensure_ascii=False)
+                button = {
+                    "label": mu_name,
+                    "role_id": role.id,
+                    "style": "primary",
+                    "row": idx // 5,
+                }
+                if secondary_role_id:
+                    button["secondary_role_id"] = secondary_role_id
+                mu_buttons.append(button)
 
-                color = int(
-                    self.bot.config.get("colors", {}).get("primary", "0x154273"), 16
-                )
-                roles_embed = discord.Embed(
-                    title=roles_data.get("title", "MU Lidmaatschap"),
-                    description=roles_data.get("description", ""),
-                    color=color,
-                )
-                btn_msg = await channel.send(
-                    embed=roles_embed, view=RoleToggleView(buttons, exclusive=True)
-                )
-                roles_data["button_message_id"] = btn_msg.id
-                with open(roles_path, "w", encoding="utf-8") as f:
-                    json.dump(roles_data, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            self.bot.logger.error(f"Error sending role buttons: {e}")
+            pinned_buttons = [b for b in all_buttons if b.get("label") in pinned_labels]
+            pinned_row = (len(mu_buttons) + 4) // 5
+            for b in pinned_buttons:
+                b["row"] = pinned_row
 
-        # Persist the new message IDs
+            buttons = mu_buttons + pinned_buttons
+
+            roles_data["buttons"] = buttons
+            with open(roles_path, "w", encoding="utf-8") as f:
+                json.dump(roles_data, f, indent=2, ensure_ascii=False)
+
+            color = int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16)
+            roles_embed = discord.Embed(
+                title=roles_data.get("title", "MU Lidmaatschap"),
+                description=roles_data.get("description", ""),
+                color=color,
+            )
+            btn_msg = await channel.send(
+                embed=roles_embed,
+                view=RoleToggleView(buttons, exclusive=True),
+            )
+            roles_data["button_message_id"] = btn_msg.id
+            with open(roles_path, "w", encoding="utf-8") as f:
+                json.dump(roles_data, f, indent=2, ensure_ascii=False)
+        except Exception as exc:
+            self.bot.logger.error("Error sending role buttons: %s", exc)
+
+        self.json_data = self.json_data or {}
+        self.json_data["embeds"] = entries_sorted
         self.json_data["posted_message_ids"] = new_ids
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(self.json_data, f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            self.bot.logger.error(f"Failed to save posted_message_ids: {e}")
+            self._save_json(path)
+        except Exception as exc:
+            self.bot.logger.error("Failed to save MU JSON: %s", exc)
 
     @app_commands.command(
         name="repostmu",
-        description="Voeg een nieuwe MU toe aan mus.json en herplaats de MU-lijst.",
+        description="Herplaats de MU-lijst en synchroniseer MU namen/thumbnails via API.",
     )
     async def repostmu(self, interaction: discord.Interaction) -> None:
-        """Repost the MU list without changes, to refresh the channel."""
         await interaction.response.defer(ephemeral=True)
         channel = await self._mu_channel(interaction.channel)
         try:
@@ -334,32 +366,32 @@ class MUs(GenerateEmbeds, name="mus"):
                 f"✅ MU-lijst herplaatst in {channel.mention}.", ephemeral=True
             )
         except Exception as e:
-            await interaction.followup.send(
-                f"❌ Fout bij herplaatsen: {e}", ephemeral=True
-            )
+            await interaction.followup.send(f"❌ Fout bij herplaatsen: {e}", ephemeral=True)
 
-    async def _mu_name_autocomplete(
+    async def _mu_id_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        titles = [e["title"] for e in (self.json_data or {}).get("embeds", [])]
+        entries = self._normalize_mu_entries((self.json_data or {}).get("embeds", []))
+        current_lower = current.lower()
         return [
-            app_commands.Choice(name=t, value=t)
-            for t in titles
-            if current.lower() in t.lower()
+            app_commands.Choice(
+                name=f"{entry['type']} • {entry['id']}",
+                value=entry["id"],
+            )
+            for entry in entries
+            if current_lower in entry["id"].lower()
         ][:25]
 
     @app_commands.command(
         name="wijzigmu",
-        description="Wijzig de gegevens van een MU en herplaats de MU-lijst.",
+        description="Wijzig MU type en/of gekoppelde Discord-rol en herplaats de MU-lijst.",
     )
     @app_commands.describe(
-        mu_naam="De naam van de MU om te wijzigen",
-        titel="Nieuwe naam/titel van de MU",
+        mu_id="De MU ID om te wijzigen",
         mu_type="Het nieuwe type van de MU",
-        link="Nieuwe link naar de MU-pagina op warera.io",
-        thumbnail="Nieuwe URL van het MU-logo",
+        rol="Nieuwe gekoppelde Discord-rol",
     )
-    @app_commands.autocomplete(mu_naam=_mu_name_autocomplete)
+    @app_commands.autocomplete(mu_id=_mu_id_autocomplete)
     @app_commands.choices(
         mu_type=[
             app_commands.Choice(name="Elite", value="Elite"),
@@ -372,86 +404,60 @@ class MUs(GenerateEmbeds, name="mus"):
     async def wijzigmu(
         self,
         interaction: discord.Interaction,
-        mu_naam: str,
-        titel: str | None = None,
+        mu_id: str,
         mu_type: str | None = None,
-        link: str | None = None,
-        thumbnail: str | None = None,
+        rol: discord.Role | None = None,
     ) -> None:
-        """Wijzig één of meer velden van een MU in mus.json en herplaats de MU-lijst."""
         await interaction.response.defer(ephemeral=True)
 
         if not self.json_data:
             self.load_json(mus_path(getattr(self.bot, "testing", False)))
 
-        if not any([titel, mu_type, link, thumbnail]):
+        if not any([mu_type, rol]):
             await interaction.followup.send(
-                "❌ Geef minimaal één veld op om te wijzigen (titel, mu_type, link of thumbnail).",
+                "❌ Geef minimaal één veld op om te wijzigen (mu_type of rol).",
                 ephemeral=True,
             )
             return
 
-        embeds = self.json_data.get("embeds", [])
-        target = next((e for e in embeds if e["title"] == mu_naam), None)
+        entries = self._normalize_mu_entries((self.json_data or {}).get("embeds", []))
+        target = next((e for e in entries if e["id"] == mu_id), None)
         if target is None:
             await interaction.followup.send(
-                f"❌ Geen MU gevonden met naam **{mu_naam}**.", ephemeral=True
+                f"❌ Geen MU gevonden met ID **{mu_id}**.", ephemeral=True
             )
             return
 
-        changes = []
+        changes: list[str] = []
+        if mu_type:
+            normalized = _normalize_mu_type(mu_type)
+            target["type"] = normalized
+            changes.append(f"type → **{normalized}**")
+        if rol:
+            target["role_id"] = rol.id
+            changes.append(f"rol → {rol.mention}")
 
-        # ── Update title ────────────────────────────────────────────
-        if titel:
-            target["title"] = titel
-            changes.append(f"titel → **{titel}**")
-
-        # ── Parse current description into (type, url) so we can patch either ──
-        old_desc = target.get("description", "")
-        desc_match = re.match(r"\[\*\*(.*?) MU\*\*\]\((.*?)\)", old_desc)
-        current_type = desc_match.group(1) if desc_match else None
-        current_url = desc_match.group(2) if desc_match else None
-
-        new_type = mu_type or current_type
-        new_url = link or current_url
-
-        if mu_type or link:
-            if new_type and new_url:
-                target["description"] = f"[**{new_type} MU**]({new_url})"
-            elif new_type:
-                target["description"] = f"**{new_type} MU**"
-            if mu_type:
-                changes.append(f"type → **{new_type} MU**")
-            if link:
-                changes.append("link bijgewerkt")
-
-        # ── Update thumbnail ──────────────────────────────────────
-        if thumbnail:
-            target["thumbnail"] = thumbnail
-            changes.append("thumbnail bijgewerkt")
+        self.json_data = self.json_data or {}
+        self.json_data["embeds"] = entries
 
         try:
-            with open(
-                mus_path(getattr(self.bot, "testing", False)), "w", encoding="utf-8"
-            ) as f:
-                json.dump(self.json_data, f, indent=4, ensure_ascii=False)
+            self._save_json(mus_path(getattr(self.bot, "testing", False)))
         except Exception as e:
             await interaction.followup.send(f"❌ Opslaan mislukt: {e}", ephemeral=True)
             return
 
-        # Repost the full list to the configured MU channel
         channel = await self._mu_channel(interaction.channel)
         try:
             await self._repost_mu_list(channel)
         except Exception as e:
             await interaction.followup.send(
-                f"✅ **{mu_naam}** bijgewerkt ({', '.join(changes)}), maar herposten mislukt: {e}",
+                f"✅ MU **{mu_id}** bijgewerkt ({', '.join(changes)}), maar herposten mislukt: {e}",
                 ephemeral=True,
             )
             return
 
         await interaction.followup.send(
-            f"✅ **{mu_naam}** bijgewerkt: {', '.join(changes)}. MU-lijst herplaatst in {channel.mention}.",
+            f"✅ MU **{mu_id}** bijgewerkt: {', '.join(changes)}. MU-lijst herplaatst in {channel.mention}.",
             ephemeral=True,
         )
 

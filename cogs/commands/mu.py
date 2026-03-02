@@ -33,28 +33,6 @@ DORM_CAPACITY: dict[int, int] = {
 INACTIVITY_HOURS = 72
 
 
-def _get_eco_mus() -> list[str]:
-    """Load the list of eco MUs from the template file."""
-    try:
-        with open("templates/mus.json") as f:
-            mus_data = json.load(f)
-            mus_list = mus_data.get("embeds", [])
-
-            mu_ids = []
-            if mus_list and isinstance(mus_list, list):
-                for embed in mus_list:
-                    if isinstance(embed, dict):
-                        title = embed.get("title", "")
-                        description = embed.get("description", "")
-                        if "Eco" in description:
-                            mu_id = description.split("/")[-1].strip(")")
-                            mu_ids.append({"title": title, "mu_id": mu_id})
-            return mu_ids
-    except Exception as exc:
-        logger.warning("_get_eco_mus: error loading eco MUs: %s", exc)
-        return []
-
-
 def _unwrap(resp: object) -> object:
     """Unwrap a tRPC result envelope."""
     if not isinstance(resp, dict):
@@ -360,7 +338,33 @@ class MU(commands.Cog, name="mu"):
         """Show eco donations in the last specified hours."""
         await interaction.response.defer()
 
-        eco_mus = _get_eco_mus()
+        # Ensure MU metadata is fresh before reading from JSON
+        mu_tasks = self.bot.get_cog("mu_tasks")
+        if mu_tasks:
+            try:
+                await mu_tasks.refresh_mu_info()
+            except Exception as exc:
+                logger.warning("eco_donations: MU refresh failed: %s", exc)
+
+        testing = getattr(self.bot, "testing", False)
+        mus_json_path = "templates/mus.testing.json" if testing else "templates/mus.json"
+        eco_mus: list[dict[str, str]] = []
+        try:
+            with open(mus_json_path, "r", encoding="utf-8") as f:
+                mus_data = json.load(f)
+            for item in mus_data.get("embeds", []):
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("type", "")).lower() != "eco":
+                    continue
+                mu_id = str(item.get("id", "")).strip()
+                if not mu_id:
+                    continue
+                name = str(item.get("name") or item.get("title") or f"MU {mu_id[:8]}")
+                eco_mus.append({"title": name, "mu_id": mu_id})
+        except Exception as exc:
+            logger.warning("eco_donations: failed to load %s: %s", mus_json_path, exc)
+
         if not eco_mus:
             await interaction.followup.send(
                 embed=discord.Embed(
@@ -387,7 +391,7 @@ class MU(commands.Cog, name="mu"):
         ] = {}  # mu_id -> (mu_name, [user_ids])
         for eco_mu in eco_mus:
             mu_id = eco_mu["mu_id"]
-            mu_name = eco_mu["title"]
+            fallback_name = eco_mu["title"]
             try:
                 resp = await client.get(
                     "/mu.getById",
@@ -395,6 +399,7 @@ class MU(commands.Cog, name="mu"):
                 )
                 data = _unwrap(resp)
                 if isinstance(data, dict):
+                    mu_name = str(data.get("name") or data.get("title") or fallback_name)
                     members = data.get("members", [])
                     mu_members[mu_id] = (mu_name, members)
             except Exception as exc:

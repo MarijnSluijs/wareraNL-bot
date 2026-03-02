@@ -106,16 +106,21 @@ class CitizenCache:
         if not embeds:
             return 0
 
-        # Extract mu_id from the URL in each embed's description
-        # e.g. "[**Elite MU**](https://app.warera.io/mu/695c10139cddbde0503e0d36)"
         import re
+
         mu_entries: list[tuple[str, str]] = []  # (mu_id, mu_name)
         for embed in embeds:
-            title = embed.get("title", "?")
-            description = embed.get("description", "")
-            m = re.search(r'/mu/([a-f0-9]+)', description)
-            if m:
-                mu_entries.append((m.group(1), title))
+            mu_id = str(embed.get("id") or "").strip()
+            if not mu_id:
+                description = embed.get("description", "")
+                m = re.search(r"/mu/([A-Za-z0-9]+)", description)
+                if m:
+                    mu_id = m.group(1)
+            if not mu_id:
+                continue
+
+            mu_name = str(embed.get("title") or f"MU {mu_id[:8]}")
+            mu_entries.append((mu_id, mu_name))
 
         if not mu_entries:
             logger.warning("refresh_mu_memberships: no MU IDs found in %s", mus_json_path)
@@ -126,12 +131,13 @@ class CitizenCache:
 
         updated = 0
         for mu_id, mu_name in mu_entries:
-            member_ids = await self._fetch_mu_member_ids(mu_id)
+            member_ids, live_name = await self._fetch_mu_members_and_name(mu_id)
+            effective_name = live_name or mu_name
             for uid in member_ids:
-                await self._db.update_citizen_mu(uid, mu_id, mu_name)
+                await self._db.update_citizen_mu(uid, mu_id, effective_name)
                 updated += 1
             await self._db.flush_citizen_levels()
-            logger.debug("refresh_mu_memberships: %s → %d members", mu_name, len(member_ids))
+            logger.debug("refresh_mu_memberships: %s → %d members", effective_name, len(member_ids))
 
         return updated
 
@@ -139,9 +145,10 @@ class CitizenCache:
     # Private helpers                                                      #
     # ------------------------------------------------------------------ #
 
-    async def _fetch_mu_member_ids(self, mu_id: str) -> list[str]:
-        """Paginate /mu.getById and return all member user IDs for a given MU."""
+    async def _fetch_mu_members_and_name(self, mu_id: str) -> tuple[list[str], str | None]:
+        """Call /mu.getById and return (member user IDs, MU name)."""
         user_ids: list[str] = []
+        mu_name: str | None = None
         # mu.getById returns the full MU including its members list
         try:
             resp = await self._client.get(
@@ -149,8 +156,8 @@ class CitizenCache:
                 params={"input": json.dumps({"muId": mu_id})},
             )
         except Exception as exc:
-            logger.warning("_fetch_mu_member_ids(%s): request failed: %s", mu_id, exc)
-            return user_ids
+            logger.warning("_fetch_mu_members_and_name(%s): request failed: %s", mu_id, exc)
+            return user_ids, mu_name
 
         # Navigate the response to find the members list
         data = resp
@@ -163,6 +170,9 @@ class CitizenCache:
 
         members: list = []
         if isinstance(data, dict):
+            raw_name = data.get("name") or data.get("title")
+            if isinstance(raw_name, str) and raw_name:
+                mu_name = raw_name
             for key in ("members", "citizenIds", "userIds", "users"):
                 v = data.get(key)
                 if isinstance(v, list):
@@ -182,7 +192,7 @@ class CitizenCache:
                 if uid:
                     user_ids.append(str(uid))
 
-        return user_ids
+        return user_ids, mu_name
 
     async def _fetch_user_ids(self, country_id: str) -> list[str]:
         """Paginate /user.getUsersByCountry and return all user IDs."""

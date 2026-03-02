@@ -162,6 +162,9 @@ class PeilCog(CommandCogBase, name="peil"):
         mus_json = "templates/mus.testing.json" if testing else "templates/mus.json"
         status_msg = await ctx.send("🔄 MU-lidmaatschappen verversen…", ephemeral=True)
         try:
+            mu_tasks = self.bot.get_cog("mu_tasks")
+            if mu_tasks:
+                await mu_tasks.refresh_mu_info()
             mu_count = await citizen_cache.refresh_mu_memberships(nl_country_id, mus_json)
             await status_msg.edit(content=f"✅ MU-lidmaatschappen verversing klaar — {mu_count} toewijzingen opgeslagen.")
             logger.info("peil mus: %d assignments refreshed", mu_count)
