@@ -245,6 +245,14 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
             nl_country_id = self.config.get("nl_country_id")
             testing = getattr(self.bot, "testing", False)
             mus_json = "templates/mus.testing.json" if testing else "templates/mus.json"
+
+            mu_tasks = self.bot.get_cog("mu_tasks")
+            if mu_tasks:
+                try:
+                    await mu_tasks.refresh_mu_info()
+                except Exception as exc:
+                    logger.warning("paraatheid alle_mus: MU refresh failed: %s", exc)
+
             try:
                 with open(mus_json, encoding="utf-8") as _f:
                     _mus_data = json.load(_f)
@@ -252,10 +260,27 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                 await ctx.send(f"Kon {mus_json} niet lezen: {exc}")
                 return
             _mu_types: dict[str, str] = {}
-            for _emb in _mus_data.get("embeds", []):
-                _title = _emb.get("title", "")
-                _m = re.search(r"\[\*\*(.+?)\*\*\]", _emb.get("description", ""))
-                _mu_types[_title] = _m.group(1) if _m else "Standaard MU"
+
+            # New schema: {id, type, role_id, name, thumbnail}
+            _entries = [e for e in _mus_data.get("embeds", []) if isinstance(e, dict)]
+            _new_schema = any(e.get("id") and e.get("type") for e in _entries)
+            if _new_schema:
+                for _entry in _entries:
+                    _name = str(_entry.get("name") or f"MU {str(_entry.get('id'))[:8]}")
+                    _type_raw = str(_entry.get("type", "")).strip().lower()
+                    if _type_raw == "elite":
+                        _mu_types[_name] = "Elite MU"
+                    elif _type_raw == "eco":
+                        _mu_types[_name] = "Eco MU"
+                    else:
+                        _mu_types[_name] = "Standaard MU"
+
+            # Backward compatibility for old schema
+            if not _mu_types:
+                for _emb in _entries:
+                    _title = _emb.get("title", "")
+                    _m = re.search(r"\[\*\*(.+?)\*\*\]", _emb.get("description", ""))
+                    _mu_types[_title] = _m.group(1) if _m else "Standaard MU"
             if not _mu_types:
                 await ctx.send("Geen MUs gevonden in het configuratiebestand.")
                 return

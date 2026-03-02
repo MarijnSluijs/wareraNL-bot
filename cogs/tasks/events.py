@@ -281,7 +281,7 @@ class EventTasks(TaskCogBase, name="event_tasks"):
             results = await self._client.batch_get(
                 "/mu.getById",
                 inputs,
-                batch_size=30,
+                batch_size=100,
                 chunk_sleep=0.5,
             )
         except Exception as exc:
