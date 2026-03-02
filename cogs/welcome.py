@@ -152,8 +152,18 @@ async def create_verification_channel(
         )
         return
 
-    # Generate unique ticket ID using millisecond timestamp (no in-memory state)
-    ticket_id = int(datetime.datetime.utcnow().timestamp() * 1000)
+    # Generate unique ticket ID (stored in central config if present)
+    ticket_id = None
+    try:
+        if "ticket_counter" in config:
+            config["ticket_counter"] = int(config.get("ticket_counter", 0)) + 1
+            ticket_id = config["ticket_counter"]
+    except Exception:
+        ticket_id = None
+
+    if ticket_id is None:
+        # fallback: use timestamp
+        ticket_id = int(datetime.datetime.utcnow().timestamp())
 
     # Configure channel properties based on request type
     roles_cfg = config.get("roles", {})
