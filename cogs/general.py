@@ -114,26 +114,80 @@ class General(commands.Cog, name="general"):
         name="help", description="Toon alle commands die de bot heeft geladen."
     )
     async def help(self, context: Context) -> None:
-        """Show all commands that the bot has loaded."""
-        embed = discord.Embed(
-            title="Help",
-            description="Lijst van beschikbare commands:",
-            color=self.color,
-        )
-        for i in self.bot.cogs:
-            if i == "owner" and not (await self.bot.is_owner(context.author)):
+        """Show every loaded command grouped by cog, across multiple embeds if needed.
+
+        Collects both prefix/hybrid commands (get_commands) and pure slash
+        commands (get_app_commands), deduplicates by name, and stays within
+        Discord's limits (≤25 fields per embed, ≤1024 chars per field value).
+        """
+        is_owner = await self.bot.is_owner(context.author)
+
+        # Build (cog_label, field_value) pairs — one or more per cog.
+        fields: list[tuple[str, str]] = []
+
+        for cog_name, cog in sorted(self.bot.cogs.items(), key=lambda x: x[0].lower()):
+            if cog_name.lower() == "owner" and not is_owner:
                 continue
-            cog = self.bot.get_cog(i.lower())
-            commands = cog.get_commands()
-            data = []
-            for command in commands:
-                description = command.description.partition("\n")[0]
-                data.append(f"{command.name} - {description}")
-            help_text = "\n".join(data)
-            embed.add_field(
-                name=i.capitalize(), value=f"```{help_text}```", inline=False
+
+            # Gather from both sources and deduplicate by command name.
+            seen: dict[str, str] = {}
+
+            for cmd in cog.get_commands():
+                if getattr(cmd, "hidden", False) and not is_owner:
+                    continue
+                desc = (cmd.description or cmd.brief or cmd.help or "").partition("\n")[0].strip()
+                seen[cmd.name] = desc or "\u2014"
+
+            for cmd in cog.get_app_commands():
+                if cmd.name not in seen:
+                    desc = (getattr(cmd, "description", "") or "").partition("\n")[0].strip()
+                    seen[cmd.name] = desc or "\u2014"
+
+            if not seen:
+                continue
+
+            lines = [f"`/{name}` — {desc}" for name, desc in sorted(seen.items())]
+
+            # Split into ≤1024-char chunks (Discord field value limit).
+            chunks: list[str] = []
+            chunk = ""
+            for line in lines:
+                addition = line + "\n"
+                if len(chunk) + len(addition) > 1000:
+                    chunks.append(chunk.rstrip())
+                    chunk = ""
+                chunk += addition
+            if chunk:
+                chunks.append(chunk.rstrip())
+
+            label = cog_name.capitalize()
+            for idx, chunk in enumerate(chunks):
+                suffix = f" ({idx + 1}/{len(chunks)})" if len(chunks) > 1 else ""
+                fields.append((label + suffix, chunk))
+
+        if not fields:
+            await context.send("Geen commands gevonden.", ephemeral=True)
+            return
+
+        # Paginate: ≤25 fields per embed (Discord hard limit).
+        MAX_FIELDS = 25
+        pages: list[discord.Embed] = []
+        for i in range(0, len(fields), MAX_FIELDS):
+            batch = fields[i : i + MAX_FIELDS]
+            embed = discord.Embed(
+                title="📖 Beschikbare commands" if i == 0 else "📖 Beschikbare commands (vervolg)",
+                description="Alle actieve commands, gegroepeerd per categorie." if i == 0 else None,
+                color=self.color,
             )
-        await context.send(embed=embed)
+            for name, value in batch:
+                embed.add_field(name=name, value=value, inline=False)
+            pages.append(embed)
+
+        total = len(pages)
+        for idx, page in enumerate(pages):
+            if total > 1:
+                page.set_footer(text=f"Pagina {idx + 1}/{total}")
+            await context.send(embed=page)
 
     @commands.hybrid_command(
         name="botinfo",
