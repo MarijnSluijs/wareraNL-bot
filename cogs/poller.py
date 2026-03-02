@@ -1035,6 +1035,10 @@ class ProductionChecker(commands.Cog, name="production_checker"):
                 avatar_url = data.get("avatarUrl")
                 if avatar_url:
                     thumbnails[mu_id] = avatar_url
+
+        if len(thumbnails) < len(mu_ids):
+            missing = set(mu_ids) - set(thumbnails.keys())
+            self.bot.logger.debug("_get_mu_thumbnails: missing thumbnails for MU IDs: %s", missing)
         
         return thumbnails
 

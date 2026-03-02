@@ -16,14 +16,24 @@
             "thumbnail": "https://media.warera.io/avatars/mu/mu-695acce63ae9eac7fb6e59e1-1770820823243-v7bl6nyb.png"
         },
         {
+            "title": "De Nederlandse Bank",
+            "description": "[**Eco MU**](https://app.warera.io/mu/697de1e370af1f7f8aa169ea)",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-697de1e370af1f7f8aa169ea-1771079953581-leqour4i.png"
+        },
+        {
+            "title": "Duytenberg",
+            "description": "[**Eco MU**](https://app.warera.io/mu/699b1d30b34e1837aaf9c1bf)",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-699b1d30b34e1837aaf9c1bf-1771774830441-nfjy03l9.png"
+        },
+        {
+            "title": "EBITDA Compagnie",
+            "description": "[**Eco MU**](https://app.warera.io/mu/699f7d14c629e138fa86ec9c)",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-699f7d14c629e138fa86ec9c-1772112040502-s113nbmg.png"
+        },
+        {
             "title": "The Flying Dutchman",
             "description": "[**Standaard MU**](https://app.warera.io/mu/6970dd1ebea7a2698be2e84e)",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-6970dd1ebea7a2698be2e84e-1770831355728-6mctkthl.png"
-        },
-        {
-            "title": "De Nederlandse Bank",
-            "description": "[**Eco MU**](https://app.warera.io/mu/697de1e370af1f7f8aa169ea)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-697de1e370af1f7f8aa169ea-1769857667228-r8i3fnrp.png"
         },
         {
             "title": "Regiment Huzaren",
@@ -31,9 +41,9 @@
             "thumbnail": "https://media.warera.io/avatars/mu/mu-6980b01819decffdc7848ef9-1770821860524-yd1m6m7w.png"
         },
         {
-            "title": "Luchtmobiele Brigade",
+            "title": "Regiment Genietroepen",
             "description": "[**Standaard MU**](https://app.warera.io/mu/69843f617cf831a523014e15)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-69843f617cf831a523014e15-1770476600780-03onmn2a.png"
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69843f617cf831a523014e15-1772439217531-wpl0xk8z.png"
         },
         {
             "title": "Regiment van Oranje",
@@ -43,17 +53,12 @@
         {
             "title": "Van Speijk Eskader",
             "description": "[**Standaard MU**](https://app.warera.io/mu/698f253efffb3268e9276ac1)",
-            "thumbnail": "https://i.imgur.com/0p5j6p1.png"
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-698f253efffb3268e9276ac1-1770991320655-qtu0zz2n.png"
         },
         {
             "title": "Oranje Huurlingen",
             "description": "[**Standaard MU**](https://app.warera.io/mu/69906c5a8b9151ad2ba50435)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-69906c5a8b9151ad2ba50435-1771094271985-uomonkkc.png"
-        },
-        {
-            "title": "Duytenberg",
-            "description": "[**Eco MU**](https://app.warera.io/mu/699b1d30b34e1837aaf9c1bf)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-699b1d30b34e1837aaf9c1bf-1771774830441-nfjy03l9.png"
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69906c5a8b9151ad2ba50435-1771584723193-r0xr7d1l.png"
         },
         {
             "title": "MIVD",
@@ -61,14 +66,9 @@
             "thumbnail": "https://media.warera.io/avatars/mu/mu-699bf0f5b232a1efde5b9aed-1772095865354-sivps2wd.png"
         },
         {
-            "title": "EBITDA Compagnie",
-            "description": "[**Eco MU**](https://app.warera.io/mu/699f7d14c629e138fa86ec9c)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-699f7d14c629e138fa86ec9c-1772060619432-cjil4teg.png"
-        },
-        {
             "title": "Baronie Wachteenheid",
             "description": "[**Standaard MU**](https://app.warera.io/mu/69a42247cedfd3ae87863a6c)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-69a42247cedfd3ae87863a6c-1772373581444-2h980quq.png"
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69a42247cedfd3ae87863a6c-1772376765723-d00juucz.png"
         },
         {
             "title": "Het Noordzee-verbond",
@@ -87,23 +87,23 @@
         }
     ],
     "posted_message_ids": [
-        1477675646586064956,
-        1477675647978700832,
-        1477675650256207995,
-        1477675652244177058,
-        1477675653993074891,
-        1477675655268401152,
-        1477675656153403607,
-        1477675677137502290,
-        1477675678563307672,
-        1477675679771398346,
-        1477675681218560071,
-        1477675683118448844,
-        1477675684368482354,
-        1477675703439851541,
-        1477675704601542708,
-        1477675706354761818,
-        1477675707499938054,
-        1477675708557033493
+        1477949738342027285,
+        1477949740103761920,
+        1477949741428904128,
+        1477949743173734514,
+        1477949744952115224,
+        1477949746722246707,
+        1477949765378506792,
+        1477949766221561948,
+        1477949768025247815,
+        1477949769338060952,
+        1477949771363913809,
+        1477949773112934552,
+        1477949792096358532,
+        1477949794210287789,
+        1477949796756226059,
+        1477949804213571697,
+        1477949805832572928,
+        1477949807501901905
     ]
 }
