@@ -1,115 +1,168 @@
 {
     "embeds": [
         {
-            "title": "De Heeren XVII",
-            "description": "[**Elite MU**](https://app.warera.io/mu/695c10139cddbde0503e0d36)",
+            "id": "695c10139cddbde0503e0d36",
+            "type": "Elite",
+            "role_id": 1469776897045954580,
+            "name": "De Heeren XVII",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-695c10139cddbde0503e0d36-1767642365469-1s8cvy38.jpg"
         },
         {
-            "title": "Korps Mariniers",
-            "description": "[**Elite MU**](https://app.warera.io/mu/695c338ec617ea3c92421bc3)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-695c338ec617ea3c92421bc3-1770834028326-m4wudnb7.png"
-        },
-        {
-            "title": "Korps Commando's",
-            "description": "[**Elite MU**](https://app.warera.io/mu/695acce63ae9eac7fb6e59e1)",
+            "id": "695acce63ae9eac7fb6e59e1",
+            "type": "Elite",
+            "role_id": 1469778101885206659,
+            "name": "Korps Commando's",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-695acce63ae9eac7fb6e59e1-1770820823243-v7bl6nyb.png"
         },
         {
-            "title": "De Nederlandse Bank",
-            "description": "[**Eco MU**](https://app.warera.io/mu/697de1e370af1f7f8aa169ea)",
+            "id": "695c338ec617ea3c92421bc3",
+            "type": "Elite",
+            "role_id": 1469778031269777510,
+            "name": "Korps Mariniers",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-695c338ec617ea3c92421bc3-1770834028326-m4wudnb7.png"
+        },
+        {
+            "id": "697de1e370af1f7f8aa169ea",
+            "type": "Eco",
+            "role_id": 1469778210190262342,
+            "name": "De Nederlandse Bank",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-697de1e370af1f7f8aa169ea-1771079953581-leqour4i.png"
         },
         {
-            "title": "Duytenberg",
-            "description": "[**Eco MU**](https://app.warera.io/mu/699b1d30b34e1837aaf9c1bf)",
+            "id": "699b1d30b34e1837aaf9c1bf",
+            "type": "Eco",
+            "role_id": 1475265345085243646,
+            "name": "Duytenberg",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-699b1d30b34e1837aaf9c1bf-1771774830441-nfjy03l9.png"
         },
         {
-            "title": "EBITDA Compagnie",
-            "description": "[**Eco MU**](https://app.warera.io/mu/699f7d14c629e138fa86ec9c)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-699f7d14c629e138fa86ec9c-1772112040502-s113nbmg.png"
+            "id": "699f7d14c629e138fa86ec9c",
+            "type": "Eco",
+            "role_id": 1476503487033376769,
+            "name": "EBITDA Compagnie",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-699f7d14c629e138fa86ec9c-1772468380534-mayiwkxz.png"
         },
         {
-            "title": "The Flying Dutchman",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/6970dd1ebea7a2698be2e84e)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-6970dd1ebea7a2698be2e84e-1770831355728-6mctkthl.png"
-        },
-        {
-            "title": "Regiment Huzaren",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/6980b01819decffdc7848ef9)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-6980b01819decffdc7848ef9-1770821860524-yd1m6m7w.png"
-        },
-        {
-            "title": "Regiment Genietroepen",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/69843f617cf831a523014e15)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-69843f617cf831a523014e15-1772439217531-wpl0xk8z.png"
-        },
-        {
-            "title": "Regiment van Oranje",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/69848b1d7922e416bbcca4e9)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-69848b1d7922e416bbcca4e9-1770821085430-y1gtahvp.png"
-        },
-        {
-            "title": "Van Speijk Eskader",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/698f253efffb3268e9276ac1)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-698f253efffb3268e9276ac1-1770991320655-qtu0zz2n.png"
-        },
-        {
-            "title": "Oranje Huurlingen",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/69906c5a8b9151ad2ba50435)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-69906c5a8b9151ad2ba50435-1771584723193-r0xr7d1l.png"
-        },
-        {
-            "title": "MIVD",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/699bf0f5b232a1efde5b9aed)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-699bf0f5b232a1efde5b9aed-1772095865354-sivps2wd.png"
-        },
-        {
-            "title": "Baronie Wachteenheid",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/69a42247cedfd3ae87863a6c)",
+            "id": "69a42247cedfd3ae87863a6c",
+            "type": "Standaard",
+            "role_id": 1477669855736893450,
+            "name": "Baronie Wachteenheid",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-69a42247cedfd3ae87863a6c-1772376765723-d00juucz.png"
         },
         {
-            "title": "Het Noordzee-verbond",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/69a41cd5cedfd3ae877c2def)",
+            "id": "69a588024833b3070edb7324",
+            "type": "Standaard",
+            "role_id": 1478040331407724614,
+            "name": "De Krooncompagnie",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69a588024833b3070edb7324-1772460579470-qq9485sk.png"
+        },
+        {
+            "id": "69a41d7b75b50126c381cca5",
+            "type": "Standaard",
+            "role_id": 1477673635362898053,
+            "name": "De Mobiele Eenheid",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69a41d7b75b50126c381cca5-1772464760674-h8gtqo40.png"
+        },
+        {
+            "id": "69a538c84833b3070e6adf17",
+            "type": "Standaard",
+            "role_id": 1478061900230295736,
+            "name": "De Waardgelders",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69a538c84833b3070e6adf17-1772466932247-yivojkle.png"
+        },
+        {
+            "id": "69a41cd5cedfd3ae877c2def",
+            "type": "Standaard",
+            "role_id": 1477670240719605892,
+            "name": "Het Noordzee-verbond",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-69a41cd5cedfd3ae877c2def-1772370042271-86cx1iqf.webp"
         },
         {
-            "title": "Pannekoekenoffensief",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/69a420a143600f560ccb9570)",
+            "id": "699bf0f5b232a1efde5b9aed",
+            "type": "Standaard",
+            "role_id": 1475444320076169328,
+            "name": "MIVD",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-699bf0f5b232a1efde5b9aed-1772095865354-sivps2wd.png"
+        },
+        {
+            "id": "69906c5a8b9151ad2ba50435",
+            "type": "Standaard",
+            "role_id": 1474045597668348055,
+            "name": "Oranje Huurlingen",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69906c5a8b9151ad2ba50435-1771584723193-r0xr7d1l.png"
+        },
+        {
+            "id": "69a5d8546719fc1a7c787cb8",
+            "type": "Standaard",
+            "role_id": 1478119044463726632,
+            "name": "OTCo",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69a5d8546719fc1a7c787cb8-1772480290303-cgrhn1kn.png"
+        },
+        {
+            "id": "69a420a143600f560ccb9570",
+            "type": "Standaard",
+            "role_id": 1477670419497484432,
+            "name": "Pannekoekenoffensief",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-69a420a143600f560ccb9570-1772366910693-gzfmpsfl.png"
         },
         {
-            "title": "De Mobiele Eenheid",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/69a41d7b75b50126c381cca5)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-69a41d7b75b50126c381cca5-1772364368968-apawnpc0.png"
+            "id": "69843f617cf831a523014e15",
+            "type": "Standaard",
+            "role_id": 1478040332732993689,
+            "name": "Reg. Genietroepen",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69843f617cf831a523014e15-1772439217531-wpl0xk8z.png"
         },
         {
-            "title": "WNM",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/69a588024833b3070edb7324)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-69a41d7b75b50126c381cca5-1772364368968-apawnpc0.png"
+            "id": "6980b01819decffdc7848ef9",
+            "type": "Standaard",
+            "role_id": 1469778258550718617,
+            "name": "Regiment Huzaren",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-6980b01819decffdc7848ef9-1770821860524-yd1m6m7w.png"
+        },
+        {
+            "id": "69848b1d7922e416bbcca4e9",
+            "type": "Standaard",
+            "role_id": 1469778491305230459,
+            "name": "Regiment van Oranje",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69848b1d7922e416bbcca4e9-1770821085430-y1gtahvp.png"
+        },
+        {
+            "id": "6970dd1ebea7a2698be2e84e",
+            "type": "Standaard",
+            "role_id": 1469778151541575784,
+            "name": "The Flying Dutchman",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-6970dd1ebea7a2698be2e84e-1770831355728-6mctkthl.png"
+        },
+        {
+            "id": "698f253efffb3268e9276ac1",
+            "type": "Standaard",
+            "role_id": 1471870072778920069,
+            "name": "Van Speijk Eskader",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-698f253efffb3268e9276ac1-1770991320655-qtu0zz2n.png"
         }
     ],
     "posted_message_ids": [
-        1478017539484287048,
-        1478017541019271250,
-        1478017542147539036,
-        1478017543426801869,
-        1478017545117368420,
-        1478017546421534800,
-        1478017565799350464,
-        1478017566902321336,
-        1478017568034918519,
-        1478017569805045770,
-        1478017571310796840,
-        1478017573349097605,
-        1478017592655347713,
-        1478017594068828342,
-        1478017595885228127,
-        1478017597294247989,
-        1478017598850469920,
-        1478017600268275827,
-        1478017619234918432
-    ]
+        1478119148142723225,
+        1478119149719912541,
+        1478119150554710199,
+        1478119152593014908,
+        1478119155180900534,
+        1478119156162232463,
+        1478119174525157378,
+        1478119177330884835,
+        1478119179185033422,
+        1478119187057742059,
+        1478119188131217551,
+        1478119189683241186,
+        1478119191201714397,
+        1478119192757534987,
+        1478119194662010923,
+        1478119214106542144,
+        1478119215964749926,
+        1478119217558720629,
+        1478119219249025066,
+        1478119220939329716,
+        1478119222579036376
+    ],
+    "mu_info_updated_at": "2026-03-03T15:43:52.814489+00:00"
 }

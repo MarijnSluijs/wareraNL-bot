@@ -327,14 +327,39 @@ class MU(commands.Cog, name="mu"):
         )
         await interaction.followup.send(embed=embed)
 
+    async def _eco_mu_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """Autocomplete MU names from mus.json eco MUs."""
+        testing = getattr(self.bot, "testing", False)
+        mus_json_path = "templates/mus.testing.json" if testing else "templates/mus.json"
+        choices: list[app_commands.Choice[str]] = []
+        try:
+            with open(mus_json_path, "r", encoding="utf-8") as f:
+                mus_data = json.load(f)
+            for item in mus_data.get("embeds", []):
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("type", "")).lower() != "eco":
+                    continue
+                name = str(item.get("name") or "").strip()
+                mu_id = str(item.get("id") or "").strip()
+                if name and mu_id and current.lower() in name.lower():
+                    choices.append(app_commands.Choice(name=name, value=mu_id))
+        except Exception as exc:
+            logger.warning("_eco_mu_autocomplete: failed to load %s: %s", mus_json_path, exc)
+        return choices[:25]  # Discord max choices
+
     @app_commands.command(
         name="eco_donaties",
         description="Laat eco-donaties sinds gespecifieerd aantal uur zien.",
     )
     @app_commands.describe(
         hours="Aantal uur terug om te controleren (standaard: 24)",
+        mu="Optioneel: specificeer een MU naam om alleen die MU te controleren",
     )
-    async def eco_donations(self, interaction: discord.Interaction, hours: int = 24):
+    @app_commands.autocomplete(mu=_eco_mu_autocomplete)
+    async def eco_donations(self, interaction: discord.Interaction, hours: int = 24, mu: Optional[str] = None) -> None:
         """Show eco donations in the last specified hours."""
         await interaction.response.defer()
 
@@ -346,22 +371,28 @@ class MU(commands.Cog, name="mu"):
             except Exception as exc:
                 logger.warning("eco_donations: MU refresh failed: %s", exc)
 
+         
         testing = getattr(self.bot, "testing", False)
         mus_json_path = "templates/mus.testing.json" if testing else "templates/mus.json"
         eco_mus: list[dict[str, str]] = []
         try:
             with open(mus_json_path, "r", encoding="utf-8") as f:
                 mus_data = json.load(f)
-            for item in mus_data.get("embeds", []):
-                if not isinstance(item, dict):
-                    continue
-                if str(item.get("type", "")).lower() != "eco":
-                    continue
-                mu_id = str(item.get("id", "")).strip()
-                if not mu_id:
-                    continue
-                name = str(item.get("name") or item.get("title") or f"MU {mu_id[:8]}")
-                eco_mus.append({"title": name, "mu_id": mu_id})
+            if mu is not None:
+                for mu_entry in mus_data.get("embeds", []):
+                    if mu_entry.get("id") == mu:
+                        eco_mus = [{"title": mu_entry.get("name"), "mu_id": mu}]
+            else:   
+                for item in mus_data.get("embeds", []):
+                    if not isinstance(item, dict):
+                        continue
+                    if str(item.get("type", "")).lower() != "eco":
+                        continue
+                    mu_id = str(item.get("id", "")).strip()
+                    if not mu_id:
+                        continue
+                    name = str(item.get("name") or item.get("title") or f"MU {mu_id[:8]}")
+                    eco_mus.append({"title": name, "mu_id": mu_id})
         except Exception as exc:
             logger.warning("eco_donations: failed to load %s: %s", mus_json_path, exc)
 
@@ -488,9 +519,13 @@ class MU(commands.Cog, name="mu"):
                             continue
 
                         amount = float(txn.get("money", 0))
-                        mu_id = user_to_mu.get(user_id)
-                        if mu_id:
-                            mu_donations[mu_id] = mu_donations.get(mu_id, 0) + amount
+                        if mu is not None:
+                            # if a specific MU is selected, keep count for each individual user
+                            mu_donations[user_id] = mu_donations.get(user_id, 0) + amount
+                        else:
+                            mu_id = user_to_mu.get(user_id)
+                            if mu_id:
+                                mu_donations[mu_id] = mu_donations.get(mu_id, 0) + amount
                     except Exception:
                         continue
 
@@ -530,7 +565,7 @@ class MU(commands.Cog, name="mu"):
         # Format as monospace table
         col_name = max(len(r[0]) for r in rows)
         col_name = max(col_name, len("MU"))
-        header = f"{'MU':<{col_name}}  Donaties"
+        header = f"{f'{"MU" if not mu else "User"}':<{col_name}}  Donaties"
         separator = "-" * (col_name + 20)
         lines = [header, separator]
 
@@ -543,7 +578,7 @@ class MU(commands.Cog, name="mu"):
 
         color = int(self.config.get("colors", {}).get("primary", "0x154273"), 16)
         embed = discord.Embed(
-            title=f"💰 Eco-donaties – Laatste {hours} uur",
+            title=f"💰 {"Eco-donaties" if not mu else f"Eco-donaties voor {mu}"} – Laatste {hours} uur",
             description=f"**Totaal: €{total_donations:,.0f}**\n\n```\n{table}\n```",
             color=color,
             timestamp=now,
