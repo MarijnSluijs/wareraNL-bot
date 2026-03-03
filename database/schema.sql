@@ -131,6 +131,26 @@ CREATE TABLE IF NOT EXISTS resistance_state (
     updated_at        TEXT
 );
 
+
+-- ── Giveaways ─────────────────────────────────────────────────────────────────
+
+-- giveaways: rewards inventory for citizens
+CREATE TABLE IF NOT EXISTS wallets (
+    user_id TEXT PRIMARY KEY,
+    balance INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+
+-- wallet_transactions: ledger of all wallet changes (positive and negative)
+CREATE TABLE IF NOT EXISTS wallet_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    tx_type TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES wallets(user_id)
+);
+
 -- ── Legacy (krypton template) ─────────────────────────────────────────────────
 
 -- warns: moderation warn log used by database/__init__.py DatabaseManager
