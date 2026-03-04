@@ -56,13 +56,13 @@ class ResistanceTasks(TaskCogBase, name="resistance_tasks"):
 
     async def run_resistance_poll(self) -> None:
         """Public wrapper so /peil and debug commands can trigger the poll."""
-        await self._run_resistance_poll()
+        await self._run_resistance_poll(silent=True)
 
     # ------------------------------------------------------------------ #
     # Internals                                                            #
     # ------------------------------------------------------------------ #
 
-    async def _run_resistance_poll(self) -> None:
+    async def _run_resistance_poll(self, *, silent: bool = False) -> None:
         """Fetch all regions, find NL originals occupied by others, report resistance."""
         nl_country_id = self.config.get("nl_country_id")
         channels = self.config.get("channels", {})
@@ -157,6 +157,10 @@ class ResistanceTasks(TaskCogBase, name="resistance_tasks"):
         for rname, field_val in fields:
             embed.add_field(name=rname, value=field_val, inline=False)
         embed.set_footer(text="WarEra — verzetspeiling")
+
+        if silent:
+            logger.info("resistance_poll: DB updated silently (%d regions), skipping post", len(fields))
+            return
 
         for guild in self.bot.guilds:
             ch = guild.get_channel(channel_id)

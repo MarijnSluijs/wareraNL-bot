@@ -102,6 +102,51 @@ class ProductionMixin:
         )
         await self._conn.commit()
 
+    # ── country_item_ethic ───────────────────────────────────────────────────
+
+    async def save_country_item_ethic(
+        self,
+        item: str,
+        country_id: str,
+        strategic_bonus: float,
+        ethic_bonus: float,
+        updated_at: str,
+    ) -> None:
+        """Upsert an ethics entry for a (item, country_id) pair."""
+        await self._conn.execute(
+            "INSERT OR REPLACE INTO country_item_ethic"
+            "(item, country_id, strategic_bonus, ethic_bonus, updated_at)"
+            " VALUES(?, ?, ?, ?, ?)",
+            (item, country_id, strategic_bonus, ethic_bonus, updated_at),
+        )
+        await self._conn.commit()
+
+    async def get_all_country_item_ethics(self) -> list[dict]:
+        """Return all rows from country_item_ethic as a list of dicts."""
+        rows: list[dict] = []
+        async with self._conn.execute(
+            "SELECT item, country_id, strategic_bonus, ethic_bonus FROM country_item_ethic"
+        ) as cur:
+            async for row in cur:
+                rows.append({
+                    "item": row[0],
+                    "country_id": row[1],
+                    "strategic_bonus": row[2],
+                    "ethic_bonus": row[3],
+                })
+        return rows
+
+    async def get_country_spec_map(self) -> dict[str, str]:
+        """Return {country_id: specialized_item} for all countries with a specialization."""
+        result: dict[str, str] = {}
+        async with self._conn.execute(
+            "SELECT country_id, specialized_item FROM country_snapshots"
+            " WHERE specialized_item IS NOT NULL AND specialized_item != ''"
+        ) as cur:
+            async for row in cur:
+                result[row[0]] = row[1]
+        return result
+
     # ── deposit_top ──────────────────────────────────────────────────────────
 
     async def get_deposit_top(self, item: str) -> Optional[dict]:

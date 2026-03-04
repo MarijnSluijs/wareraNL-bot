@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import aiosqlite
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -95,52 +95,54 @@ class MU(commands.Cog, name="mu"):
             await self._client.start()
         return self._client
 
-    async def _get_nl_user_ids(self) -> set[str]:
-        """Return the set of all Dutch citizen user IDs from the external DB."""
-        nl_country_id = self.config.get("nl_country_id", "")
-        db_path = self.config.get("external_db_path", "database/external.db")
+    def _mus_path(self) -> str:
+        testing = getattr(self.bot, "testing", False)
+        return "templates/mus.testing.json" if testing else "templates/mus.json"
+
+    def _extract_mu_ids_from_template(self) -> list[str]:
+        """Read mus.json and return the MU IDs listed in it."""
         try:
-            async with aiosqlite.connect(db_path) as db:
-                cur = await db.execute(
-                    "SELECT user_id FROM citizen_levels WHERE country_id = ?",
-                    (nl_country_id,),
-                )
-                rows = await cur.fetchall()
-            return {r[0] for r in rows}
+            with open(self._mus_path(), "r", encoding="utf-8") as f:
+                data = json.load(f)
         except Exception as exc:
-            logger.warning("_get_nl_user_ids: DB error: %s", exc)
-            return set()
+            logger.warning("_extract_mu_ids_from_template: failed to read mus.json: %s", exc)
+            return []
+        ids: list[str] = []
+        seen: set[str] = set()
+        for entry in data.get("embeds", []):
+            if not isinstance(entry, dict):
+                continue
+            mu_id = str(entry.get("id") or "").strip()
+            if not mu_id:
+                desc = str(entry.get("description", ""))
+                m = re.search(r"/mu/([A-Za-z0-9]+)", desc)
+                if m:
+                    mu_id = m.group(1)
+            if mu_id and mu_id not in seen:
+                ids.append(mu_id)
+                seen.add(mu_id)
+        return ids
 
     async def _get_all_dutch_mus(self) -> list[dict]:
-        """Paginate /mu.getManyPaginated and return only MUs owned by a Dutch citizen."""
-        nl_users = await self._get_nl_user_ids()
-        if not nl_users:
-            logger.warning("_get_all_dutch_mus: no NL citizens found in DB")
+        """Fetch MUs listed in mus.json via batch mu.getById calls."""
+        mu_ids = self._extract_mu_ids_from_template()
+        if not mu_ids:
+            logger.warning("_get_all_dutch_mus: no MU IDs found in mus.json")
             return []
 
         client = await self._get_client()
+        inputs = [{"muId": mid} for mid in mu_ids]
+        try:
+            results = await client.batch_get("/mu.getById", inputs)
+        except Exception as exc:
+            logger.error("_get_all_dutch_mus: batch_get failed: %s", exc)
+            return []
+
         mus: list[dict] = []
-        cursor: Optional[str] = None
-        while True:
-            payload: dict = {"limit": 100}
-            if cursor:
-                payload["cursor"] = cursor
-            try:
-                resp = await client.get(
-                    "/mu.getManyPaginated",
-                    params={"input": json.dumps(payload)},
-                )
-            except Exception as exc:
-                logger.error("_get_all_dutch_mus: API error: %s", exc)
-                break
-            data = _unwrap(resp)
-            items: list[dict] = data.get("items", []) if isinstance(data, dict) else []
-            for mu in items:
-                if mu.get("user") in nl_users:
-                    mus.append(mu)
-            cursor = data.get("nextCursor") if isinstance(data, dict) else None
-            if not cursor or not items:
-                break
+        for raw in results:
+            data = _unwrap(raw) if isinstance(raw, dict) else raw
+            if isinstance(data, dict):
+                mus.append(data)
 
         return sorted(mus, key=lambda m: m.get("name", "").lower())
 

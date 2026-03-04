@@ -1,69 +1,95 @@
 {
     "embeds": [
         {
-            "title": "De Heeren XVII",
-            "description": "[**Elite MU**](https://app.warera.io/mu/695c10139cddbde0503e0d36)",
+            "id": "695c10139cddbde0503e0d36",
+            "type": "Elite",
+            "role_id": 0,
+            "name": "De Heeren XVII",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-695c10139cddbde0503e0d36-1767642365469-1s8cvy38.jpg"
         },
         {
-            "title": "Korps Mariniers",
-            "description": "[**Elite MU**](https://app.warera.io/mu/695c338ec617ea3c92421bc3)",
+            "id": "695c338ec617ea3c92421bc3",
+            "type": "Elite",
+            "role_id": 0,
+            "name": "Korps Mariniers",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-695c338ec617ea3c92421bc3-1770834028326-m4wudnb7.png"
         },
         {
-            "title": "Korps Commando's",
-            "description": "[**Elite MU**](https://app.warera.io/mu/695acce63ae9eac7fb6e59e1)",
+            "id": "695acce63ae9eac7fb6e59e1",
+            "type": "Elite",
+            "role_id": 0,
+            "name": "Korps Commando's",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-695acce63ae9eac7fb6e59e1-1770820823243-v7bl6nyb.png"
         },
         {
-            "title": "The Flying Dutchman",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/6970dd1ebea7a2698be2e84e)",
+            "id": "6970dd1ebea7a2698be2e84e",
+            "type": "Standaard",
+            "role_id": 0,
+            "name": "The Flying Dutchman",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-6970dd1ebea7a2698be2e84e-1770831355728-6mctkthl.png"
         },
         {
-            "title": "De Nederlandse Bank",
-            "description": "[**Eco MU**](https://app.warera.io/mu/697de1e370af1f7f8aa169ea)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-697de1e370af1f7f8aa169ea-1769857667228-r8i3fnrp.png"
+            "id": "697de1e370af1f7f8aa169ea",
+            "type": "Eco",
+            "role_id": 0,
+            "name": "De Nederlandse Bank",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-697de1e370af1f7f8aa169ea-1771079953581-leqour4i.png"
         },
         {
-            "title": "Regiment Huzaren",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/6980b01819decffdc7848ef9)",
+            "id": "6980b01819decffdc7848ef9",
+            "type": "Standaard",
+            "role_id": 0,
+            "name": "Regiment Huzaren",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-6980b01819decffdc7848ef9-1770821860524-yd1m6m7w.png"
         },
         {
-            "title": "Luchtmobiele Brigade",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/69843f617cf831a523014e15)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-69843f617cf831a523014e15-1770476600780-03onmn2a.png"
+            "id": "69843f617cf831a523014e15",
+            "type": "Standaard",
+            "role_id": 0,
+            "name": "Reg. Genietroepen",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69843f617cf831a523014e15-1772439217531-wpl0xk8z.png"
         },
         {
-            "title": "Regiment van Oranje",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/69848b1d7922e416bbcca4e9)",
+            "id": "69848b1d7922e416bbcca4e9",
+            "type": "Standaard",
+            "role_id": 0,
+            "name": "Regiment van Oranje",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-69848b1d7922e416bbcca4e9-1770821085430-y1gtahvp.png"
         },
         {
-            "title": "Van Speijk Eskader",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/698f253efffb3268e9276ac1)",
-            "thumbnail": "https://i.imgur.com/0p5j6p1.png"
+            "id": "698f253efffb3268e9276ac1",
+            "type": "Standaard",
+            "role_id": 0,
+            "name": "Van Speijk Eskader",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-698f253efffb3268e9276ac1-1770991320655-qtu0zz2n.png"
         },
         {
-            "title": "Oranje Huurlingen",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/69906c5a8b9151ad2ba50435)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-69906c5a8b9151ad2ba50435-1771094271985-uomonkkc.png"
+            "id": "69906c5a8b9151ad2ba50435",
+            "type": "Standaard",
+            "role_id": 0,
+            "name": "Oranje Huurlingen",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69906c5a8b9151ad2ba50435-1771584723193-r0xr7d1l.png"
         },
         {
-            "title": "Duytenberg",
-            "description": "[**Eco MU**](https://app.warera.io/mu/699b1d30b34e1837aaf9c1bf)",
+            "id": "699b1d30b34e1837aaf9c1bf",
+            "type": "Eco",
+            "role_id": 0,
+            "name": "Duytenberg",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-699b1d30b34e1837aaf9c1bf-1771774830441-nfjy03l9.png"
         },
         {
-            "title": "MIVD",
-            "description": "[**Standaard MU**](https://app.warera.io/mu/699bf0f5b232a1efde5b9aed)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-699bf0f5b232a1efde5b9aed-1771828191040-h1uvx1ml.png"
+            "id": "699bf0f5b232a1efde5b9aed",
+            "type": "Standaard",
+            "role_id": 0,
+            "name": "MIVD",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-699bf0f5b232a1efde5b9aed-1772095865354-sivps2wd.png"
         },
         {
-            "title": "EBITDA Compagnie",
-            "description": "[**Eco MU**](https://app.warera.io/mu/699f7d14c629e138fa86ec9c)",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-699f7d14c629e138fa86ec9c-1772060619432-cjil4teg.png"
+            "id": "699f7d14c629e138fa86ec9c",
+            "type": "Eco",
+            "role_id": 0,
+            "name": "EBITDA Compagnie",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-699f7d14c629e138fa86ec9c-1772468380534-mayiwkxz.png"
         }
     ],
     "posted_message_ids": [
@@ -81,5 +107,6 @@
         1477715940429791382,
         1477715941336027358,
         1477715959174402110
-    ]
+    ],
+    "mu_info_updated_at": "2026-03-04T21:36:35.585162+00:00"
 }
