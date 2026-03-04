@@ -278,12 +278,14 @@ class Owner(commands.Cog, name="owner"):
             await context.send("❌ `congres` channel niet geconfigureerd.")
             return
 
+        congress_role = context.guild.get_role(1451181300009537547)
+
         start_time = datetime(2026, 2, 7)  # Get messages from 7 february to today
         message_count = Counter()
         async for message in self.bot.get_channel(congres_channel_id).history(
             limit=None, after=start_time
         ):
-            if message.author.bot:
+            if message.author.bot or congress_role not in message.author.roles:
                 continue
             message_count[message.author.id] += 1
 
@@ -293,7 +295,7 @@ class Owner(commands.Cog, name="owner"):
         )
         embed = discord.Embed(
             title="Congresleden Analyse",
-            description=f"Berichten in de congres channel over de laatste 30 dagen:\n{results}",
+            description=f"Berichten in het congres kanaal sinds 7 februari:\n{results}",
             color=self.color,
         )
         await context.send(embed=embed)
@@ -308,7 +310,7 @@ class Owner(commands.Cog, name="owner"):
         # this is a forum channel so we can't use history
         for thread in self.bot.get_channel(debate_channel_id).threads:
             async for message in thread.history(limit=None, after=start_time):
-                if message.author.bot:
+                if message.author.bot or congress_role not in message.author.roles:
                     continue
                 message_count[message.author.id] += 1
 
@@ -317,7 +319,7 @@ class Owner(commands.Cog, name="owner"):
             limit=None
         ):
             async for message in thread.history(limit=None, after=start_time):
-                if message.author.bot:
+                if message.author.bot or congress_role not in message.author.roles:
                     continue
                 message_count[message.author.id] += 1
 
@@ -327,7 +329,7 @@ class Owner(commands.Cog, name="owner"):
         )
         embed = discord.Embed(
             title="Debatleden Analyse",
-            description=f"Berichten in de debat channel over de laatste 30 dagen:\n{results}",
+            description=f"Berichten in het debat kanaal sinds 7 februari:\n{results}",
             color=self.color,
         )
         await context.send(embed=embed)
@@ -341,19 +343,24 @@ class Owner(commands.Cog, name="owner"):
         async for message in self.bot.get_channel(stembureau_channel_id).history(
             limit=None, after=start_time
         ):
-            # count reactions as votes
+            # count reactions as votes, only counting each member once per message
+            users_counted = []
             for reaction in message.reactions:
                 async for user in reaction.users():
-                    if user.bot:
+                    if user.bot or congress_role not in user.roles:
                         continue
+                    if user.id in users_counted:
+                        continue
+                    users_counted.append(user.id)
                     vote_count[user.id] += 1
+
         # Send the results
         results = "\n".join(
             [f"<@{user_id}>: {count}" for user_id, count in vote_count.most_common()]
         )
         embed = discord.Embed(
             title="Stembureau Analyse",
-            description=f"Votes in de stembureau channel over de laatste 30 dagen:\n{results}",
+            description=f"Votes in de stembureau channel sinds 7 februari:\n{results}",
             color=self.color,
         )
         await context.send(embed=embed)

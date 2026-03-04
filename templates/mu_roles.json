@@ -10,15 +10,15 @@
       "secondary_role_id": 1456723236732534974
     },
     {
-      "label": "Korps Mariniers",
-      "role_id": 1469778031269777510,
+      "label": "Korps Commando's",
+      "role_id": 1469778101885206659,
       "style": "primary",
       "row": 0,
       "secondary_role_id": 1456723236732534974
     },
     {
-      "label": "Korps Commando's",
-      "role_id": 1469778101885206659,
+      "label": "Korps Mariniers",
+      "role_id": 1469778031269777510,
       "style": "primary",
       "row": 0,
       "secondary_role_id": 1456723236732534974
@@ -45,36 +45,36 @@
       "secondary_role_id": 1456723236732534974
     },
     {
-      "label": "The Flying Dutchman",
-      "role_id": 1469778151541575784,
+      "label": "Baronie Wachteenheid",
+      "role_id": 1477669855736893450,
       "style": "primary",
       "row": 1,
       "secondary_role_id": 1456723236732534974
     },
     {
-      "label": "Regiment Huzaren",
-      "role_id": 1469778258550718617,
+      "label": "De Krooncompagnie",
+      "role_id": 1478040331407724614,
       "style": "primary",
       "row": 1,
       "secondary_role_id": 1456723236732534974
     },
     {
-      "label": "Regiment van Oranje",
-      "role_id": 1469778491305230459,
+      "label": "De Mobiele Eenheid",
+      "role_id": 1477673635362898053,
       "style": "primary",
       "row": 1,
       "secondary_role_id": 1456723236732534974
     },
     {
-      "label": "Van Speijk Eskader",
-      "role_id": 1471870072778920069,
+      "label": "De Waardgelders",
+      "role_id": 1478061900230295736,
       "style": "primary",
       "row": 1,
       "secondary_role_id": 1456723236732534974
     },
     {
-      "label": "Oranje Huurlingen",
-      "role_id": 1474045597668348055,
+      "label": "Het Noordzee-verbond",
+      "role_id": 1477670240719605892,
       "style": "primary",
       "row": 2,
       "secondary_role_id": 1456723236732534974
@@ -87,15 +87,15 @@
       "secondary_role_id": 1456723236732534974
     },
     {
-      "label": "Baronie Wachteenheid",
-      "role_id": 1477669855736893450,
+      "label": "Oranje Huurlingen",
+      "role_id": 1474045597668348055,
       "style": "primary",
       "row": 2,
       "secondary_role_id": 1456723236732534974
     },
     {
-      "label": "Het Noordzee-verbond",
-      "role_id": 1477670240719605892,
+      "label": "OTCo",
+      "role_id": 1478119044463726632,
       "style": "primary",
       "row": 2,
       "secondary_role_id": 1456723236732534974
@@ -108,22 +108,36 @@
       "secondary_role_id": 1456723236732534974
     },
     {
-      "label": "De Mobiele Eenheid",
-      "role_id": 1477673635362898053,
+      "label": "Reg. Genietroepen",
+      "role_id": 1478040332732993689,
       "style": "primary",
       "row": 3,
       "secondary_role_id": 1456723236732534974
     },
     {
-      "label": "WNM",
-      "role_id": 1478014565227823326,
+      "label": "Regiment Huzaren",
+      "role_id": 1469778258550718617,
       "style": "primary",
       "row": 3,
       "secondary_role_id": 1456723236732534974
     },
     {
-      "label": "Luchtmobiele Brigade",
-      "role_id": 1469778313261219993,
+      "label": "Regiment van Oranje",
+      "role_id": 1469778491305230459,
+      "style": "primary",
+      "row": 3,
+      "secondary_role_id": 1456723236732534974
+    },
+    {
+      "label": "The Flying Dutchman",
+      "role_id": 1469778151541575784,
+      "style": "primary",
+      "row": 3,
+      "secondary_role_id": 1456723236732534974
+    },
+    {
+      "label": "Van Speijk Eskader",
+      "role_id": 1471870072778920069,
       "style": "primary",
       "row": 3,
       "secondary_role_id": 1456723236732534974
@@ -143,5 +157,5 @@
       "secondary_role_id": 1456723236732534974
     }
   ],
-  "button_message_id": 1478017620598067250
+  "button_message_id": 1478119240459485367
 }

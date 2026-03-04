@@ -546,7 +546,7 @@ class Welcome(commands.Cog, name="welcome"):
 
         # Verify this is a ticket channel
         if not channel.name.startswith(
-            ("citizen-", "foreigner-", "embassy-", "belgian-")
+            ("citizen-", "foreigner-", "belgian-")
         ):
             await interaction.response.send_message(
                 "This command can only be used in verification channels.",
@@ -921,6 +921,12 @@ class Welcome(commands.Cog, name="welcome"):
             minister_role = interaction.guild.get_role(
                 self.config["roles"]["government"]
             )
+            president_role = interaction.guild.get_role(
+                self.config["roles"]["president"]
+            )
+            vice_president_role = interaction.guild.get_role(
+                self.config["roles"]["vice_president"]
+            )
 
             # Check if the user has permission to moderate
             mod_roles = [
@@ -1036,6 +1042,12 @@ class Welcome(commands.Cog, name="welcome"):
                     overwrites = {
                         guild.default_role: discord.PermissionOverwrite(view_channel=False),
                         minister_role: discord.PermissionOverwrite(
+                            view_channel=True, send_messages=True, read_message_history=True
+                        ),
+                        president_role: discord.PermissionOverwrite(
+                            view_channel=True, send_messages=True, read_message_history=True
+                        ),
+                        vice_president_role: discord.PermissionOverwrite(
                             view_channel=True, send_messages=True, read_message_history=True
                         ),
                         guild.me: discord.PermissionOverwrite(

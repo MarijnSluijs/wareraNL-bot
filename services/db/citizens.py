@@ -450,6 +450,15 @@ class CitizensMixin:
                     "can_reset": can_reset,
                 })
         return mu_name, players
+    
+    async def get_citizen_name_by_id(self, user_id: str) -> Optional[str]:
+        """Return the citizen name for a given user_id, or None if not found."""
+        sql = "SELECT citizen_name FROM citizen_levels WHERE user_id = ?"
+        async with self._conn.execute(sql, (user_id,)) as cur:
+            row = await cur.fetchone()
+            if row and row[0]:
+                return row[0]
+        return None
 
     async def get_distinct_mu_names(
         self, country_id: Optional[str] = None
