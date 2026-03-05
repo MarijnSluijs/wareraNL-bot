@@ -50,7 +50,18 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
         try:
             await self.refresh_mu_info()
         except Exception:
-            logger.exception("mu_refresh: unexpected error")
+            logger.exception("mu_refresh: refresh_mu_info failed")
+
+        # Also refresh DB MU memberships so /paraatheid alles_mus has data
+        citizen_cache = getattr(self.bot, "_ext_citizen_cache", None)
+        nl_country_id = self.config.get("nl_country_id")
+        if citizen_cache and nl_country_id:
+            path = mus_path(getattr(self.bot, "testing", False))
+            try:
+                count = await citizen_cache.refresh_mu_memberships(nl_country_id, path)
+                logger.info("mu_refresh: %d MU assignments refreshed", count)
+            except Exception:
+                logger.exception("mu_refresh: refresh_mu_memberships failed")
 
     @mu_refresh.before_loop
     async def before_mu_refresh(self) -> None:
