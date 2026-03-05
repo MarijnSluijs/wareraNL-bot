@@ -155,6 +155,14 @@ class VerificationQuestionnaireModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         is_english = self.request_type in {"belgian", "foreigner", "embassy"}
+
+        raw_profile_value = str(self.profile_link).strip().strip("<>")
+        profile_value_for_admins = raw_profile_value
+        if raw_profile_value and "://" not in raw_profile_value:
+            profile_value_for_admins = (
+                f"https://app.warera.io/user/{raw_profile_value}"
+            )
+
         questionnaire_answers = {
             (
                 "WarEra username" if is_english else "WarEra gebruikersnaam"
@@ -163,7 +171,7 @@ class VerificationQuestionnaireModal(discord.ui.Modal):
                 "URL to your in-game profile or your user ID"
                 if is_english
                 else "Profiel-URL of gebruikers-ID"
-            ): str(self.profile_link).strip(),
+            ): profile_value_for_admins,
         }
         if self.embassy_country:
             questionnaire_answers["Country"] = str(self.embassy_country).strip()
@@ -403,29 +411,18 @@ async def create_verification_channel(
         await channel.send(embed=questionnaire_embed)
 
     if request_type == "citizen":
-        instructions_embed = discord.Embed(
-            title="Verificatie Uitvoeren",
-            description=f"Beste {user.mention},\n\nBedankt voor het aanvragen van de Nederlandse nationaliteit. Voor verificatie vragen we je om een screenshot van je WarEra profiel te sturen.\n\nZodra een moderator je aanvraag heeft beoordeeld, ontvang je een bericht in dit kanaal.",
-            color=embed_color,
+        instruction_text = (
+            "Hallo, stuur alsjeblieft een screenshot van je WarEra profiel om je verificatieverzoek af te ronden."
         )
-    elif request_type == "belgian":
-        instructions_embed = discord.Embed(
-            title="Verification Instructions",
-            description=f"Hello {user.mention},\n\nThank you for requesting Belgian citizenship. For verification, please send a screenshot of your WarEra profile.\n\nOnce a moderator has reviewed your request, you will receive a message in this channel.",
-            color=embed_color,
+    else:
+        instruction_text = (
+            "Hello, please send a screenshot of your WarEra profile to complete your verification request."
         )
-    elif request_type == "foreigner":
-        instructions_embed = discord.Embed(
-            title="Verification",
-            description=f"Hello {user.mention},\n\nThank you for requesting foreigner status. Please send a screenshot of your WarEra profile to verify your identity.\n\nA moderator will review your request and you will be notified in this channel.",
-            color=embed_color,
-        )
-    else:  # embassy
-        instructions_embed = discord.Embed(
-            title="Embassy Request Instructions",
-            description=f"Hello {user.mention},\n\nThank you for submitting an embassy request. Please send a screenshot of your WarEra profile for verification.\n\nA moderator will review your request as soon as possible.",
-            color=embed_color,
-        )
+
+    instructions_embed = discord.Embed(
+        description=instruction_text,
+        color=embed_color,
+    )
     await channel.send(content=user.mention, embed=instructions_embed)
 
     # Confirm to the user (only they can see this response)
