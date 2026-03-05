@@ -250,13 +250,13 @@ class BonusCog(CommandCogBase, name="bonus"):
     async def verhuiskosten(self, ctx: Context, bonuses: str = ""):
         """Break-even table: hours of Automated Engine production to recover the 5-concrete move cost."""
         parts = bonuses.split()
-        bonus: int = 0
-        new_bonus: int | None = None
+        bonus: float = 0.0
+        new_bonus: float | None = None
         try:
             if len(parts) >= 1:
-                bonus = int(parts[0])
+                bonus = float(parts[0])
             if len(parts) >= 2:
-                new_bonus = int(parts[1])
+                new_bonus = float(parts[1])
         except ValueError:
             await ctx.send(
                 "Ongeldige invoer. Gebruik `/verhuiskosten`, `/verhuiskosten 30`, of `/verhuiskosten 30 55`."
@@ -320,7 +320,7 @@ class BonusCog(CommandCogBase, name="bonus"):
 
         if new_bonus is not None:
             bonus_gain = new_bonus - bonus
-            assumption = f"Verhuizing van **{bonus}%** → **{new_bonus}%** (winst: **+{bonus_gain}%**)"
+            assumption = f"Verhuizing van **{bonus:g}%** → **{new_bonus:g}%** (winst: **+{bonus_gain:g}%**)"
             if bonus_gain <= 0:
                 embed = discord.Embed(
                     title="Break-evenpunt — bedrijfsverhuizing",
@@ -386,8 +386,8 @@ class BonusCog(CommandCogBase, name="bonus"):
 
         if bonus > 0:
             assumption = (
-                f"Je huidige productiebonus is **{bonus}%**.\n"
-                f"Voeg een tweede getal toe voor een specifiek doel, bijv. `/verhuiskosten {bonus} 55`."
+                f"Je huidige productiebonus is **{bonus:g}%**.\n"
+                f"Voeg een tweede getal toe voor een specifiek doel, bijv. `/verhuiskosten {bonus:g} 55`."
             )
         else:
             assumption = (

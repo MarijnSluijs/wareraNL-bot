@@ -44,6 +44,17 @@ CREATE TABLE IF NOT EXISTS specialization_top (
     updated_at          TEXT
 );
 
+-- country_item_ethic: ethics bonus per (item, country) pair seen in recommended lists
+--   populated by the production poller from all recommended-region entries
+CREATE TABLE IF NOT EXISTS country_item_ethic (
+    item            TEXT NOT NULL,
+    country_id      TEXT NOT NULL,
+    strategic_bonus REAL,
+    ethic_bonus     REAL,
+    updated_at      TEXT,
+    PRIMARY KEY (item, country_id)
+);
+
 -- deposit_top: current best deposit bonus region per specialization item
 CREATE TABLE IF NOT EXISTS deposit_top (
     item                TEXT PRIMARY KEY,

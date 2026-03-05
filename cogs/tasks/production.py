@@ -225,6 +225,23 @@ class ProductionTasks(TaskCogBase, name="production_tasks"):
                                 "Failed to clear stale permanent leader for %s", item
                             )
 
+                # ---- Persist ethics for all countries in this item's list ----
+                if self._db:
+                    for entry in region_list:
+                        rid = entry.get("regionId") or entry.get("region_id") or ""
+                        cid = region_to_cid.get(rid)
+                        ethic = float(entry.get("ethicSpecializationBonus") or 0)
+                        sr = float(entry.get("strategicBonus") or 0)
+                        if cid and ethic > 0:
+                            try:
+                                await self._db.save_country_item_ethic(
+                                    item, cid, sr, ethic, now
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "Failed to save country_item_ethic for %s/%s", item, cid
+                                )
+
                 # ---- Short-term top (deposit) ----
                 deposit_regions = [
                     r for r in region_list if (r.get("depositBonus") or 0) > 0

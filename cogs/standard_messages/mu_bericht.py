@@ -375,11 +375,12 @@ class MUs(GenerateEmbeds, name="mus"):
         current_lower = current.lower()
         return [
             app_commands.Choice(
-                name=f"{entry['type']} • {entry['id']}",
+                name=f"{entry.get('name') or entry['id']}  [{entry['type']}]",
                 value=entry["id"],
             )
             for entry in entries
             if current_lower in entry["id"].lower()
+            or current_lower in (entry.get("name") or "").lower()
         ][:25]
 
     @app_commands.command(

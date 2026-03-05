@@ -550,10 +550,10 @@ class Geluk(commands.Cog, name="geluk"):
                         resolved_user_id,
                     )
 
-        # -- Gelukranking section --
+        # -- Gelukranking section (only for NL citizens) --
         try:
             nl_country_id = self.config.get("nl_country_id")
-            if nl_country_id:
+            if nl_country_id and _player_country == nl_country_id:
                 db = await self._get_db()
                 ranking = await db.get_luck_ranking(nl_country_id)
                 if ranking:
@@ -644,22 +644,23 @@ class Geluk(commands.Cog, name="geluk"):
 
     @app_commands.command(
         name="caserang",
-        description="Toon de NL top 5 op cases + de rang van een speler",
+        description="Toon de NL top op cases; optioneel met rang van een speler",
     )
     @app_commands.describe(
-        speler="De gebruikersnaam van de speler",
+        speler="De gebruikersnaam van de speler (optioneel)",
         gebruiker_id="Optioneel: WarEra user ID van de speler",
+        top_n="Hoeveel spelers in de top tonen (standaard: 10)",
     )
     async def caserang(
         self,
         interaction: discord.Interaction,
         speler: Optional[str] = None,
         gebruiker_id: Optional[str] = None,
+        top_n: Optional[int] = None,
     ) -> None:
         await interaction.response.defer(thinking=True)
 
-        if not speler and not gebruiker_id:
-            speler = interaction.user.display_name
+        top = max(1, min(top_n or 10, 100))
 
         nl_country_id = self.config.get("nl_country_id")
         if not nl_country_id:
@@ -689,7 +690,7 @@ class Geluk(commands.Cog, name="geluk"):
         for idx, row in enumerate(rows, start=1):
             row["rank"] = idx
 
-        # Same matching behavior as /geluk: exact first, closest fallback
+        # Resolve player if requested
         target_row: Optional[dict] = None
         if gebruiker_id:
             target_row = next((r for r in rows if r["user_id"] == gebruiker_id), None)
@@ -708,7 +709,7 @@ class Geluk(commands.Cog, name="geluk"):
                         best_ratio = ratio
                         target_row = r
 
-        if target_row is None:
+        if (speler or gebruiker_id) and target_row is None:
             lookup_label = gebruiker_id or speler or "?"
             await interaction.followup.send(
                 f"❌ Speler **{discord.utils.escape_markdown(lookup_label)}** niet gevonden in de cache.",
@@ -720,24 +721,45 @@ class Geluk(commands.Cog, name="geluk"):
             name = (r["username"] or "?")[:16]
             return f"#{r['rank']:<4} {name:<16} {r['cases']:>8,}"
 
-        top5 = rows[:5]
-        lines = [f"{'rang':<5} {'naam':<16} {'cases':>8}", "─" * 34]
-        for r in top5:
-            lines.append(_fmt_row(r))
+        top_rows = rows[:top]
+        header = f"{'rang':<5} {'naam':<16} {'cases':>8}"
+        sep = "─" * 34
+        # Add player below top if they fall outside it
+        extra: list[dict] = []
+        if target_row and target_row["rank"] > top:
+            extra = [None, target_row]  # None → ellipsis row
 
-        if target_row and target_row["rank"] > 5:
-            lines.append("    • • •")
-            lines.append(_fmt_row(target_row))
+        # Split into chunks of 25 so each field stays under Discord's 1024-char limit
+        CHUNK = 25
+        all_data_rows = top_rows + extra  # type: ignore[operator]
+        chunks: list[list] = [all_data_rows[i:i + CHUNK] for i in range(0, len(all_data_rows), CHUNK)]
 
-        block = "```\n" + "\n".join(lines) + "\n```"
+        if target_row:
+            resolved_name = target_row["username"]
+            description = f"Speler: **{discord.utils.escape_markdown(resolved_name)}**"
+            field_title = f"Top {top} + gevraagde speler"
+        else:
+            description = None
+            field_title = f"Top {top}"
 
-        resolved_name = target_row["username"]
         embed = discord.Embed(
             title="🎟️ NL case-rang",
-            description=f"Speler: **{discord.utils.escape_markdown(resolved_name)}**",
+            description=description,
             color=discord.Color.gold(),
         )
-        embed.add_field(name="Top 5 + gevraagde speler", value=block, inline=False)
+        for chunk_idx, chunk in enumerate(chunks):
+            lines: list[str] = []
+            if chunk_idx == 0:
+                lines = [header, sep]
+            for r in chunk:
+                if r is None:
+                    lines.append("    • • •")
+                else:
+                    lines.append(_fmt_row(r))
+            block = "```\n" + "\n".join(lines) + "\n```"
+            name_label = field_title if chunk_idx == 0 else f"Top {top} (vervolg)"
+            embed.add_field(name=name_label, value=block, inline=False)
+
         embed.set_footer(text=f"Cache-bron: citizen_luck • NL spelers: {len(rows)}")
         await interaction.followup.send(embed=embed)
 
