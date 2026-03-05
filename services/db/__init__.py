@@ -28,6 +28,7 @@ from .production import ProductionMixin
 from .citizens import CitizensMixin
 from .events import EventsMixin
 from .giveaways_db import GiveawaysMixin
+from .identities import IdentityLinksMixin
 from .luck import LuckMixin
 from .resistance import ResistanceMixin
 
@@ -36,6 +37,7 @@ class Database(
     StateMixin,
     ProductionMixin,
     CitizensMixin,
+    IdentityLinksMixin,
     EventsMixin,
     GiveawaysMixin,
     LuckMixin,

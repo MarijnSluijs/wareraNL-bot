@@ -5,14 +5,15 @@ Commands and listeners:
   !postwelcome              — (admin) post the welcome message with verification buttons
   on_member_join            — automatically prompts new members to verify
   /nickname (user, nickname) — change a member's server nickname
-  /approve (reason)         — approve a pending verification request
+    /approve (in_game_id, reason) — approve a pending verification request
   /deny (reason)            — deny a pending verification request
-  /embassyapprove (country) — approve an embassy membership request
+    /embassyapprove (country, in_game_id) — approve an embassy membership request
 """
 
 import asyncio
 import datetime
 import logging
+import re
 
 import discord
 from discord import app_commands
@@ -43,7 +44,9 @@ class WelcomeView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         """Handle citizen verification request."""
-        await create_verification_channel(interaction, "citizen")
+        await interaction.response.send_modal(
+            VerificationQuestionnaireModal("citizen")
+        )
 
     @discord.ui.button(
         label="Belgian",
@@ -55,7 +58,9 @@ class WelcomeView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         """Handle Belgian verification request."""
-        await create_verification_channel(interaction, "belgian")
+        await interaction.response.send_modal(
+            VerificationQuestionnaireModal("belgian")
+        )
 
     @discord.ui.button(
         label="Foreigner",
@@ -67,7 +72,9 @@ class WelcomeView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         """Handle foreigner verification request."""
-        await create_verification_channel(interaction, "foreigner")
+        await interaction.response.send_modal(
+            VerificationQuestionnaireModal("foreigner")
+        )
 
     @discord.ui.button(
         label="Embassy Request",
@@ -79,11 +86,105 @@ class WelcomeView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         """Handle embassy request."""
-        await create_verification_channel(interaction, "embassy")
+        await interaction.response.send_modal(
+            VerificationQuestionnaireModal("embassy")
+        )
+
+
+class VerificationQuestionnaireModal(discord.ui.Modal):
+    """Questionnaire shown to users before opening a verification ticket."""
+
+    def __init__(self, request_type: str):
+        self.request_type = request_type
+        is_english = request_type in {"belgian", "foreigner", "embassy"}
+        super().__init__(
+            title="Verification Questionnaire" if is_english else "Verificatie Vragenlijst"
+        )
+
+        self.warera_name = discord.ui.TextInput(
+            label="WarEra username" if is_english else "WarEra gebruikersnaam",
+            placeholder=(
+                "Enter your in-game name"
+                if is_english
+                else "Vul je in-game naam in"
+            ),
+            required=True,
+            max_length=64,
+        )
+        self.profile_link = discord.ui.TextInput(
+            label=(
+                "URL to your in-game profile or your user ID"
+                if is_english
+                else "Profiel-URL of gebruikers-ID"
+            ),
+            style=discord.TextStyle.paragraph,
+            placeholder=(
+                "Paste your profile URL or user ID"
+                if is_english
+                else "Plak je profiellink of gebruikers-ID"
+            ),
+            required=True,
+            max_length=500,
+        )
+        self.extra_info = discord.ui.TextInput(
+            label="Additional info" if is_english else "Aanvullende info",
+            style=discord.TextStyle.paragraph,
+            placeholder=(
+                "Optional: extra context for the moderators"
+                if is_english
+                else "Optioneel: extra context voor de moderators"
+            ),
+            required=False,
+            max_length=500,
+        )
+
+        self.add_item(self.warera_name)
+        self.add_item(self.profile_link)
+
+        self.embassy_country = None
+        if self.request_type == "embassy":
+            self.embassy_country = discord.ui.TextInput(
+                label="Country",
+                placeholder="Which country is this embassy request for?",
+                required=True,
+                max_length=64,
+            )
+            self.add_item(self.embassy_country)
+
+        self.add_item(self.extra_info)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        is_english = self.request_type in {"belgian", "foreigner", "embassy"}
+        questionnaire_answers = {
+            (
+                "WarEra username" if is_english else "WarEra gebruikersnaam"
+            ): str(self.warera_name).strip(),
+            (
+                "URL to your in-game profile or your user ID"
+                if is_english
+                else "Profiel-URL of gebruikers-ID"
+            ): str(self.profile_link).strip(),
+        }
+        if self.embassy_country:
+            questionnaire_answers["Country"] = str(self.embassy_country).strip()
+
+        extra = str(self.extra_info).strip()
+        if extra:
+            questionnaire_answers[
+                "Additional info" if is_english else "Aanvullende info"
+            ] = extra
+
+        await create_verification_channel(
+            interaction,
+            self.request_type,
+            questionnaire_answers=questionnaire_answers,
+        )
 
 
 async def create_verification_channel(
-    interaction: discord.Interaction, request_type: str
+    interaction: discord.Interaction,
+    request_type: str,
+    questionnaire_answers: dict[str, str] | None = None,
 ) -> None:
     """
     Create a private verification ticket channel for the user.
@@ -287,6 +388,20 @@ async def create_verification_channel(
     mention_text = " ".join(role_mentions) if role_mentions else ""
     await channel.send(content=mention_text, embed=embed)
 
+    if questionnaire_answers:
+        questionnaire_embed = discord.Embed(
+            title="🧾 Ingevulde Vragenlijst",
+            color=embed_color,
+            timestamp=datetime.datetime.now(datetime.UTC),
+        )
+        for label, value in questionnaire_answers.items():
+            questionnaire_embed.add_field(
+                name=label,
+                value=value[:1024] if value else "-",
+                inline=False,
+            )
+        await channel.send(embed=questionnaire_embed)
+
     if request_type == "citizen":
         instructions_embed = discord.Embed(
             title="Verificatie Uitvoeren",
@@ -340,6 +455,113 @@ class Welcome(commands.Cog, name="welcome"):
         self.config = getattr(self.bot, "config", {}) or {}
         # Per-(guild, country) locks to prevent duplicate embassy channel creation
         self._embassy_locks: dict[str, asyncio.Lock] = {}
+        self._approval_db = None
+
+    async def _get_approval_db(self):
+        """Return shared external DB, or lazily create one as fallback."""
+        shared = getattr(self.bot, "_ext_db", None)
+        if shared is not None:
+            return shared
+        if self._approval_db is None:
+            from services.db import Database
+
+            db_path = self.config.get("external_db_path", "database/external.db")
+            self._approval_db = Database(db_path)
+            await self._approval_db.setup()
+        return self._approval_db
+
+    async def _store_identity_link(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        in_game_id: str,
+        request_type: str,
+        nationality: str,
+        embassy_country: str | None = None,
+    ) -> None:
+        """Persist Discord ↔ in-game identity mapping for approved users."""
+        db = await self._get_approval_db()
+        approved_at = datetime.datetime.now(datetime.UTC).isoformat()
+        await db.upsert_identity_link(
+            discord_user_id=str(member.id),
+            guild_id=str(interaction.guild.id),
+            in_game_user_id=in_game_id,
+            nationality=nationality,
+            request_type=request_type,
+            embassy_country=embassy_country,
+            approved_by_discord_id=str(interaction.user.id),
+            approved_at=approved_at,
+        )
+
+    async def _validate_identity_link_target(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        in_game_id: str,
+    ) -> None:
+        """Ensure new mapping does not conflict with existing records."""
+        db = await self._get_approval_db()
+        guild_id = str(interaction.guild.id)
+        discord_id = str(member.id)
+
+        existing_for_discord = await db.get_identity_link_by_discord(
+            discord_user_id=discord_id,
+            guild_id=guild_id,
+        )
+        if (
+            existing_for_discord
+            and existing_for_discord.get("in_game_user_id") != in_game_id
+        ):
+            raise ValueError(
+                "Deze Discord gebruiker is al gekoppeld aan een ander in-game ID. "
+                "Werk de mapping eerst handmatig bij om fouten te voorkomen."
+            )
+
+        existing_for_ingame = await db.get_identity_links_by_ingame(
+            in_game_user_id=in_game_id,
+            guild_id=guild_id,
+        )
+        conflicting_discord = next(
+            (
+                link.get("discord_user_id")
+                for link in existing_for_ingame
+                if link.get("discord_user_id") != discord_id
+            ),
+            None,
+        )
+        if conflicting_discord:
+            raise ValueError(
+                "Dit in-game ID is al gekoppeld aan een andere Discord gebruiker: "
+                f"<@{conflicting_discord}> (`{conflicting_discord}`)."
+            )
+
+    @staticmethod
+    def _normalize_ingame_id(in_game_id: str) -> str:
+        """Normalize and validate in-game ID or WarEra profile URL input."""
+        raw_value = str(in_game_id).strip()
+        if not raw_value:
+            raise ValueError("In-game ID cannot be empty.")
+
+        # Accept direct profile links like: https://app.warera.io/user/{id}
+        match = re.match(
+            r"^https?://app\.warera\.io/user/([^/?#]+)(?:[/?#].*)?$",
+            raw_value,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            normalized = match.group(1).strip()
+        else:
+            normalized = raw_value
+            if "://" in raw_value:
+                raise ValueError(
+                    "Invalid WarEra profile URL. Use `https://app.warera.io/user/{id}` or provide the raw in-game ID."
+                )
+
+        if not normalized:
+            raise ValueError("Could not extract an in-game ID from the provided input.")
+        if len(normalized) > 64:
+            raise ValueError("In-game ID is too long (max 64 characters).")
+        return normalized
 
     # def cog_load(self) -> None:
     #     """Start the scheduled tasks when the cog is loaded."""
@@ -534,15 +756,24 @@ class Welcome(commands.Cog, name="welcome"):
         name="approve", description="Keur een verificatieverzoek goed"
     )
     @app_commands.describe(
+        in_game_id="In-game ID of profiel-URL (https://app.warera.io/user/{id})",
         reason="Interne reden voor goedkeuring (niet zichtbaar voor de gebruiker)"
     )
     async def approve(
-        self, interaction: discord.Interaction, reason: str = "Geen reden opgegeven"
+        self,
+        interaction: discord.Interaction,
+        in_game_id: str,
+        reason: str = "Geen reden opgegeven",
     ):
         """
         Approve a verification request in the current ticket channel.
         """
         channel = interaction.channel
+        try:
+            in_game_id = self._normalize_ingame_id(in_game_id)
+        except ValueError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+            return
 
         # Verify this is a ticket channel
         if not channel.name.startswith(
@@ -594,6 +825,25 @@ class Welcome(commands.Cog, name="welcome"):
         if not member:
             await interaction.response.send_message(
                 "The user is no longer in the server.", ephemeral=True
+            )
+            return
+
+        try:
+            await self._validate_identity_link_target(
+                interaction=interaction,
+                member=member,
+                in_game_id=in_game_id,
+            )
+        except ValueError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+            return
+        except Exception as e:
+            self.bot.logger.error(
+                "Failed identity validation in /approve: %s", e, exc_info=True
+            )
+            await interaction.response.send_message(
+                "Kon identity mapping niet valideren door een interne fout.",
+                ephemeral=True,
             )
             return
 
@@ -651,6 +901,24 @@ class Welcome(commands.Cog, name="welcome"):
                     f"Failed to remove role {old_role.name} from {member.name}: {e}"
                 )
 
+        db_saved = True
+        try:
+            nationality = {
+                "citizen": "nederlander",
+                "belgian": "belgian",
+                "foreigner": "foreigner",
+            }.get(request_type, request_type)
+            await self._store_identity_link(
+                interaction=interaction,
+                member=member,
+                in_game_id=in_game_id,
+                request_type=request_type,
+                nationality=nationality,
+            )
+        except Exception as e:
+            db_saved = False
+            self.bot.logger.error("Failed to persist identity link in /approve: %s", e)
+
         # Notify the user of approval
         if not request_type == "citizen":
             user_embed = discord.Embed(
@@ -703,7 +971,12 @@ class Welcome(commands.Cog, name="welcome"):
         # Confirm to the moderator
         mod_embed = discord.Embed(
             title="📝 Goedkeuring Geregistreerd",
-            description=f"**Gebruiker:** {member.mention}\n**Type:** {request_type}\n**Reden:** {reason}",
+            description=(
+                f"**Gebruiker:** {member.mention}\n"
+                f"**Type:** {request_type}\n"
+                f"**In-game ID:** `{in_game_id}`\n"
+                f"**Reden:** {reason}"
+            ),
             color=discord.Color.green(),
         )
         mod_embed.set_footer(text=f"Goedgekeurd door {interaction.user.name}")
@@ -713,6 +986,12 @@ class Welcome(commands.Cog, name="welcome"):
             mod_embed.add_field(
                 name="⚠️ Waarschuwing",
                 value="Kon niet in het logkanaal posten",
+                inline=False,
+            )
+        if not db_saved:
+            mod_embed.add_field(
+                name="⚠️ Database",
+                value="Rol is toegekend, maar identity mapping kon niet worden opgeslagen.",
                 inline=False,
             )
 
@@ -891,8 +1170,16 @@ class Welcome(commands.Cog, name="welcome"):
     @app_commands.command(
         name="embassyapprove", description="Keur een ambassadeverzoek goed"
     )
-    @app_commands.describe(country="Land van het ambassadeverzoek")
-    async def embassy_approve(self, interaction: discord.Interaction, country: str):
+    @app_commands.describe(
+        country="Land van het ambassadeverzoek",
+        in_game_id="In-game ID of profiel-URL (https://app.warera.io/user/{id})",
+    )
+    async def embassy_approve(
+        self,
+        interaction: discord.Interaction,
+        country: str,
+        in_game_id: str,
+    ):
         """
         Approve an embassy request and assign the corresponding role.
 
@@ -903,6 +1190,11 @@ class Welcome(commands.Cog, name="welcome"):
         try:
             # avoid "The application did not respond" (Discord requires a response within 3s)
             await interaction.response.defer(ephemeral=True)
+            try:
+                in_game_id = self._normalize_ingame_id(in_game_id)
+            except ValueError as e:
+                await interaction.followup.send(str(e), ephemeral=True)
+                return
             # quick trace so you can see the command started
             self.bot.logger.info(
                 f"embassy_approve started by {interaction.user} for country={country}"
@@ -974,6 +1266,16 @@ class Welcome(commands.Cog, name="welcome"):
                 await interaction.response.send_message(
                     "De gebruiker is niet meer op de server.", ephemeral=True
                 )
+                return
+
+            try:
+                await self._validate_identity_link_target(
+                    interaction=interaction,
+                    member=member,
+                    in_game_id=in_game_id,
+                )
+            except ValueError as e:
+                await reply(str(e), ephemeral=True)
                 return
 
             # Attempt to assign the embassy role based on country
@@ -1101,6 +1403,23 @@ class Welcome(commands.Cog, name="welcome"):
             self.bot.logger.debug(
                 f"Successfully approved embassy request for {member.name} and assigned role {embassy_role.name}"
             )
+
+            db_saved = True
+            try:
+                await self._store_identity_link(
+                    interaction=interaction,
+                    member=member,
+                    in_game_id=in_game_id,
+                    request_type="embassy",
+                    nationality=country.strip().lower(),
+                    embassy_country=country.strip(),
+                )
+            except Exception as e:
+                db_saved = False
+                self.bot.logger.error(
+                    "Failed to persist identity link in /embassyapprove: %s", e
+                )
+
             confirmation_embed = discord.Embed(
                 title=f"Welcome to {country.title()} Embassy! 🇳🇱",
             )
@@ -1110,10 +1429,15 @@ class Welcome(commands.Cog, name="welcome"):
                 embed=confirmation_embed,
             )
 
-            await reply(
+            response_text = (
                 f"Successfully approved embassy request for {member.mention} and assigned role {embassy_role.mention}. "
                 f"Access to the embassy channel {embassy_channel.mention} has been granted."
             )
+            if not db_saved:
+                response_text += (
+                    "\n⚠️ Identity mapping could not be saved to the database."
+                )
+            await reply(response_text)
 
             # Log to the government log channel
             log_channel_id = self.bot.config.get("channels", {}).get("logs")

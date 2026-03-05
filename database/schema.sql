@@ -87,6 +87,21 @@ CREATE TABLE IF NOT EXISTS citizen_levels (
 );
 CREATE INDEX IF NOT EXISTS idx_citizen_levels_country ON citizen_levels(country_id);
 
+-- identity_links: mapping between Discord identities and in-game identities
+--   updated on verification approvals in welcome flow
+CREATE TABLE IF NOT EXISTS identity_links (
+    discord_user_id        TEXT PRIMARY KEY,
+    guild_id               TEXT NOT NULL,
+    in_game_user_id        TEXT NOT NULL,
+    nationality            TEXT NOT NULL,
+    request_type           TEXT NOT NULL,
+    embassy_country        TEXT,
+    approved_by_discord_id TEXT NOT NULL,
+    approved_at            TEXT NOT NULL,
+    updated_at             TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_identity_links_ingame ON identity_links(in_game_user_id);
+
 -- ── Events ────────────────────────────────────────────────────────────────────
 
 -- seen_articles: deduplication for posted articles
