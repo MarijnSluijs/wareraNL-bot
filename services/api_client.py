@@ -35,9 +35,14 @@ class APIClient:
 		# API key rotation
 		self._api_keys = list(api_keys) if api_keys else []
 		self._key_index = 0
+		self._key_rate_limited_until: Dict[int, float] = {}
 		if self._api_keys:
 			# ensure header contains the active API key
 			self._base_headers["x-api-key"] = self._api_keys[self._key_index]
+
+	def _set_active_key_index(self, key_index: int) -> None:
+		self._key_index = key_index
+		self._base_headers["x-api-key"] = self._api_keys[self._key_index]
 
 	async def start(self) -> None:
 		if self._session is None:
@@ -53,9 +58,41 @@ class APIClient:
 	def _rotate_key(self) -> None:
 		if not self._api_keys:
 			return
-		self._key_index = (self._key_index + 1) % len(self._api_keys)
-		self._base_headers["x-api-key"] = self._api_keys[self._key_index]
+		next_index = (self._key_index + 1) % len(self._api_keys)
+		self._set_active_key_index(next_index)
 		logger.info("Rotated API key to index %d", self._key_index)
+
+	def _mark_current_key_rate_limited(self, retry_after: Optional[float], fallback_wait: float) -> None:
+		if not self._api_keys:
+			return
+		wait_seconds = retry_after if retry_after is not None else fallback_wait
+		wait_seconds = max(wait_seconds, 0.0)
+		now = asyncio.get_running_loop().time()
+		limited_until = now + wait_seconds
+		current_until = self._key_rate_limited_until.get(self._key_index, 0.0)
+		if limited_until > current_until:
+			self._key_rate_limited_until[self._key_index] = limited_until
+
+	def _next_available_key_index(self) -> Optional[int]:
+		if not self._api_keys:
+			return None
+		now = asyncio.get_running_loop().time()
+		key_count = len(self._api_keys)
+		for offset in range(1, key_count + 1):
+			idx = (self._key_index + offset) % key_count
+			if self._key_rate_limited_until.get(idx, 0.0) <= now:
+				return idx
+		return None
+
+	def _seconds_until_next_key_available(self) -> float:
+		if not self._api_keys:
+			return 0.0
+		now = asyncio.get_running_loop().time()
+		soonest = min(
+			self._key_rate_limited_until.get(i, 0.0)
+			for i in range(len(self._api_keys))
+		)
+		return max(soonest - now, 0.0)
 
 	async def _request(self, method: str, path: str, **kwargs) -> Any:
 		if self._session is None:
@@ -102,11 +139,30 @@ class APIClient:
 								retry_after = None
 
 							logger.warning("Rate limited on %s (429). Retry-after=%s attempt %d/%d", url, retry_after, attempts, max_attempts)
-							# rotate key if available
+
 							if self._api_keys:
-								self._rotate_key()
-							# wait either server-specified time or backoff
-							await asyncio.sleep(retry_after if retry_after is not None else backoff)
+								self._mark_current_key_rate_limited(retry_after, backoff)
+								next_idx = self._next_available_key_index()
+								if next_idx is not None:
+									self._set_active_key_index(next_idx)
+									logger.info(
+										"Rate-limited key rotated immediately to index %d",
+										self._key_index,
+									)
+									if attempts < max_attempts:
+										continue
+
+								sleep_for = self._seconds_until_next_key_available()
+								if sleep_for <= 0:
+									sleep_for = retry_after if retry_after is not None else backoff
+								logger.warning(
+									"All API keys appear rate-limited; waiting %.2fs before retry",
+									sleep_for,
+								)
+								await asyncio.sleep(sleep_for)
+							else:
+								await asyncio.sleep(retry_after if retry_after is not None else backoff)
+
 							backoff = min(backoff * 2, 30.0)
 							if attempts < max_attempts:
 								continue
@@ -133,7 +189,7 @@ class APIClient:
 								error_data = await resp.json()
 								logger.error("Bad request to %s: %s", url, error_data)
 							except Exception:
-							 	logger.error("Bad request to %s with status 400 and non-JSON response", url)
+								logger.error("Bad request to %s with status 400 and non-JSON response", url)
 							continue
 
 						# otherwise raise the status error
@@ -222,7 +278,7 @@ class APIClient:
 						chunk_results.append(result)
 					except Exception:
 						chunk_results.append(None)
-					await asyncio.sleep(0.3)
+					# await asyncio.sleep(0.3)
 
 			all_results.extend(chunk_results)
 

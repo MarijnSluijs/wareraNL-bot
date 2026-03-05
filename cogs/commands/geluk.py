@@ -384,7 +384,7 @@ class Geluk(commands.Cog, name="geluk"):
             if not cursor or not items:
                 break
 
-            await asyncio.sleep(0.3)
+            # await asyncio.sleep(0.3)
 
         logger.info(
             "Geluk: fetched %d case transactions for %s across %d pages",

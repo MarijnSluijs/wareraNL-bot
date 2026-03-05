@@ -179,7 +179,7 @@ class LuckTasks(TaskCogBase, name="luck_tasks"):
                 counts[rarity] = counts.get(rarity, 0) + 1
             if not cursor or not items:
                 break
-            await asyncio.sleep(0.2)
+            # await asyncio.sleep(0.2)
         return counts, sum(counts.values())
 
     async def _daily_luck_refresh_sweep(
