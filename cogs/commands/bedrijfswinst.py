@@ -1123,4 +1123,5 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
 
 
 async def setup(bot) -> None:
+    """Add the bedrijfswinst command cog to the bot."""
     await bot.add_cog(BedrijfswinstCog(bot))

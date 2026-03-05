@@ -115,6 +115,9 @@ class General(commands.Cog, name="general"):
     )
     async def help(self, context: Context) -> None:
         """Show all commands that the bot has loaded."""
+        if context.interaction:
+            await context.interaction.response.defer(ephemeral=False)
+
         fields: list[tuple[str, str]] = []
 
         for cog_name in self.bot.cogs:
