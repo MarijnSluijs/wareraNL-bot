@@ -45,7 +45,7 @@ class CitizenCache:
             "/user.getUserLite",
             inputs,
             batch_size=batch_size,
-            chunk_sleep=0.5,
+            chunk_sleep=0.0,
         )
 
         recorded = 0

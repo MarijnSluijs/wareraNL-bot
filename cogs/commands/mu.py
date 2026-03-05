@@ -260,7 +260,7 @@ class MU(commands.Cog, name="mu"):
             "/user.getUserLite",
             inputs,
             batch_size=30,
-            chunk_sleep=0.5,
+            chunk_sleep=0.0,
         )
 
         now = datetime.now(timezone.utc)

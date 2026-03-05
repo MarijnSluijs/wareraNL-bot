@@ -179,7 +179,7 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
                 "/mu.getById",
                 inputs,
                 batch_size=100,
-                chunk_sleep=0.5,
+                chunk_sleep=0.0,
             )
         except Exception as exc:
             logger.warning("refresh_mu_info: batch_get failed: %s", exc)

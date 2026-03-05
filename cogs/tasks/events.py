@@ -282,7 +282,7 @@ class EventTasks(TaskCogBase, name="event_tasks"):
                 "/mu.getById",
                 inputs,
                 batch_size=100,
-                chunk_sleep=0.5,
+                chunk_sleep=0.0,
             )
         except Exception as exc:
             logger.warning("_get_mu_thumbnails: batch_get failed: %s", exc)
