@@ -807,18 +807,21 @@ class Welcome(commands.Cog, name="welcome"):
         """
         Approve a verification request in the current ticket channel.
         """
+        # defer to avoid timing out
+        await interaction.response.defer(ephemeral=True)
+
         channel = interaction.channel
         try:
             in_game_id = self._normalize_ingame_id(in_game_id)
         except ValueError as e:
-            await interaction.response.send_message(str(e), ephemeral=True)
+            await interaction.followup.send(str(e), ephemeral=True)
             return
         
         if nickname is None:
             try: 
                 nickname = await self._get_nickname(in_game_id)
             except Exception as e:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"Failed to retrieve username for in-game ID: {e}", ephemeral=True
                 )
                 return
@@ -827,7 +830,7 @@ class Welcome(commands.Cog, name="welcome"):
         if not channel.name.startswith(
             ("citizen-", "foreigner-", "belgian-")
         ):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "This command can only be used in verification channels.",
                 ephemeral=True,
             )
@@ -847,7 +850,7 @@ class Welcome(commands.Cog, name="welcome"):
         )
 
         if not has_permission and not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "You don't have permission to use this command.", ephemeral=True
             )
             return
@@ -863,7 +866,7 @@ class Welcome(commands.Cog, name="welcome"):
                     logger.debug("Could not parse user ID from topic part: %r", part)
 
         if not user_id:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Could not find the user for this request. Please check manually.",
                 ephemeral=True,
             )
@@ -871,7 +874,7 @@ class Welcome(commands.Cog, name="welcome"):
 
         member = interaction.guild.get_member(user_id)
         if not member:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "The user is no longer in the server.", ephemeral=True
             )
             return
@@ -879,7 +882,7 @@ class Welcome(commands.Cog, name="welcome"):
         try:
             await member.edit(nick=nickname)
         except Exception as e:
-            await interaction.response.send_message(f"Failed to edit member nickname: {e}")
+            await interaction.followup.send(f"Failed to edit member nickname: {e}", ephemeral=True)
             self.bot.logger.error(f"Failed to edit member nickname: {e}")
             return
 
@@ -890,13 +893,13 @@ class Welcome(commands.Cog, name="welcome"):
                 in_game_id=in_game_id,
             )
         except ValueError as e:
-            await interaction.response.send_message(str(e), ephemeral=True)
+            await interaction.followup.send(str(e), ephemeral=True)
             return
         except Exception as e:
             self.bot.logger.error(
                 "Failed identity validation in /approve: %s", e, exc_info=True
             )
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Kon identity mapping niet valideren door een interne fout.",
                 ephemeral=True,
             )
@@ -923,19 +926,19 @@ class Welcome(commands.Cog, name="welcome"):
                     f"Assigned role {role_to_give.name} to {member.name} for {request_type} verification"
                 )
             except discord.Forbidden:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"I don't have permission to assign the {role_to_give.name} role. "
                     "Make sure my bot role is **higher** than this role in Server Settings > Roles.",
                     ephemeral=True,
                 )
                 return
             except discord.HTTPException as e:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"Failed to assign role: {e}", ephemeral=True
                 )
                 return
             except Exception as e:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"An unexpected error occurred while assigning the role: {e}",
                     ephemeral=True,
                 )
@@ -1050,7 +1053,7 @@ class Welcome(commands.Cog, name="welcome"):
                 inline=False,
             )
 
-        await interaction.response.send_message(embed=mod_embed, ephemeral=True)
+        await interaction.followup.send(embed=mod_embed, ephemeral=True)
 
         if request_type == "citizen":
             # Build contextual links from config when available
@@ -1291,7 +1294,7 @@ class Welcome(commands.Cog, name="welcome"):
                 not has_permission
                 and not interaction.user.guild_permissions.administrator
             ):
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "You don't have permission to use this command.", ephemeral=True
                 )
                 return
@@ -1310,7 +1313,7 @@ class Welcome(commands.Cog, name="welcome"):
                         self.bot.logger.debug("Could not parse user ID from topic part: %r", part)
 
             if not user_id:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "Kon de gebruiker voor dit verzoek niet vinden. Controleer dit handmatig.",
                     ephemeral=True,
                 )
@@ -1318,7 +1321,7 @@ class Welcome(commands.Cog, name="welcome"):
 
             member = interaction.guild.get_member(user_id)
             if not member:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "De gebruiker is niet meer op de server.", ephemeral=True
                 )
                 return
@@ -1345,7 +1348,7 @@ class Welcome(commands.Cog, name="welcome"):
             try:
                 await member.add_roles(embassy_role)
             except discord.Forbidden:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"I don't have permission to assign the {embassy_role.name} role. "
                     "Make sure my bot role is **higher** than this role in Server Settings > Roles.",
                     ephemeral=True,
@@ -1433,7 +1436,7 @@ class Welcome(commands.Cog, name="welcome"):
                         if category:
                             error_msg += f"• Voeg de bot toe aan de **{category.name}** categorie met 'Kanalen beheren' toestemming\n"
                         error_msg += f"\n**Fout:** {e}"
-                        await interaction.response.send_message(error_msg, ephemeral=True)
+                        await interaction.followup.send(error_msg, ephemeral=True)
                         return
 
             if embassy_channel:
