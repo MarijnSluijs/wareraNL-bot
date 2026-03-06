@@ -13,7 +13,8 @@
         "ambassadeur": 1470763108753477859,
         "commandant": 1458427087189835776,
         "belgian": 1475467520365428807,
-        "wachtlijst": 1470742053527748823
+        "wachtlijst": 1470742053527748823,
+        "officier": 1475206894992883723
     },
     "channels": {
         "welcome_message": 1401530718223335499,
@@ -22,7 +23,7 @@
         "verification": 1467976282968166706,
         "logs": 1456287198780457134,
         "bot_mededelingen": 1474472809215299706,
-        "orders": 1467977826924761128,
+        "orders": 1475790386936152186,
         "rules": 0,
         "handleiding": 1457351757444419769,
         "roles": 1456612515902390353,
@@ -34,7 +35,8 @@
         "congres": 1469622838368669768,
         "debat": 1471160014097092822,
         "stembureau": 1466165467155665080,
-        "events": 1474472809215299706
+        "events": 1474472809215299706,
+        "mu_aanmelden": 1479460408220844124
     },
     "welcome_message": "# Welcome to the Official Nederland War Era Server!\n\nGreetings, traveler! You have arrived at the gates of Nederland.\n\nPlease select your status below to proceed with verification:",
     "colors": {
