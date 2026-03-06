@@ -8,6 +8,8 @@ import random
 
 import discord
 import pytz
+import discord.utils
+import typing
 from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
@@ -58,6 +60,17 @@ class General(commands.Cog, name="general"):
             return
         content = message.content or ""
         # self.bot.logger.debug(f"Received message: {content} from {message.author} in {getattr(message.channel, 'id', 'DM')}")
+        if "hoezeer" in content.lower():
+            self.bot.logger.info(f"Hoezeer detected in message {message.id} by {message.author} in {getattr(message.channel, 'id', 'DM')}")
+            # add hoezeer reaction to the message
+            try:
+                emoji = self.bot.get_emoji(1475153734806798665)  # hoezeer emoji ID
+                if emoji:
+                    await message.add_reaction(emoji)
+                else:
+                    self.bot.logger.error("Hoezeer emoji not found in the bot's cache.")
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to add reaction to message {message.id}: {e}")
         if "app.warera.io" not in content:
             return
         try:
@@ -405,23 +418,126 @@ class General(commands.Cog, name="general"):
             log_channel = member.guild.get_channel(log_channel_id)
             if log_channel:
                 try:
-                    log_embed = discord.Embed(
-                        # title="Gebruiker heeft de server verlaten",
-                        description=f"**{member.mention if member else 'Unknown'} "
-                        f"({member.name if member else 'Unknown'}) heeft de server verlaten**\n",
-                        color=discord.Color.red(),
-                        timestamp=discord.datetime.now(
-                            pytz.timezone("Europe/Amsterdam")
-                        ),
-                    )
-                    if member:
-                        log_embed.set_author(
-                            name=member.name, icon_url=member.display_avatar.url
+                    # Detect whether this was a kick by checking recent audit logs.
+                    kicked_entry: typing.Optional[discord.AuditLogEntry] = None
+                    try:
+                        now = discord.utils.utcnow()
+                        async for entry in member.guild.audit_logs(limit=6, action=discord.AuditLogAction.kick):
+                            if getattr(entry.target, "id", None) == member.id:
+                                # consider entries within 10 seconds recent enough
+                                if (now - entry.created_at).total_seconds() < 10:
+                                    kicked_entry = entry
+                                    break
+                    except Exception:
+                        kicked_entry = None
+
+                    if kicked_entry:
+                        moderator = kicked_entry.user
+                        reason = kicked_entry.reason or "Geen reden opgegeven"
+                        log_embed = discord.Embed(
+                            title="Gebruiker verwijderd (Kick)",
+                            description=(
+                                f"**{member.mention} ({member.name}) is gekickt**\n"
+                                f"**Door:** {moderator.mention if moderator else moderator}\n"
+                                f"**Reden:** {reason}"
+                            ),
+                            color=discord.Color.red(),
+                            timestamp=discord.datetime.now(pytz.timezone("Europe/Amsterdam")),
                         )
-                        log_embed.set_thumbnail(url=member.display_avatar.url)
-                    await log_channel.send(embed=log_embed)
+                        if member:
+                            log_embed.set_author(name=member.name, icon_url=member.display_avatar.url)
+                            log_embed.set_thumbnail(url=member.display_avatar.url)
+                        await log_channel.send(embed=log_embed)
+                    else:
+                        log_embed = discord.Embed(
+                            # title="Gebruiker heeft de server verlaten",
+                            description=f"**{member.mention if member else 'Unknown'} "
+                            f"({member.name if member else 'Unknown'}) heeft de server verlaten**\n",
+                            color=discord.Color.red(),
+                            timestamp=discord.datetime.now(pytz.timezone("Europe/Amsterdam")),
+                        )
+                        if member:
+                            log_embed.set_author(
+                                name=member.name, icon_url=member.display_avatar.url
+                            )
+                            log_embed.set_thumbnail(url=member.display_avatar.url)
+                        await log_channel.send(embed=log_embed)
                 except (discord.Forbidden, discord.HTTPException) as e:
                     self.bot.logger.error(f"Failed to post to log channel: {e}")
+
+    @commands.Cog.listener()
+    async def on_member_ban(self, guild: discord.Guild, user: discord.User) -> None:
+        """Log when a user is banned (with audit-log moderator & reason)."""
+        log_channel_id = self.bot.config.get("channels", {}).get("logs")
+        if not log_channel_id:
+            return
+        log_channel = guild.get_channel(log_channel_id)
+        if not log_channel:
+            return
+
+        moderator = None
+        reason = None
+        try:
+            async for entry in guild.audit_logs(limit=6, action=discord.AuditLogAction.ban):
+                if getattr(entry.target, "id", None) == user.id:
+                    moderator = entry.user
+                    reason = entry.reason
+                    break
+        except Exception as e:
+            self.bot.logger.debug("Could not fetch audit logs for ban: %s", e)
+
+        description = (
+            f"**{user} ({getattr(user, 'name', user.id)}) is gebanned**\n"
+            f"**Door:** {moderator.mention if moderator else moderator}\n"
+            f"**Reden:** {reason or 'Geen reden opgegeven'}"
+        )
+        embed = discord.Embed(
+            title="Gebruiker verbannen",
+            description=description,
+            color=discord.Color.dark_red(),
+            timestamp=discord.datetime.now(pytz.timezone("Europe/Amsterdam")),
+        )
+        try:
+            await log_channel.send(embed=embed)
+        except (discord.Forbidden, discord.HTTPException) as e:
+            self.bot.logger.error(f"Failed to post ban log: {e}")
+
+    @commands.Cog.listener()
+    async def on_member_unban(self, guild: discord.Guild, user: discord.User) -> None:
+        """Log when a user is unbanned (with audit-log moderator & reason)."""
+        log_channel_id = self.bot.config.get("channels", {}).get("logs")
+        if not log_channel_id:
+            return
+        log_channel = guild.get_channel(log_channel_id)
+        if not log_channel:
+            return
+
+        moderator = None
+        reason = None
+        try:
+            async for entry in guild.audit_logs(limit=6, action=discord.AuditLogAction.unban):
+                if getattr(entry.target, "id", None) == user.id:
+                    moderator = entry.user
+                    reason = entry.reason
+                    break
+        except Exception as e:
+            self.bot.logger.debug("Could not fetch audit logs for unban: %s", e)
+
+        description = (
+            f"**{user} ({getattr(user, 'name', user.id)}) is unbanned**\n"
+            f"**Door:** {moderator.mention if moderator else moderator}\n"
+            f"**Reden:** {reason or 'Geen reden opgegeven'}"
+        )
+        embed = discord.Embed(
+            title="Gebruiker unbanned",
+            description=description,
+            color=discord.Color.green(),
+            timestamp=discord.datetime.now(pytz.timezone("Europe/Amsterdam")),
+        )
+        try:
+            await log_channel.send(embed=embed)
+        except (discord.Forbidden, discord.HTTPException) as e:
+            self.bot.logger.error(f"Failed to post unban log: {e}")
 
     @commands.Cog.listener()
     async def on_member_update(

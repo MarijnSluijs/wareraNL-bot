@@ -80,6 +80,13 @@
       "secondary_role_id": 1456723236732534974
     },
     {
+      "label": "kikkers-likken-divis",
+      "role_id": 1479412616144224357,
+      "style": "primary",
+      "row": 2,
+      "secondary_role_id": 1456723236732534974
+    },
+    {
       "label": "MIVD",
       "role_id": 1475444320076169328,
       "style": "primary",
@@ -104,7 +111,7 @@
       "label": "Pannekoekenoffensief",
       "role_id": 1477670419497484432,
       "style": "primary",
-      "row": 2,
+      "row": 3,
       "secondary_role_id": 1456723236732534974
     },
     {
@@ -139,7 +146,7 @@
       "label": "Van Speijk Eskader",
       "role_id": 1471870072778920069,
       "style": "primary",
-      "row": 3,
+      "row": 4,
       "secondary_role_id": 1456723236732534974
     },
     {
