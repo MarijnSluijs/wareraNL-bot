@@ -17,20 +17,21 @@ class LuckMixin:
         citizen_name: Optional[str],
         luck_score: float,
         opens_count: int,
+        rarity_json: Optional[str],
         updated_at: str,
     ) -> None:
         """Insert or replace a luck score (call flush_luck_scores to commit batch)."""
         await self._conn.execute(
             """
             INSERT OR REPLACE INTO citizen_luck
-                (user_id, country_id, citizen_name, luck_score, opens_count, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (user_id, country_id, citizen_name, luck_score, opens_count, rarity_json, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (user_id, country_id, citizen_name, luck_score, opens_count, updated_at),
+            (user_id, country_id, citizen_name, luck_score, opens_count, rarity_json, updated_at),
         )
 
     async def flush_luck_scores(self) -> None:
-        """Commit any pending luck score upserts."""
+        """Commit pending luck score upserts."""
         await self._conn.commit()
 
     async def delete_luck_scores_for_country(self, country_id: str) -> None:

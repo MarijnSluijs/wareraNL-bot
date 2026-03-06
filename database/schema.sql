@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS citizen_luck (
     citizen_name TEXT,
     luck_score   REAL NOT NULL,
     opens_count  INTEGER NOT NULL,
+    rarity_json  TEXT,
     updated_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_citizen_luck_country ON citizen_luck(country_id);
@@ -154,6 +155,7 @@ CREATE TABLE IF NOT EXISTS resistance_state (
     region_name       TEXT,
     occupying_country TEXT,
     resistance_value  REAL,
+    resistance_max    REAL DEFAULT 100.0,
     updated_at        TEXT
 );
 
