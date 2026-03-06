@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import difflib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 import aiosqlite
@@ -16,7 +16,7 @@ class CitizensMixin:
         self,
         user_id: str,
         country_id: str,
-        level: int,
+        level: Optional[int],
         updated_at: str,
         skill_mode: Optional[str] = None,
         last_skills_reset_at: Optional[str] = None,
@@ -25,12 +25,26 @@ class CitizensMixin:
         mu_id: Optional[str] = None,
         mu_name: Optional[str] = None,
     ) -> None:
-        """Insert or update a citizen's level and related info."""
+        """Insert or update a citizen's level and related info.
+
+        mu_id / mu_name are preserved from existing row when the caller
+        passes None, so a plain citizen-level refresh never wipes MU data.
+        """
         await self._conn.execute(
-            "INSERT OR REPLACE INTO citizen_levels"
+            "INSERT INTO citizen_levels"
             "(user_id, country_id, level, skill_mode, last_skills_reset_at, "
             "citizen_name, last_login_at, mu_id, mu_name, updated_at)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(user_id) DO UPDATE SET"
+            "  country_id           = excluded.country_id,"
+            "  level                = excluded.level,"
+            "  skill_mode           = excluded.skill_mode,"
+            "  last_skills_reset_at = excluded.last_skills_reset_at,"
+            "  citizen_name         = excluded.citizen_name,"
+            "  last_login_at        = excluded.last_login_at,"
+            "  mu_id   = COALESCE(excluded.mu_id,   citizen_levels.mu_id),"
+            "  mu_name = COALESCE(excluded.mu_name, citizen_levels.mu_name),"
+            "  updated_at           = excluded.updated_at",
             (user_id, country_id, level, skill_mode, last_skills_reset_at,
              citizen_name, last_login_at, mu_id, mu_name, updated_at),
         )
@@ -63,38 +77,42 @@ class CitizensMixin:
         )
         await self._conn.commit()
 
+    async def prune_stale_citizens(self, country_id: str, updated_at: str) -> int:
+        """Delete citizens for *country_id* whose updated_at is older than *updated_at*.
+
+        Used after a full country refresh so citizens who left the country are
+        removed while preserving MU data that was written by a concurrent task.
+        Returns the number of rows deleted.
+        """
+        cursor = await self._conn.execute(
+            "DELETE FROM citizen_levels WHERE country_id = ? AND updated_at < ?",
+            (country_id, updated_at),
+        )
+        await self._conn.commit()
+        return cursor.rowcount or 0
+
     async def get_level_distribution(
         self, country_id: Optional[str]
-    ) -> tuple[dict[int, int], dict[int, int], Optional[str]]:
-        """Return (level_counts, active_counts, last_updated_at).
-
-        active_counts: citizens whose last_login_at is within 24 hours.
-        """
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(hours=24)
-        ).strftime("%Y-%m-%dT%H:%M:%S")
-
+    ) -> tuple[dict[int, int], Optional[str]]:
+        """Return (level_counts, last_updated_at)."""
         counts: dict[int, int] = {}
-        active: dict[int, int] = {}
         last_updated: Optional[str] = None
 
         if country_id:
-            sql = "SELECT level, updated_at, last_login_at FROM citizen_levels WHERE country_id = ?"
+            sql = "SELECT level, updated_at FROM citizen_levels WHERE country_id = ?"
             params: tuple = (country_id,)
         else:
-            sql = "SELECT level, updated_at, last_login_at FROM citizen_levels"
+            sql = "SELECT level, updated_at FROM citizen_levels"
             params = ()
         async with self._conn.execute(sql, params) as cur:
             async for row in cur:
-                lvl, updated_at, last_login_at = row
+                lvl, updated_at = row
                 if lvl is not None:
                     lvl = int(lvl)
                     counts[lvl] = counts.get(lvl, 0) + 1
-                    if last_login_at and last_login_at[:19] >= cutoff:
-                        active[lvl] = active.get(lvl, 0) + 1
                 if last_updated is None or updated_at > last_updated:
                     last_updated = updated_at
-        return counts, active, last_updated
+        return counts, last_updated
 
     async def get_skill_mode_distribution(
         self, country_id: Optional[str]
@@ -450,15 +468,6 @@ class CitizensMixin:
                     "can_reset": can_reset,
                 })
         return mu_name, players
-    
-    async def get_citizen_name_by_id(self, user_id: str) -> Optional[str]:
-        """Return the citizen name for a given user_id, or None if not found."""
-        sql = "SELECT citizen_name FROM citizen_levels WHERE user_id = ?"
-        async with self._conn.execute(sql, (user_id,)) as cur:
-            row = await cur.fetchone()
-            if row and row[0]:
-                return row[0]
-        return None
 
     async def get_distinct_mu_names(
         self, country_id: Optional[str] = None

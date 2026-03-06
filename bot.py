@@ -148,9 +148,19 @@ class DiscordBot(commands.Bot):
             return {"colors": {"primary": "0x154273", "success": "0x57F287", "error": "0xE02B2B", "warning": "0xF59E42"}}
 
     async def init_db(self) -> None:
-        async with aiosqlite.connect("database/database.db") as db:
+        ext_db_path = self.config.get("external_db_path", "database/external.db")
+        async with aiosqlite.connect(ext_db_path) as db:
             with open(Path("database") / "schema.sql", encoding = "utf-8") as file:
                 await db.executescript(file.read())
+            # Idempotent column migrations for DBs created before schema update
+            for _sql in [
+                "ALTER TABLE resistance_state ADD COLUMN resistance_max REAL DEFAULT 100.0",
+                "ALTER TABLE citizen_luck ADD COLUMN rarity_json TEXT",
+            ]:
+                try:
+                    await db.execute(_sql)
+                except Exception:
+                    pass  # Column already exists
             await db.commit()
 
     async def _write_command_catalogue(self) -> None:
@@ -221,6 +231,8 @@ class DiscordBot(commands.Bot):
         for cmd in self.commands:
             if cmd.hidden:
                 continue
+            if getattr(cmd, "app_command", None) is not None:
+                continue  # hybrid command; already listed as slash above
             cog_name = type(cmd.cog).__name__ if cmd.cog else None
             lbl = _label(cog_name)
             desc = (cmd.help or cmd.brief or "").strip().split("\n")[0]

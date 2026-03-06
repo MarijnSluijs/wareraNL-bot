@@ -3,7 +3,7 @@ This module defines the BedrijfswinstCog, which provides the /bedrijfswinst comm
 whether a user is making a profit on their employees across all their companies.
 
 For each company the command shows, per employee:
-    revenue  = sell_price × company_production_bonus × employee_fidelity_bonus
+    revenue  = sell_price × (company_production_bonus_pct + employee_fidelity_pct) / 100
     profit   = revenue − employee_wage
 
 and a per-company and grand total summary.
@@ -839,8 +839,8 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     _bk_margin_pre = sell_price - _bk_mat_pre
                     breakeven_overview.append((
                         company_name, item_code,
-                        _bk_items_pre * prod_bonus_mult * 1.00 * _bk_margin_pre,
-                        _bk_items_pre * prod_bonus_mult * 1.10 * _bk_margin_pre,
+                        _bk_items_pre * (prod_bonus_mult + 0.00) * _bk_margin_pre,
+                        _bk_items_pre * (prod_bonus_mult + 0.10) * _bk_margin_pre,
                     ))
                     continue
 
@@ -858,12 +858,21 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 total_bonus_pct = region_pct + country_pct + ethics_pct
                 bonus_footer = f"  |  Productiebonus: +{total_bonus_pct:.2f}%" if total_bonus_pct else ""
                 pp_footer = f"  |  {pp_pts:.0f} PP/item"
-                mat_footer = (
-                    "  |  Grondstoffen/item: " + ", ".join(
-                        f"{qty:.0f}× {mat}"
-                        for mat, qty in item_mat_needs.items()
+                if item_mat_needs:
+                    _mat_parts = []
+                    _mat_total = 0.0
+                    for mat, qty in item_mat_needs.items():
+                        _unit = item_prices.get(mat, 0.0)
+                        _cost = float(qty) * _unit
+                        _mat_total += _cost
+                        _mat_parts.append(f"{float(qty):.0f}× {mat} ({_fmt_cc(_unit)})")
+                    mat_footer = (
+                        "  |  Grondstoffen/item: "
+                        + ", ".join(_mat_parts)
+                        + f"  =  {_fmt_cc(_mat_total)}"
                     )
-                ) if item_mat_needs else ""
+                else:
+                    mat_footer = ""
                 embed.set_footer(
                     text=f"Item: {item_code}  |  Marktprijs: {_fmt_cc(sell_price)}{bonus_footer}{pp_footer}{mat_footer}"
                 )
@@ -880,7 +889,8 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     profile = worker_profiles.get(emp_uid) or {}
                     emp_name: str = profile.get("username") or emp_uid or "?"
                     fidelity = float(emp.get("fidelity") or 0)
-                    fidelity_mult = 1.0 + fidelity * 0.01
+                    # fidelity % and production % are additive, not multiplicative
+                    combined_mult = prod_bonus_mult + fidelity * 0.01
 
                     # Employee skills
                     # The API may return the upgrade level (0-10) OR the computed value
@@ -902,9 +912,9 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     # Total PP the employee delivers per day
                     total_pp_day = emp_pp * actions_per_day
 
-                    # items produced per PP — base rate times all bonuses
+                    # items produced per PP — base rate times combined bonus (additive pcts)
                     items_per_pp = 1.0 / pp_pts
-                    items_produced_per_pp = items_per_pp * fidelity_mult * prod_bonus_mult
+                    items_produced_per_pp = items_per_pp * combined_mult
 
                     # Gross revenue per PP (before material costs)
                     gross_rev_per_pp = items_produced_per_pp * sell_price
@@ -948,8 +958,8 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 )
                 # margin per item (sell - materials); production bonus scales both equally
                 _bk_margin_per_item = sell_price - _bk_mat_per_item
-                breakeven_f0  = _bk_items_per_pp * prod_bonus_mult * 1.00 * _bk_margin_per_item
-                breakeven_f10 = _bk_items_per_pp * prod_bonus_mult * 1.10 * _bk_margin_per_item
+                breakeven_f0  = _bk_items_per_pp * (prod_bonus_mult + 0.00) * _bk_margin_per_item
+                breakeven_f10 = _bk_items_per_pp * (prod_bonus_mult + 0.10) * _bk_margin_per_item
 
                 breakeven_overview.append((
                     company_name, item_code,
@@ -1023,6 +1033,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                         value="```ansi\n" + "\n".join(chunk) + "\n```",
                         inline=False,
                     )
+
                 embeds.append(embed)
 
             if not embeds and not breakeven_overview:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math as _luck_math
 import time
@@ -241,6 +242,7 @@ class LuckTasks(TaskCogBase, name="luck_tasks"):
                     citizen_name,
                     luck_pct,
                     total_opens,
+                    json.dumps(counts),
                     updated_at,
                 )
                 recorded += 1

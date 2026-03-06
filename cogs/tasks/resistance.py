@@ -146,7 +146,7 @@ class ResistanceTasks(TaskCogBase, name="resistance_tasks"):
             old_val: float | None = stored["resistance_value"] if stored else None
             delta = (res - old_val) if old_val is not None else None
             fields.append((f"{rname} ({orig})", _region_field(res, maxr, delta)))
-            await self._db.upsert_resistance_state(rid, rname, orig, res, now_str)
+            await self._db.upsert_resistance_state(rid, rname, orig, res, maxr, now_str)
 
         embed = discord.Embed(
             title="⚔️ Door NL bezette regio's — dagelijks verzetsoverzicht",
