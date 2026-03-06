@@ -12,12 +12,15 @@ Commands and listeners:
 
 import asyncio
 import datetime
+import json
 import logging
 import re
 
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+from services.api_client import APIClient
 
 logger = logging.getLogger("discord_bot")
 
@@ -454,6 +457,10 @@ class Welcome(commands.Cog, name="welcome"):
         self._embassy_locks: dict[str, asyncio.Lock] = {}
         self._approval_db = None
 
+    @property
+    def _client(self):
+        return getattr(self.bot, "_ext_client", None)
+
     async def _get_approval_db(self):
         """Return shared external DB, or lazily create one as fallback."""
         shared = getattr(self.bot, "_ext_db", None)
@@ -749,17 +756,52 @@ class Welcome(commands.Cog, name="welcome"):
                 except (discord.Forbidden, discord.HTTPException) as e:
                     self.bot.logger.error(f"Failed to post to log channel: {e}")
 
+    async def _get_nickname(self, in_game_id: str) -> str | None:
+        # Ensure the shared API client is available. The ServiceCoordinator cog
+        # initializes `bot._ext_client` asynchronously; wait for that if present.
+        client = self._client
+        if client is None:
+            ready_event = getattr(self.bot, "_ext_services_ready", None)
+            if ready_event is not None:
+                try:
+                    await asyncio.wait_for(ready_event.wait(), timeout=5.0)
+                except Exception:
+                    # timed out or other error; continue to check client below
+                    pass
+                client = self._client
+
+        if client is None:
+            raise RuntimeError("API client is not available. Cannot fetch username.")
+
+        try:
+            params = {"input": json.dumps({"userId": in_game_id})}
+            user_info: dict = await client.get("/user.getUserLite", params=params)
+            # Defensive extraction in case the API returns unexpected shapes
+            nickname = (
+                user_info.get("result", {})
+                .get("data", {})
+                .get("username")
+            )
+            if not nickname:
+                raise ValueError("username not found in API response")
+        except Exception as e:
+            self.bot.logger.error(f"Error fetching username for in-game ID {in_game_id}: {e}")
+            raise ValueError("Failed to fetch username from API for the provided in-game ID.")
+            return
+
     @app_commands.command(
         name="approve", description="Keur een verificatieverzoek goed"
     )
     @app_commands.describe(
         in_game_id="In-game ID of profiel-URL (https://app.warera.io/user/{id})",
-        reason="Interne reden voor goedkeuring (niet zichtbaar voor de gebruiker)"
+        reason="Interne reden voor goedkeuring (niet zichtbaar voor de gebruiker)",
+        nickname="[Optioneel]: Gebruikersnaam van de speler"
     )
     async def approve(
         self,
         interaction: discord.Interaction,
         in_game_id: str,
+        nickname: str = None,
         reason: str = "Geen reden opgegeven",
     ):
         """
@@ -771,6 +813,15 @@ class Welcome(commands.Cog, name="welcome"):
         except ValueError as e:
             await interaction.response.send_message(str(e), ephemeral=True)
             return
+        
+        if nickname is None:
+            try: 
+                nickname = await self._get_nickname(in_game_id)
+            except Exception as e:
+                await interaction.response.send_message(
+                    f"Failed to retrieve username for in-game ID: {e}", ephemeral=True
+                )
+                return
 
         # Verify this is a ticket channel
         if not channel.name.startswith(
@@ -823,6 +874,13 @@ class Welcome(commands.Cog, name="welcome"):
             await interaction.response.send_message(
                 "The user is no longer in the server.", ephemeral=True
             )
+            return
+        
+        try:
+            await member.edit(nick=nickname)
+        except Exception as e:
+            await interaction.response.send_message(f"Failed to edit member nickname: {e}")
+            self.bot.logger.error(f"Failed to edit member nickname: {e}")
             return
 
         try:
@@ -1379,7 +1437,7 @@ class Welcome(commands.Cog, name="welcome"):
                         return
 
             if embassy_channel:
-                self.bot.logger.debug(
+                self.bot.logger.debug("Failed to edit member nickname: {e}"
                     f"Setting permissions for member {member} in embassy channel {embassy_channel.name}"
                 )
                 # try:
