@@ -93,26 +93,37 @@ class CitizensMixin:
 
     async def get_level_distribution(
         self, country_id: Optional[str]
-    ) -> tuple[dict[int, int], Optional[str]]:
-        """Return (level_counts, last_updated_at)."""
+    ) -> tuple[dict[int, int], dict[int, int], Optional[str]]:
+        """Return (level_counts, active_counts, last_updated_at).
+
+        active_counts contains only citizens whose last_login_at is within
+        the last 24 hours.
+        """
+        from datetime import datetime, timezone, timedelta
         counts: dict[int, int] = {}
+        active_counts: dict[int, int] = {}
         last_updated: Optional[str] = None
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=24)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         if country_id:
-            sql = "SELECT level, updated_at FROM citizen_levels WHERE country_id = ?"
+            sql = "SELECT level, updated_at, last_login_at FROM citizen_levels WHERE country_id = ?"
             params: tuple = (country_id,)
         else:
-            sql = "SELECT level, updated_at FROM citizen_levels"
+            sql = "SELECT level, updated_at, last_login_at FROM citizen_levels"
             params = ()
         async with self._conn.execute(sql, params) as cur:
             async for row in cur:
-                lvl, updated_at = row
+                lvl, updated_at, last_login_at = row
                 if lvl is not None:
                     lvl = int(lvl)
                     counts[lvl] = counts.get(lvl, 0) + 1
+                    if last_login_at and last_login_at >= cutoff:
+                        active_counts[lvl] = active_counts.get(lvl, 0) + 1
                 if last_updated is None or updated_at > last_updated:
                     last_updated = updated_at
-        return counts, last_updated
+        return counts, active_counts, last_updated
 
     async def get_skill_mode_distribution(
         self, country_id: Optional[str]

@@ -34,8 +34,8 @@ class CitizenCache:
         if not user_ids:
             return 0
 
-        await self._db.delete_citizens_for_country(country_id)
-
+        # Do NOT delete first — use upsert then prune so MU data written by
+        # the parallel mu_refresh task is preserved across citizen refreshes.
         updated_at = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         batch_size = 100
         inputs = [{"userId": uid} for uid in user_ids]
@@ -81,6 +81,10 @@ class CitizenCache:
                         pass
 
         await self._db.flush_citizen_levels()
+        # Remove any citizens not seen in this refresh (they left the country)
+        pruned = await self._db.prune_stale_citizens(country_id, updated_at)
+        if pruned:
+            logger.debug("refresh_country: pruned %d stale citizens for %s", pruned, country_id)
         return recorded
 
     async def refresh_mu_memberships(self, country_id: str, mus_json_path: str) -> int:

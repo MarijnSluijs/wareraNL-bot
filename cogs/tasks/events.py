@@ -462,9 +462,10 @@ class EventTasks(TaskCogBase, name="event_tasks"):
 
         elif event_type == "regionTransfer":
             amount = _num("amount")
-            amount_str = f" voor **{amount}** munt" if amount else ""
+            munt = "munt" if amount == 1 else "munten"
+            amount_str = f" voor **{amount}** {munt}" if amount else ""
             description = (
-                f"**{atk}** heeft regio **{rgn}** overgenomen van **{dfn}**{amount_str}"
+                f"**{dfn}** heeft regio **{rgn}** overgenomen van **{atk}**{amount_str}"
             )
             color = discord.Color.orange()
 
