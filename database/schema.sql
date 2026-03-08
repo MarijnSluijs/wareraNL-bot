@@ -179,6 +179,18 @@ CREATE TABLE IF NOT EXISTS wallet_transactions (
     FOREIGN KEY(user_id) REFERENCES wallets(user_id)
 );
 
+-- ── Weekly damage ────────────────────────────────────────────────────────────
+
+-- citizen_weekly_damages: latest weekly battle damage per NL citizen
+CREATE TABLE IF NOT EXISTS citizen_weekly_damages (
+    user_id       TEXT PRIMARY KEY,
+    citizen_name  TEXT,
+    country_id    TEXT NOT NULL,
+    weekly_damage REAL NOT NULL DEFAULT 0,
+    updated_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_weekly_damages_country ON citizen_weekly_damages(country_id);
+
 -- ── Legacy (krypton template) ─────────────────────────────────────────────────
 
 -- warns: moderation warn log used by database/__init__.py DatabaseManager

@@ -92,8 +92,6 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
             channel_id = channels.get("testing-area")
         else:
             channel_id = channels.get("bot_mededelingen")
-        logger.info("bounty_poll: starting — testing=%s channel_id=%s",
-                    getattr(self.bot, "testing", False), channel_id)
         if not channel_id:
             logger.warning("bounty_poll: no channel configured, skipping")
             return
@@ -107,19 +105,11 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
             logger.warning("bounty_poll: failed to fetch battles: %s", exc)
             return
 
-        logger.debug("bounty_poll: raw resp type=%s keys=%s",
-                     type(resp).__name__,
-                     list(resp.keys()) if isinstance(resp, dict) else "N/A")
-
         # Unwrap tRPC-style response
         data: object = resp
         if isinstance(resp, dict):
             inner = resp.get("result", resp)
             data = inner.get("data", inner) if isinstance(inner, dict) else resp
-
-        logger.debug("bounty_poll: unwrapped data type=%s keys=%s",
-                     type(data).__name__,
-                     list(data.keys()) if isinstance(data, dict) else "N/A")
 
         battles: list[dict] = []
         if isinstance(data, dict):
@@ -128,10 +118,7 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
             battles = [b for b in data if isinstance(b, dict)]
 
         if not isinstance(battles, list):
-            logger.debug("bounty_poll: battles is not a list (%s)", type(battles).__name__)
             return
-
-        logger.debug("bounty_poll: got %d active battles", len(battles))
 
         # Refresh country name cache
         try:
@@ -145,7 +132,7 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                     if isinstance(c, dict) and c.get("_id")
                 }
         except Exception:
-            logger.debug("bounty_poll: could not refresh country names")
+            pass  # country names cache not refreshed; fall back to IDs
 
         # Remove stale entries for battles that are no longer active
         active_ids = {str(b.get("_id") or "") for b in battles}
@@ -175,11 +162,6 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
             attacker = battle.get("attacker") or {}
             defender = battle.get("defender") or {}
 
-            logger.debug(
-                "bounty_poll: battle %s — atk keys=%s dfn keys=%s",
-                battle_id, list(attacker.keys()), list(defender.keys()),
-            )
-
             att_name = _cname(attacker)
             def_name = _cname(defender)
             region_raw = defender.get("region") or attacker.get("region") or battle.get("region")
@@ -196,11 +178,6 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                 if not b:
                     continue
                 rate, total = b
-
-                logger.debug(
-                    "bounty_poll: battle %s [%s] — rate=%.4f total=%.4f",
-                    battle_id, side_key, rate, total,
-                )
 
                 if total <= 0:
                     continue  # Pool depleted
