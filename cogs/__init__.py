@@ -1,7 +1,6 @@
-from pathlib import Path
-
 """Cogs package for wareraNL-bot."""
 
+from pathlib import Path
 
 __all__ = []
 
