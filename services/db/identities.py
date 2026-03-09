@@ -1,4 +1,5 @@
 """Discord ↔ in-game identity mapping DB methods (identity_links table)."""
+
 from __future__ import annotations
 
 from typing import Optional

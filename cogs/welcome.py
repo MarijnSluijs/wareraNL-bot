@@ -47,9 +47,7 @@ class WelcomeView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         """Handle citizen verification request."""
-        await interaction.response.send_modal(
-            VerificationQuestionnaireModal("citizen")
-        )
+        await interaction.response.send_modal(VerificationQuestionnaireModal("citizen"))
 
     @discord.ui.button(
         label="Belgian",
@@ -61,9 +59,7 @@ class WelcomeView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         """Handle Belgian verification request."""
-        await interaction.response.send_modal(
-            VerificationQuestionnaireModal("belgian")
-        )
+        await interaction.response.send_modal(VerificationQuestionnaireModal("belgian"))
 
     @discord.ui.button(
         label="Foreigner",
@@ -89,9 +85,7 @@ class WelcomeView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         """Handle embassy request."""
-        await interaction.response.send_modal(
-            VerificationQuestionnaireModal("embassy")
-        )
+        await interaction.response.send_modal(VerificationQuestionnaireModal("embassy"))
 
 
 class VerificationQuestionnaireModal(discord.ui.Modal):
@@ -101,15 +95,17 @@ class VerificationQuestionnaireModal(discord.ui.Modal):
         self.request_type = request_type
         is_english = request_type in {"belgian", "foreigner", "embassy"}
         super().__init__(
-            title="Verification Questionnaire" if is_english else "Verificatie Vragenlijst"
+            title=(
+                "Verification Questionnaire"
+                if is_english
+                else "Verificatie Vragenlijst"
+            )
         )
 
         self.warera_name = discord.ui.TextInput(
             label="WarEra username" if is_english else "WarEra gebruikersnaam",
             placeholder=(
-                "Enter your in-game name"
-                if is_english
-                else "Vul je in-game naam in"
+                "Enter your in-game name" if is_english else "Vul je in-game naam in"
             ),
             required=True,
             max_length=64,
@@ -162,14 +158,12 @@ class VerificationQuestionnaireModal(discord.ui.Modal):
         raw_profile_value = str(self.profile_link).strip().strip("<>")
         profile_value_for_admins = raw_profile_value
         if raw_profile_value and "://" not in raw_profile_value:
-            profile_value_for_admins = (
-                f"https://app.warera.io/user/{raw_profile_value}"
-            )
+            profile_value_for_admins = f"https://app.warera.io/user/{raw_profile_value}"
 
         questionnaire_answers = {
-            (
-                "WarEra username" if is_english else "WarEra gebruikersnaam"
-            ): str(self.warera_name).strip(),
+            ("WarEra username" if is_english else "WarEra gebruikersnaam"): str(
+                self.warera_name
+            ).strip(),
             (
                 "URL to your in-game profile or your user ID"
                 if is_english
@@ -414,13 +408,9 @@ async def create_verification_channel(
         await channel.send(embed=questionnaire_embed)
 
     if request_type == "citizen":
-        instruction_text = (
-            "Hallo, stuur alsjeblieft een screenshot van je WarEra profiel om je verificatieverzoek af te ronden."
-        )
+        instruction_text = "Hallo, stuur alsjeblieft een screenshot van je WarEra profiel om je verificatieverzoek af te ronden."
     else:
-        instruction_text = (
-            "Hello, please send a screenshot of your WarEra profile to complete your verification request."
-        )
+        instruction_text = "Hello, please send a screenshot of your WarEra profile to complete your verification request."
 
     instructions_embed = discord.Embed(
         description=instruction_text,
@@ -777,16 +767,16 @@ class Welcome(commands.Cog, name="welcome"):
             params = {"input": json.dumps({"userId": in_game_id})}
             user_info: dict = await client.get("/user.getUserLite", params=params)
             # Defensive extraction in case the API returns unexpected shapes
-            nickname = (
-                user_info.get("result", {})
-                .get("data", {})
-                .get("username")
-            )
+            nickname = user_info.get("result", {}).get("data", {}).get("username")
             if not nickname:
                 raise ValueError("username not found in API response")
         except Exception as e:
-            self.bot.logger.error(f"Error fetching username for in-game ID {in_game_id}: {e}")
-            raise ValueError("Failed to fetch username from API for the provided in-game ID.")
+            self.bot.logger.error(
+                f"Error fetching username for in-game ID {in_game_id}: {e}"
+            )
+            raise ValueError(
+                "Failed to fetch username from API for the provided in-game ID."
+            )
             return
 
     @app_commands.command(
@@ -795,7 +785,7 @@ class Welcome(commands.Cog, name="welcome"):
     @app_commands.describe(
         in_game_id="In-game ID of profiel-URL (https://app.warera.io/user/{id})",
         reason="Interne reden voor goedkeuring (niet zichtbaar voor de gebruiker)",
-        nickname="[Optioneel]: Gebruikersnaam van de speler"
+        nickname="[Optioneel]: Gebruikersnaam van de speler",
     )
     async def approve(
         self,
@@ -816,9 +806,9 @@ class Welcome(commands.Cog, name="welcome"):
         except ValueError as e:
             await interaction.followup.send(str(e), ephemeral=True)
             return
-        
+
         if nickname is None:
-            try: 
+            try:
                 nickname = await self._get_nickname(in_game_id)
             except Exception as e:
                 await interaction.followup.send(
@@ -827,9 +817,7 @@ class Welcome(commands.Cog, name="welcome"):
                 return
 
         # Verify this is a ticket channel
-        if not channel.name.startswith(
-            ("citizen-", "foreigner-", "belgian-")
-        ):
+        if not channel.name.startswith(("citizen-", "foreigner-", "belgian-")):
             await interaction.followup.send(
                 "This command can only be used in verification channels.",
                 ephemeral=True,
@@ -878,11 +866,13 @@ class Welcome(commands.Cog, name="welcome"):
                 "The user is no longer in the server.", ephemeral=True
             )
             return
-        
+
         try:
             await member.edit(nick=nickname)
         except Exception as e:
-            await interaction.followup.send(f"Failed to edit member nickname: {e}", ephemeral=True)
+            await interaction.followup.send(
+                f"Failed to edit member nickname: {e}", ephemeral=True
+            )
             self.bot.logger.error(f"Failed to edit member nickname: {e}")
             return
 
@@ -1116,7 +1106,9 @@ class Welcome(commands.Cog, name="welcome"):
         channel = interaction.channel
 
         # Verify this is a ticket channel
-        if not channel.name.startswith(("citizen-", "foreigner-", "embassy-", "belgian-")):
+        if not channel.name.startswith(
+            ("citizen-", "foreigner-", "embassy-", "belgian-")
+        ):
             await interaction.response.send_message(
                 "Dit commando kan alleen worden gebruikt in verificatiekanalen.",
                 ephemeral=True,
@@ -1310,7 +1302,9 @@ class Welcome(commands.Cog, name="welcome"):
                     try:
                         user_id = int(part.split(":")[-1].strip())
                     except ValueError:
-                        self.bot.logger.debug("Could not parse user ID from topic part: %r", part)
+                        self.bot.logger.debug(
+                            "Could not parse user ID from topic part: %r", part
+                        )
 
             if not user_id:
                 await interaction.followup.send(
@@ -1400,15 +1394,23 @@ class Welcome(commands.Cog, name="welcome"):
 
                     # Set up channel permissions
                     overwrites = {
-                        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                        guild.default_role: discord.PermissionOverwrite(
+                            view_channel=False
+                        ),
                         minister_role: discord.PermissionOverwrite(
-                            view_channel=True, send_messages=True, read_message_history=True
+                            view_channel=True,
+                            send_messages=True,
+                            read_message_history=True,
                         ),
                         president_role: discord.PermissionOverwrite(
-                            view_channel=True, send_messages=True, read_message_history=True
+                            view_channel=True,
+                            send_messages=True,
+                            read_message_history=True,
                         ),
                         vice_president_role: discord.PermissionOverwrite(
-                            view_channel=True, send_messages=True, read_message_history=True
+                            view_channel=True,
+                            send_messages=True,
+                            read_message_history=True,
                         ),
                         guild.me: discord.PermissionOverwrite(
                             view_channel=True,
@@ -1440,7 +1442,8 @@ class Welcome(commands.Cog, name="welcome"):
                         return
 
             if embassy_channel:
-                self.bot.logger.debug("Failed to edit member nickname: {e}"
+                self.bot.logger.debug(
+                    "Failed to edit member nickname: {e}"
                     f"Setting permissions for member {member} in embassy channel {embassy_channel.name}"
                 )
                 # try:

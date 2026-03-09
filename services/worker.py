@@ -19,7 +19,12 @@ class Worker:
     of work (e.g., identifiers to fetch via the API).
     """
 
-    def __init__(self, api_client: APIClient, db: Optional[Database] = None, concurrency: int = 10):
+    def __init__(
+        self,
+        api_client: APIClient,
+        db: Optional[Database] = None,
+        concurrency: int = 10,
+    ):
         self.api_client = api_client
         self.db = db
         self._semaphore = asyncio.Semaphore(concurrency)
@@ -29,7 +34,9 @@ class Worker:
         async with self._semaphore:
             return await self.api_client.get(item)
 
-    async def run_job(self, job_id: str, items: Iterable[Any], progress_cb: ProgressCallback = None) -> None:
+    async def run_job(
+        self, job_id: str, items: Iterable[Any], progress_cb: ProgressCallback = None
+    ) -> None:
         items = list(items)
         total = len(items)
         if self.db:
@@ -46,7 +53,9 @@ class Worker:
                     logger.exception("Error processing item %s", item)
                 completed += 1
                 if self.db:
-                    await self.db.update_job_progress(job_id, int((completed / total) * 100))
+                    await self.db.update_job_progress(
+                        job_id, int((completed / total) * 100)
+                    )
                 if progress_cb:
                     await progress_cb(completed, total)
 

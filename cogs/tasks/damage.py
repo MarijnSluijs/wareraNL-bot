@@ -152,9 +152,6 @@ class DamageTasks(TaskCogBase, name="damage_tasks"):
 
         entries = _extract_ranking_entries(resp)
         logger.info("weekly_damage_refresh: got %d global ranking entries", len(entries))
-        if entries:
-            logger.debug("weekly_damage_refresh: sample entry keys=%s value=%s",
-                         list(entries[0].keys()), entries[0])
 
         # Build lookup: user_id -> (damage, username) AND lowercase name -> damage
         ranking_map: dict[str, tuple[float, Optional[str]]] = {}
@@ -169,11 +166,8 @@ class DamageTasks(TaskCogBase, name="damage_tasks"):
                 ranking_by_name[name.lower()] = dmg
 
         logger.info(
-            "weekly_damage_refresh: ranking_map has %d entries by ID, %d by name; "
-            "sample ID keys=%s sample names=%s",
+            "weekly_damage_refresh: ranking_map has %d entries by ID, %d by name",
             len(ranking_map), len(ranking_by_name),
-            list(ranking_map.keys())[:3],
-            list(ranking_by_name.keys())[:3],
         )
 
         # ── 2. Get all NL citizens from DB ────────────────────────────
@@ -181,10 +175,6 @@ class DamageTasks(TaskCogBase, name="damage_tasks"):
         if not citizens:
             logger.warning("weekly_damage_refresh: no NL citizens in DB")
             return 0, 0
-
-        if citizens:
-            logger.debug("weekly_damage_refresh: sample citizen IDs=%s names=%s",
-                         [c[0] for c in citizens[:3]], [c[1] for c in citizens[:3]])
 
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         updated = 0

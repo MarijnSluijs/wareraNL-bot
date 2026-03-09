@@ -191,6 +191,21 @@ CREATE TABLE IF NOT EXISTS citizen_weekly_damages (
 );
 CREATE INDEX IF NOT EXISTS idx_weekly_damages_country ON citizen_weekly_damages(country_id);
 
+-- ── Global luck ────────────────────────────────────────────────────────────────
+
+-- global_citizen_luck: case-opening luck scores across all countries
+CREATE TABLE IF NOT EXISTS global_citizen_luck (
+    user_id      TEXT PRIMARY KEY,
+    country_id   TEXT NOT NULL,
+    citizen_name TEXT,
+    luck_score   REAL NOT NULL,
+    opens_count  INTEGER NOT NULL,
+    rarity_json  TEXT,
+    updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_global_luck_score ON global_citizen_luck(luck_score);
+CREATE INDEX IF NOT EXISTS idx_global_luck_country ON global_citizen_luck(country_id);
+
 -- ── Legacy (krypton template) ─────────────────────────────────────────────────
 
 -- warns: moderation warn log used by database/__init__.py DatabaseManager

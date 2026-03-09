@@ -10,6 +10,7 @@ from discord.ext.commands import Context
 
 class EmbedModal(discord.ui.Modal, title="Create Embed"):
     """Modal dialog for creating an embed message with multi-line support."""
+
     def __init__(self, bot, selected_channel: discord.TextChannel) -> None:
         super().__init__()
         self.bot = bot
@@ -43,6 +44,7 @@ class EmbedModal(discord.ui.Modal, title="Create Embed"):
 
 class ChannelSelectView(discord.ui.View):
     """View for selecting a channel to post the embed."""
+
     def __init__(self, bot):
         super().__init__()
         self.bot = bot
@@ -63,6 +65,7 @@ class ChannelSelectView(discord.ui.View):
 
 class Embeds(commands.Cog, name="embeds"):
     """Cog for the !embed command, allowing the bot owner to create and post rich embeds via an interactive modal."""
+
     def __init__(self, bot) -> None:
         self.bot = bot
 

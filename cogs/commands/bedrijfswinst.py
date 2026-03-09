@@ -21,7 +21,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from cogs.commands._base import CommandCogBase
+from cogs.commands._base import CommandCogBase, citizen_autocomplete
 
 logger = logging.getLogger("discord_bot")
 
@@ -634,6 +634,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
     @app_commands.describe(
         speler="WarEra-gebruikersnaam van de speler (leeg = jijzelf)",
     )
+    @app_commands.autocomplete(speler=citizen_autocomplete)
     async def bedrijfswinst(
         self,
         interaction: discord.Interaction,

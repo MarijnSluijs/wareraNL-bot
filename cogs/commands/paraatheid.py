@@ -17,7 +17,7 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
 
-from cogs.commands._base import CommandCogBase, country_autocomplete
+from cogs.commands._base import CommandCogBase, citizen_autocomplete, country_autocomplete
 from services.country_utils import country_id as cid_of
 from services.country_utils import find_country
 
@@ -66,7 +66,7 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
         alle_mus="Toon paraatheid voor alle NL MUs in één tabel (geen verdere invoer nodig).",
     )
     @app_commands.autocomplete(
-        land=country_autocomplete, mu=_paraatheid_mu_autocomplete
+        land=country_autocomplete, mu=_paraatheid_mu_autocomplete, speler=citizen_autocomplete
     )
     @app_commands.choices(alle_mus=[app_commands.Choice(name="Ja", value="ja")])
     async def paraatheid(  # noqa: C901

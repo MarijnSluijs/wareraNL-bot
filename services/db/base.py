@@ -1,4 +1,5 @@
 """Database connection management and schema initialization."""
+
 from __future__ import annotations
 
 import logging
@@ -56,9 +57,7 @@ class DatabaseBase:
         ]
         for table, column_def in migrations:
             try:
-                await self._conn.execute(
-                    f"ALTER TABLE {table} ADD COLUMN {column_def}"
-                )
+                await self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
                 await self._conn.commit()
             except Exception:
                 pass  # column already exists — ignore

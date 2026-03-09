@@ -45,44 +45,32 @@ class MUOnboardingView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         """Handle citizen verification request."""
-        await interaction.response.send_modal(
-            MUApplicationModal()
-        )
+        await interaction.response.send_modal(MUApplicationModal())
 
 
 class MUApplicationModal(discord.ui.Modal):
     """Questionnaire shown to users before opening a verification ticket."""
 
     def __init__(self):
-        super().__init__(
-            title="MU Aanmelden"
-        )
+        super().__init__(title="MU Aanmelden")
 
         self.warera_name = discord.ui.TextInput(
             label="WarEra gebruikersnaam",
-            placeholder=(
-                "Vul je in-game naam in"
-            ),
+            placeholder=("Vul je in-game naam in"),
             required=True,
             max_length=64,
         )
         self.mu_link = discord.ui.TextInput(
-            label=(
-                "Link naar de in-game pagina van de MU"
-            ),
+            label=("Link naar de in-game pagina van de MU"),
             style=discord.TextStyle.paragraph,
-            placeholder=(
-                "Plak de MU link"
-            ),
+            placeholder=("Plak de MU link"),
             required=True,
             max_length=500,
         )
         self.extra_info = discord.ui.TextInput(
             label="Aanvullende info",
             style=discord.TextStyle.paragraph,
-            placeholder=(
-                "Optioneel: extra info (bijv. mede-commandanten)"
-            ),
+            placeholder=("Optioneel: extra info (bijv. mede-commandanten)"),
             required=False,
             max_length=500,
         )
@@ -93,18 +81,12 @@ class MUApplicationModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         questionnaire_answers = {
-            (
-                "WarEra gebruikersnaam"
-            ): str(self.warera_name).strip(),
-            (
-                "MU URL"
-            ): str(self.mu_link).strip(),
+            ("WarEra gebruikersnaam"): str(self.warera_name).strip(),
+            ("MU URL"): str(self.mu_link).strip(),
         }
         extra = str(self.extra_info).strip()
         if extra:
-            questionnaire_answers[
-                "Aanvullende info"
-            ] = extra
+            questionnaire_answers["Aanvullende info"] = extra
 
         await create_mu_request_channel(
             interaction,
@@ -141,7 +123,7 @@ async def create_mu_request_channel(
 
     # Configure channel properties based on request type
     roles_cfg = config.get("roles", {})
-    
+
     channel_name = f"mu-{ticket_id}-{user.name}"
     # Embassy requests notify multiple high-level roles
     role_ids = [
@@ -258,7 +240,6 @@ async def create_mu_request_channel(
             )
         await channel.send(embed=questionnaire_embed)
 
-
     instructions_embed = discord.Embed(
         description="Bedankt voor je MU aanmelding! We nemen hem zo snel mogelijk in behandling."
         "Mocht je al een idee hebben voor een logo voor de MU, stuur die dan hier.",
@@ -266,7 +247,6 @@ async def create_mu_request_channel(
     )
     await channel.send(content=user.mention, embed=instructions_embed)
 
-    
     await interaction.response.send_message(
         f"Je MU-aanvraag kanaal is aangemaakt: {channel.mention}\n"
         "Wacht op een moderator om je verzoek te beoordelen.",
@@ -322,7 +302,6 @@ class MURequest(commands.Cog, name="murequest"):
         await channel.purge(limit=1)
 
         await channel.send(embed=embed, view=MUOnboardingView(self.bot))
-
 
 
 async def setup(bot) -> None:

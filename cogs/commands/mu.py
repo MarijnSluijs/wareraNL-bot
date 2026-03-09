@@ -106,7 +106,9 @@ class MU(commands.Cog, name="mu"):
             with open(self._mus_path(), "r", encoding="utf-8") as f:
                 data = json.load(f)
         except Exception as exc:
-            logger.warning("_extract_mu_ids_from_template: failed to read mus.json: %s", exc)
+            logger.warning(
+                "_extract_mu_ids_from_template: failed to read mus.json: %s", exc
+            )
             return []
         ids: list[str] = []
         seen: set[str] = set()
@@ -264,9 +266,9 @@ class MU(commands.Cog, name="mu"):
         )
 
         now = datetime.now(timezone.utc)
-        inactive: list[
-            tuple[float, str, str, str]
-        ] = []  # (hours_ago, uid, name, mu_name)
+        inactive: list[tuple[float, str, str, str]] = (
+            []
+        )  # (hours_ago, uid, name, mu_name)
 
         for uid, obj in zip(all_member_ids, results):
             last_conn = _last_connection(obj)
@@ -351,7 +353,9 @@ class MU(commands.Cog, name="mu"):
     ) -> list[app_commands.Choice[str]]:
         """Autocomplete MU names from mus.json eco MUs."""
         testing = getattr(self.bot, "testing", False)
-        mus_json_path = "templates/mus.testing.json" if testing else "templates/mus.json"
+        mus_json_path = (
+            "templates/mus.testing.json" if testing else "templates/mus.json"
+        )
         choices: list[app_commands.Choice[str]] = []
         try:
             with open(mus_json_path, "r", encoding="utf-8") as f:
@@ -366,7 +370,9 @@ class MU(commands.Cog, name="mu"):
                 if name and mu_id and current.lower() in name.lower():
                     choices.append(app_commands.Choice(name=name, value=mu_id))
         except Exception as exc:
-            logger.warning("_eco_mu_autocomplete: failed to load %s: %s", mus_json_path, exc)
+            logger.warning(
+                "_eco_mu_autocomplete: failed to load %s: %s", mus_json_path, exc
+            )
         return choices[:25]  # Discord max choices
 
     @app_commands.command(
@@ -378,7 +384,12 @@ class MU(commands.Cog, name="mu"):
         mu="Optioneel: specificeer een MU naam om alleen die MU te controleren",
     )
     @app_commands.autocomplete(mu=_eco_mu_autocomplete)
-    async def eco_donations(self, interaction: discord.Interaction, hours: int = 24, mu: Optional[str] = None) -> None:
+    async def eco_donations(
+        self,
+        interaction: discord.Interaction,
+        hours: int = 24,
+        mu: Optional[str] = None,
+    ) -> None:
         """Show eco donations in the last specified hours."""
         await interaction.response.defer()
 
@@ -391,9 +402,10 @@ class MU(commands.Cog, name="mu"):
             except Exception as exc:
                 logger.warning("eco_donations: MU refresh failed: %s", exc)
 
-         
         testing = getattr(self.bot, "testing", False)
-        mus_json_path = "templates/mus.testing.json" if testing else "templates/mus.json"
+        mus_json_path = (
+            "templates/mus.testing.json" if testing else "templates/mus.json"
+        )
         eco_mus: list[dict[str, str]] = []
         selected_mu_name: Optional[str] = None
         try:
@@ -403,12 +415,10 @@ class MU(commands.Cog, name="mu"):
             if mu is not None:
                 for mu_entry in mus_data.get("embeds", []):
                     if mu_entry.get("id") == mu:
-                        selected_mu_name = str(
-                            mu_entry.get("name") or f"MU {mu[:8]}"
-                        )
+                        selected_mu_name = str(mu_entry.get("name") or f"MU {mu[:8]}")
                         eco_mus = [{"title": selected_mu_name, "mu_id": mu}]
                         break
-            else:   
+            else:
                 for item in mus_data.get("embeds", []):
                     if not isinstance(item, dict):
                         continue
@@ -444,9 +454,9 @@ class MU(commands.Cog, name="mu"):
 
         # Fetch MU details and collect members
         logger.debug("eco_donations: fetching MU details for %d eco MUs", len(eco_mus))
-        mu_members: dict[
-            str, tuple[str, list[str]]
-        ] = {}  # mu_id -> (mu_name, [user_ids])
+        mu_members: dict[str, tuple[str, list[str]]] = (
+            {}
+        )  # mu_id -> (mu_name, [user_ids])
         for eco_mu in eco_mus:
             mu_id = eco_mu["mu_id"]
             fallback_name = eco_mu["title"]
@@ -506,7 +516,11 @@ class MU(commands.Cog, name="mu"):
         cursor: Optional[str] = None
         reached_cutoff = False
 
-        logger.debug("eco_donations: fetching transactions for country %s since %s", nl_country_id, cutoff_time.isoformat())
+        logger.debug(
+            "eco_donations: fetching transactions for country %s since %s",
+            nl_country_id,
+            cutoff_time.isoformat(),
+        )
         while not reached_cutoff:
             try:
                 payload = {
@@ -549,11 +563,15 @@ class MU(commands.Cog, name="mu"):
                         amount = float(txn.get("money", 0))
                         if mu is not None:
                             # if a specific MU is selected, keep count for each individual user
-                            mu_donations[user_id] = mu_donations.get(user_id, 0) + amount
+                            mu_donations[user_id] = (
+                                mu_donations.get(user_id, 0) + amount
+                            )
                         else:
                             mu_id = user_to_mu.get(user_id)
                             if mu_id:
-                                mu_donations[mu_id] = mu_donations.get(mu_id, 0) + amount
+                                mu_donations[mu_id] = (
+                                    mu_donations.get(mu_id, 0) + amount
+                                )
                     except Exception:
                         continue
 
@@ -579,10 +597,16 @@ class MU(commands.Cog, name="mu"):
             )
             return
 
-        logger.debug("eco_donations: found %d relevant transactions for %d members", len(mu_donations), len(all_members))
+        logger.debug(
+            "eco_donations: found %d relevant transactions for %d members",
+            len(mu_donations),
+            len(all_members),
+        )
         # Build table data
         if mu is not None:
-            self._db = await self._get_db()  # ensure DB is available for username lookups
+            self._db = (
+                await self._get_db()
+            )  # ensure DB is available for username lookups
 
         try:
             rows: list[tuple[str, float]] = []
@@ -633,11 +657,11 @@ class MU(commands.Cog, name="mu"):
                 timestamp=now,
             )
             if mu is None:
-                footer_text = f"{len(rows)} MU's • {len(all_members)} leden gecontroleerd"
-            else:
                 footer_text = (
-                    f"Top {len(display_rows)} van {len(rows)} donateurs • {len(all_members)} leden gecontroleerd"
+                    f"{len(rows)} MU's • {len(all_members)} leden gecontroleerd"
                 )
+            else:
+                footer_text = f"Top {len(display_rows)} van {len(rows)} donateurs • {len(all_members)} leden gecontroleerd"
             embed.set_footer(text=footer_text)
             await interaction.followup.send(embed=embed)
         except Exception as exc:

@@ -16,11 +16,15 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
         self.bot = bot
 
         try:
-            template = load_roles_template(general_roles_path(getattr(bot, "testing", False)))
+            template = load_roles_template(
+                general_roles_path(getattr(bot, "testing", False))
+            )
             if template.get("embeds"):
                 for embed_data in template["embeds"]:
                     if embed_data.get("buttons"):
-                        self.bot.add_view(RoleToggleView(embed_data["buttons"], exclusive=False))
+                        self.bot.add_view(
+                            RoleToggleView(embed_data["buttons"], exclusive=False)
+                        )
             elif template.get("buttons"):
                 self.bot.add_view(RoleToggleView(template["buttons"], exclusive=False))
         except Exception:

@@ -159,7 +159,10 @@ class ResistanceTasks(TaskCogBase, name="resistance_tasks"):
         embed.set_footer(text="WarEra — verzetspeiling")
 
         if silent:
-            logger.info("resistance_poll: DB updated silently (%d regions), skipping post", len(fields))
+            logger.info(
+                "resistance_poll: DB updated silently (%d regions), skipping post",
+                len(fields),
+            )
             return
 
         for guild in self.bot.guilds:

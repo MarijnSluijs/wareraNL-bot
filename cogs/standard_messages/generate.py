@@ -1,5 +1,5 @@
 """
-This module provides functionality to generate Discord embeds based on JSON data. 
+This module provides functionality to generate Discord embeds based on JSON data.
 """
 
 import json
@@ -10,6 +10,7 @@ from discord.ext import commands
 
 class GenerateEmbeds(commands.Cog, name="generate_embeds"):
     """A base cog that provides methods to load embed data from a JSON file and create Discord embeds accordingly."""
+
     def __init__(self, bot) -> None:
         self.bot = bot
         self.json_data = None

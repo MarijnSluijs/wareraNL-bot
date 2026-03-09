@@ -12,7 +12,12 @@ from discord.ext import commands
 
 from utils.checks import has_privileged_role
 
-from .roles import RoleToggleView, load_roles_template, mu_roles_path, post_or_edit_buttons
+from .roles import (
+    RoleToggleView,
+    load_roles_template,
+    mu_roles_path,
+    post_or_edit_buttons,
+)
 
 
 def mus_json_path(testing: bool = False) -> str:
@@ -87,12 +92,16 @@ def _normalize_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 class MuRoles(commands.Cog, name="mu_roles"):
     def __init__(self, bot) -> None:
         self.bot = bot
-        self.template = load_roles_template(mu_roles_path(getattr(bot, "testing", False)))
+        self.template = load_roles_template(
+            mu_roles_path(getattr(bot, "testing", False))
+        )
 
         if self.template.get("embeds"):
             for embed_data in self.template["embeds"]:
                 if embed_data.get("buttons"):
-                    self.bot.add_view(RoleToggleView(embed_data["buttons"], exclusive=True))
+                    self.bot.add_view(
+                        RoleToggleView(embed_data["buttons"], exclusive=True)
+                    )
         if self.template.get("buttons"):
             self.bot.add_view(RoleToggleView(self.template["buttons"], exclusive=True))
 
@@ -144,7 +153,9 @@ class MuRoles(commands.Cog, name="mu_roles"):
     async def muwachtlijst(self, interaction: discord.Interaction) -> None:
         guild = interaction.guild
         if not guild:
-            await interaction.response.send_message("❌ Guild not found.", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ Guild not found.", ephemeral=True
+            )
             return
 
         wachtlijst_role_id = self.bot.config.get("roles", {}).get("wachtlijst")
@@ -257,7 +268,9 @@ class MuRoles(commands.Cog, name="mu_roles"):
                 )
                 return
             except Exception as e:
-                await interaction.followup.send(f"❌ Rol aanmaken mislukt: {e}", ephemeral=True)
+                await interaction.followup.send(
+                    f"❌ Rol aanmaken mislukt: {e}", ephemeral=True
+                )
                 return
 
         path, data, entries = self._load_mus_entries()
@@ -281,7 +294,9 @@ class MuRoles(commands.Cog, name="mu_roles"):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            await interaction.followup.send(f"❌ Opslaan mus.json mislukt: {e}", ephemeral=True)
+            await interaction.followup.send(
+                f"❌ Opslaan mus.json mislukt: {e}", ephemeral=True
+            )
             return
 
         mus_cog = self.bot.cogs.get("mus")
@@ -352,7 +367,9 @@ class MuRoles(commands.Cog, name="mu_roles"):
                     )
                     deleted_role_msg = f" Discord-rol **{role.name}** verwijderd."
                 except discord.Forbidden:
-                    deleted_role_msg = " ⚠️ Kon de Discord-rol niet verwijderen (onvoldoende rechten)."
+                    deleted_role_msg = (
+                        " ⚠️ Kon de Discord-rol niet verwijderen (onvoldoende rechten)."
+                    )
                 except Exception as e:
                     deleted_role_msg = f" ⚠️ Rol verwijderen mislukt: {e}"
             else:

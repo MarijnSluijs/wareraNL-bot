@@ -56,7 +56,9 @@ class MUs(GenerateEmbeds, name="mus"):
         super().__init__(bot)
         self.load_json(mus_path(getattr(bot, "testing", False)))
 
-    def _normalize_mu_entries(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _normalize_mu_entries(
+        self, entries: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         """Normalize old and new mus.json entries to {id, type, role_id}."""
         normalized: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
@@ -65,14 +67,17 @@ class MUs(GenerateEmbeds, name="mus"):
             if not isinstance(entry, dict):
                 continue
 
-            mu_id = str(entry.get("id") or "").strip() or _extract_mu_id_from_description(
+            mu_id = str(
+                entry.get("id") or ""
+            ).strip() or _extract_mu_id_from_description(
                 str(entry.get("description", ""))
             )
             if not mu_id or mu_id in seen_ids:
                 continue
 
             mu_type = _normalize_mu_type(
-                entry.get("type") or _extract_mu_type_from_description(str(entry.get("description", "")))
+                entry.get("type")
+                or _extract_mu_type_from_description(str(entry.get("description", "")))
             )
 
             role_id_raw = entry.get("role_id", 0)
@@ -81,7 +86,11 @@ class MUs(GenerateEmbeds, name="mus"):
             except (TypeError, ValueError):
                 role_id = 0
 
-            normalized_item: dict[str, Any] = {"id": mu_id, "type": mu_type, "role_id": role_id}
+            normalized_item: dict[str, Any] = {
+                "id": mu_id,
+                "type": mu_type,
+                "role_id": role_id,
+            }
 
             if entry.get("name"):
                 normalized_item["name"] = str(entry.get("name"))
@@ -109,7 +118,9 @@ class MUs(GenerateEmbeds, name="mus"):
                 return ch
         return fallback
 
-    @commands.hybrid_command(name="mulijst", description="Post de MU lijst in het MU-kanaal.")
+    @commands.hybrid_command(
+        name="mulijst", description="Post de MU lijst in het MU-kanaal."
+    )
     @has_privileged_role()
     async def mulijst(self, context: Context) -> None:
         if not self.json_data or not self.json_data.get("embeds"):
@@ -123,7 +134,9 @@ class MUs(GenerateEmbeds, name="mus"):
         await context.send("📚 Bezig met posten van de MU lijst...", ephemeral=True)
         channel = await self._mu_channel(context.channel)
         await self._repost_mu_list(channel)
-        self.bot.logger.info("MU lijst posted by %s in %s", context.author, channel.name)
+        self.bot.logger.info(
+            "MU lijst posted by %s in %s", context.author, channel.name
+        )
 
     @commands.hybrid_command(name="reloadmus", description="Herlaad de MU JSON file.")
     @commands.is_owner()
@@ -232,13 +245,19 @@ class MUs(GenerateEmbeds, name="mus"):
             ]
 
             secondary_role_id = next(
-                (b.get("secondary_role_id") for b in all_buttons if b.get("secondary_role_id")),
+                (
+                    b.get("secondary_role_id")
+                    for b in all_buttons
+                    if b.get("secondary_role_id")
+                ),
                 None,
             )
 
             # Ensure pinned roles exist and have button entries
             for pdef in pinned_role_defs:
-                existing_btn = next((b for b in all_buttons if b.get("label") == pdef["label"]), None)
+                existing_btn = next(
+                    (b for b in all_buttons if b.get("label") == pdef["label"]), None
+                )
                 role = None
                 if existing_btn and existing_btn.get("role_id"):
                     role = channel.guild.get_role(int(existing_btn["role_id"]))
@@ -300,10 +319,15 @@ class MUs(GenerateEmbeds, name="mus"):
 
                 if role.name != mu_name:
                     try:
-                        await role.edit(name=mu_name, reason="MU naam gesynchroniseerd via API")
+                        await role.edit(
+                            name=mu_name, reason="MU naam gesynchroniseerd via API"
+                        )
                     except Exception as exc:
                         self.bot.logger.warning(
-                            "Failed to rename MU role %s to %s: %s", role.name, mu_name, exc
+                            "Failed to rename MU role %s to %s: %s",
+                            role.name,
+                            mu_name,
+                            exc,
                         )
 
                 entry["role_id"] = role.id
@@ -329,7 +353,9 @@ class MUs(GenerateEmbeds, name="mus"):
             with open(roles_path, "w", encoding="utf-8") as f:
                 json.dump(roles_data, f, indent=2, ensure_ascii=False)
 
-            color = int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16)
+            color = int(
+                self.bot.config.get("colors", {}).get("primary", "0x154273"), 16
+            )
             roles_embed = discord.Embed(
                 title=roles_data.get("title", "MU Lidmaatschap"),
                 description=roles_data.get("description", ""),
@@ -366,7 +392,9 @@ class MUs(GenerateEmbeds, name="mus"):
                 f"✅ MU-lijst herplaatst in {channel.mention}.", ephemeral=True
             )
         except Exception as e:
-            await interaction.followup.send(f"❌ Fout bij herplaatsen: {e}", ephemeral=True)
+            await interaction.followup.send(
+                f"❌ Fout bij herplaatsen: {e}", ephemeral=True
+            )
 
     async def _mu_id_autocomplete(
         self, interaction: discord.Interaction, current: str

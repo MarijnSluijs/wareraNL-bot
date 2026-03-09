@@ -5,11 +5,11 @@ General bot commands — /help, /botinfo, /serverinfo, /ping, /invite,
 
 import platform
 import random
+import typing
 
 import discord
-import pytz
 import discord.utils
-import typing
+import pytz
 from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
@@ -19,6 +19,7 @@ from discord.ext.commands import Context
 
 class FeedbackForm(discord.ui.Modal, title="Feedback"):
     """Modal dialog for submitting feedback to the bot owners."""
+
     feedback = discord.ui.TextInput(
         label="Wat vind je van deze bot?",
         style=discord.TextStyle.long,
@@ -35,6 +36,7 @@ class FeedbackForm(discord.ui.Modal, title="Feedback"):
 
 class General(commands.Cog, name="general"):
     """Cog for general-purpose commands like /help, /botinfo, /serverinfo, /ping, /invite, and /feedback."""
+
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.context_menu_user = app_commands.ContextMenu(
@@ -61,7 +63,9 @@ class General(commands.Cog, name="general"):
         content = message.content or ""
         # self.bot.logger.debug(f"Received message: {content} from {message.author} in {getattr(message.channel, 'id', 'DM')}")
         if "hoezeer" in content.lower():
-            self.bot.logger.info(f"Hoezeer detected in message {message.id} by {message.author} in {getattr(message.channel, 'id', 'DM')}")
+            self.bot.logger.info(
+                f"Hoezeer detected in message {message.id} by {message.author} in {getattr(message.channel, 'id', 'DM')}"
+            )
             # add hoezeer reaction to the message
             try:
                 emoji = self.bot.get_emoji(1475153734806798665)  # hoezeer emoji ID
@@ -70,7 +74,9 @@ class General(commands.Cog, name="general"):
                 else:
                     self.bot.logger.error("Hoezeer emoji not found in the bot's cache.")
             except discord.HTTPException as e:
-                self.bot.logger.error(f"Failed to add reaction to message {message.id}: {e}")
+                self.bot.logger.error(
+                    f"Failed to add reaction to message {message.id}: {e}"
+                )
         if "app.warera.io" not in content:
             return
         try:
@@ -189,7 +195,6 @@ class General(commands.Cog, name="general"):
                 return False
 
         return False
-    
 
     @commands.hybrid_command(
         name="botinfo",
@@ -422,7 +427,9 @@ class General(commands.Cog, name="general"):
                     kicked_entry: typing.Optional[discord.AuditLogEntry] = None
                     try:
                         now = discord.utils.utcnow()
-                        async for entry in member.guild.audit_logs(limit=6, action=discord.AuditLogAction.kick):
+                        async for entry in member.guild.audit_logs(
+                            limit=6, action=discord.AuditLogAction.kick
+                        ):
                             if getattr(entry.target, "id", None) == member.id:
                                 # consider entries within 10 seconds recent enough
                                 if (now - entry.created_at).total_seconds() < 10:
@@ -442,10 +449,14 @@ class General(commands.Cog, name="general"):
                                 f"**Reden:** {reason}"
                             ),
                             color=discord.Color.red(),
-                            timestamp=discord.datetime.now(pytz.timezone("Europe/Amsterdam")),
+                            timestamp=discord.datetime.now(
+                                pytz.timezone("Europe/Amsterdam")
+                            ),
                         )
                         if member:
-                            log_embed.set_author(name=member.name, icon_url=member.display_avatar.url)
+                            log_embed.set_author(
+                                name=member.name, icon_url=member.display_avatar.url
+                            )
                             log_embed.set_thumbnail(url=member.display_avatar.url)
                         await log_channel.send(embed=log_embed)
                     else:
@@ -454,7 +465,9 @@ class General(commands.Cog, name="general"):
                             description=f"**{member.mention if member else 'Unknown'} "
                             f"({member.name if member else 'Unknown'}) heeft de server verlaten**\n",
                             color=discord.Color.red(),
-                            timestamp=discord.datetime.now(pytz.timezone("Europe/Amsterdam")),
+                            timestamp=discord.datetime.now(
+                                pytz.timezone("Europe/Amsterdam")
+                            ),
                         )
                         if member:
                             log_embed.set_author(
@@ -478,7 +491,9 @@ class General(commands.Cog, name="general"):
         moderator = None
         reason = None
         try:
-            async for entry in guild.audit_logs(limit=6, action=discord.AuditLogAction.ban):
+            async for entry in guild.audit_logs(
+                limit=6, action=discord.AuditLogAction.ban
+            ):
                 if getattr(entry.target, "id", None) == user.id:
                     moderator = entry.user
                     reason = entry.reason
@@ -515,7 +530,9 @@ class General(commands.Cog, name="general"):
         moderator = None
         reason = None
         try:
-            async for entry in guild.audit_logs(limit=6, action=discord.AuditLogAction.unban):
+            async for entry in guild.audit_logs(
+                limit=6, action=discord.AuditLogAction.unban
+            ):
                 if getattr(entry.target, "id", None) == user.id:
                     moderator = entry.user
                     reason = entry.reason

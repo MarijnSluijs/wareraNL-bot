@@ -21,6 +21,7 @@ logger = logging.getLogger("discord_bot")
 
 class NiveauverdelingCog(CommandCogBase, name="niveauverdeling"):
     """Cog for the /niveauverdeling command, showing cached level distribution of citizens for a country or all countries."""
+
     def __init__(self, bot) -> None:
         self.bot = bot
 

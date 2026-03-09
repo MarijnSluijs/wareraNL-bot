@@ -25,44 +25,44 @@ from typing import Any, Optional
 # Source: skills_equipment.txt, mid-range of stated ranges used.
 _EQ: dict[str, dict[str, float]] = {
     "uncommon": {
-        "attack":      55.0,
-        "crit_chance":  0.080,
-        "crit_dmg":     0.155,   # 11-20% → 15.5%
-        "armor":        0.160,   # chest 8% + pants 8%
-        "precision":    0.080,
-        "dodge":        0.080,
+        "attack": 55.0,
+        "crit_chance": 0.080,
+        "crit_dmg": 0.155,  # 11-20% → 15.5%
+        "armor": 0.160,  # chest 8% + pants 8%
+        "precision": 0.080,
+        "dodge": 0.080,
     },
     "rare": {
-        "attack":      80.0,
-        "crit_chance":  0.130,
-        "crit_dmg":     0.255,
-        "armor":        0.260,   # 13% + 13%
-        "precision":    0.130,
-        "dodge":        0.130,
+        "attack": 80.0,
+        "crit_chance": 0.130,
+        "crit_dmg": 0.255,
+        "armor": 0.260,  # 13% + 13%
+        "precision": 0.130,
+        "dodge": 0.130,
     },
     "epic": {
-        "attack":     110.0,
-        "crit_chance":  0.180,
-        "crit_dmg":     0.355,
-        "armor":        0.360,   # 18% + 18%
-        "precision":    0.180,
-        "dodge":        0.180,
+        "attack": 110.0,
+        "crit_chance": 0.180,
+        "crit_dmg": 0.355,
+        "armor": 0.360,  # 18% + 18%
+        "precision": 0.180,
+        "dodge": 0.180,
     },
     "legendary": {
-        "attack":     145.0,
-        "crit_chance":  0.255,
-        "crit_dmg":     0.455,
-        "armor":        0.510,   # 25.5% + 25.5%
-        "precision":    0.255,
-        "dodge":        0.255,
+        "attack": 145.0,
+        "crit_chance": 0.255,
+        "crit_dmg": 0.455,
+        "armor": 0.510,  # 25.5% + 25.5%
+        "precision": 0.255,
+        "dodge": 0.255,
     },
     "mythic": {
-        "attack":     240.0,
-        "crit_chance":  0.355,
-        "crit_dmg":     0.705,
-        "armor":        0.710,   # 35.5% + 35.5%
-        "precision":    0.355,
-        "dodge":        0.355,
+        "attack": 240.0,
+        "crit_chance": 0.355,
+        "crit_dmg": 0.705,
+        "armor": 0.710,  # 35.5% + 35.5%
+        "precision": 0.355,
+        "dodge": 0.355,
     },
 }
 
@@ -94,8 +94,16 @@ def equipment_tier_name(level: int) -> str:
 
 # ── Skill allocation dataclass ───────────────────────────────────────────────
 
-_SKILL_NAMES = ("attack", "precision", "crit_chance", "crit_dmg",
-                "armor", "dodge", "health", "hunger")
+_SKILL_NAMES = (
+    "attack",
+    "precision",
+    "crit_chance",
+    "crit_dmg",
+    "armor",
+    "dodge",
+    "health",
+    "hunger",
+)
 
 # Hard cap: a skill can be upgraded at most this many times
 MAX_SKILL_LEVEL = 10
@@ -103,39 +111,54 @@ MAX_SKILL_LEVEL = 10
 
 @dataclass
 class SkillAllocation:
-    attack:      int = 0
-    precision:   int = 0
+    attack: int = 0
+    precision: int = 0
     crit_chance: int = 0
-    crit_dmg:    int = 0
-    armor:       int = 0
-    dodge:       int = 0
-    health:      int = 0
-    hunger:      int = 0
+    crit_dmg: int = 0
+    armor: int = 0
+    dodge: int = 0
+    health: int = 0
+    hunger: int = 0
 
     def total_sp_spent(self) -> int:
         return sum(v * (v + 1) // 2 for v in self._values())
 
     def _values(self):
-        return (self.attack, self.precision, self.crit_chance, self.crit_dmg,
-                self.armor, self.dodge, self.health, self.hunger)
+        return (
+            self.attack,
+            self.precision,
+            self.crit_chance,
+            self.crit_dmg,
+            self.armor,
+            self.dodge,
+            self.health,
+            self.hunger,
+        )
 
     def copy(self) -> "SkillAllocation":
-        return SkillAllocation(self.attack, self.precision, self.crit_chance,
-                               self.crit_dmg, self.armor, self.dodge,
-                               self.health, self.hunger)
+        return SkillAllocation(
+            self.attack,
+            self.precision,
+            self.crit_chance,
+            self.crit_dmg,
+            self.armor,
+            self.dodge,
+            self.health,
+            self.hunger,
+        )
 
 
 # ── Global bonus constants ───────────────────────────────────────────────────
 
 COUNTRY_ORDER_BONUS = 0.15
-MU_ORDER_BONUS      = 0.15
-ALLIANCE_BONUS      = 0.10
-MU_HQ_BONUS         = 0.20
-PILL_BONUS          = 0.60   # level ≥ 15 only
+MU_ORDER_BONUS = 0.15
+ALLIANCE_BONUS = 0.10
+MU_HQ_BONUS = 0.20
+PILL_BONUS = 0.60  # level ≥ 15 only
 
-LIGHT_AMMO_BONUS    = 0.10   # level < 20
-AMMO_BONUS          = 0.20   # level 20–30
-HEAVY_AMMO_BONUS    = 0.40   # level > 30
+LIGHT_AMMO_BONUS = 0.10  # level < 20
+AMMO_BONUS = 0.20  # level 20–30
+HEAVY_AMMO_BONUS = 0.40  # level > 30
 
 # Product of the bonuses that are always active (excluding pill, ammo and rank)
 _BASE_GLOBAL = (
@@ -157,36 +180,127 @@ FOOD_HP_PER_HUNGER = 30  # cooked fish: best available food
 # interpolated as 1.00%.
 
 RANK_BONUS_TABLE: dict[int, float] = {
-    0: 0.0000, 1: 0.0025, 2: 0.0050, 3: 0.0075, 4: 0.0100,
-    5: 0.0125, 6: 0.0150, 7: 0.0175, 8: 0.0200,
-    9: 0.0250, 10: 0.0275, 11: 0.0300, 12: 0.0325,
-    13: 0.0375, 14: 0.0400, 15: 0.0425, 16: 0.0450,
-    17: 0.0500, 18: 0.0525, 19: 0.0550, 20: 0.0575,
-    21: 0.0625, 22: 0.0650, 23: 0.0675, 24: 0.0700,
-    25: 0.0750, 26: 0.0775, 27: 0.0800, 28: 0.0825,
-    29: 0.0875, 30: 0.0900, 31: 0.0925, 32: 0.0950,
-    33: 0.1000, 34: 0.1025, 35: 0.1050, 36: 0.1075,
-    37: 0.1125, 38: 0.1150, 39: 0.1175, 40: 0.1200,
-    41: 0.1250, 42: 0.1275, 43: 0.1300, 44: 0.1325,
-    45: 0.1375, 46: 0.1400, 47: 0.1425, 48: 0.1450,
-    49: 0.1500, 50: 0.1525, 51: 0.1550, 52: 0.1575,
-    53: 0.1625, 54: 0.1650, 55: 0.1675, 56: 0.1700,
-    57: 0.1750, 58: 0.1775, 59: 0.1800, 60: 0.1825,
-    61: 0.1875, 62: 0.1900, 63: 0.1925, 64: 0.1950,
-    65: 0.2000, 66: 0.2025, 67: 0.2050, 68: 0.2075,
-    69: 0.2125, 70: 0.2150, 71: 0.2175, 72: 0.2200,
-    73: 0.2250, 74: 0.2275, 75: 0.2300, 76: 0.2325,
-    77: 0.2375, 78: 0.2400, 79: 0.2425, 80: 0.2450,
-    81: 0.2500, 82: 0.2525, 83: 0.2550, 84: 0.2575,
-    85: 0.2625, 86: 0.2650, 87: 0.2675, 88: 0.2700,
-    89: 0.2750, 90: 0.2775, 91: 0.2800, 92: 0.2825,
-    93: 0.2875, 94: 0.2900, 95: 0.2925, 96: 0.2950,
-    97: 0.3000, 98: 0.3025, 99: 0.3050, 100: 0.3075,
-    101: 0.3125, 102: 0.3150, 103: 0.3175, 104: 0.3200,
-    105: 0.3250, 106: 0.3275, 107: 0.3300, 108: 0.3325,
-    109: 0.3350, 110: 0.3375, 111: 0.3425, 112: 0.3450,
-    113: 0.3475, 114: 0.3500, 115: 0.3525, 116: 0.3550,
-    117: 0.3600, 118: 0.3650, 119: 0.3700, 120: 0.3750,
+    0: 0.0000,
+    1: 0.0025,
+    2: 0.0050,
+    3: 0.0075,
+    4: 0.0100,
+    5: 0.0125,
+    6: 0.0150,
+    7: 0.0175,
+    8: 0.0200,
+    9: 0.0250,
+    10: 0.0275,
+    11: 0.0300,
+    12: 0.0325,
+    13: 0.0375,
+    14: 0.0400,
+    15: 0.0425,
+    16: 0.0450,
+    17: 0.0500,
+    18: 0.0525,
+    19: 0.0550,
+    20: 0.0575,
+    21: 0.0625,
+    22: 0.0650,
+    23: 0.0675,
+    24: 0.0700,
+    25: 0.0750,
+    26: 0.0775,
+    27: 0.0800,
+    28: 0.0825,
+    29: 0.0875,
+    30: 0.0900,
+    31: 0.0925,
+    32: 0.0950,
+    33: 0.1000,
+    34: 0.1025,
+    35: 0.1050,
+    36: 0.1075,
+    37: 0.1125,
+    38: 0.1150,
+    39: 0.1175,
+    40: 0.1200,
+    41: 0.1250,
+    42: 0.1275,
+    43: 0.1300,
+    44: 0.1325,
+    45: 0.1375,
+    46: 0.1400,
+    47: 0.1425,
+    48: 0.1450,
+    49: 0.1500,
+    50: 0.1525,
+    51: 0.1550,
+    52: 0.1575,
+    53: 0.1625,
+    54: 0.1650,
+    55: 0.1675,
+    56: 0.1700,
+    57: 0.1750,
+    58: 0.1775,
+    59: 0.1800,
+    60: 0.1825,
+    61: 0.1875,
+    62: 0.1900,
+    63: 0.1925,
+    64: 0.1950,
+    65: 0.2000,
+    66: 0.2025,
+    67: 0.2050,
+    68: 0.2075,
+    69: 0.2125,
+    70: 0.2150,
+    71: 0.2175,
+    72: 0.2200,
+    73: 0.2250,
+    74: 0.2275,
+    75: 0.2300,
+    76: 0.2325,
+    77: 0.2375,
+    78: 0.2400,
+    79: 0.2425,
+    80: 0.2450,
+    81: 0.2500,
+    82: 0.2525,
+    83: 0.2550,
+    84: 0.2575,
+    85: 0.2625,
+    86: 0.2650,
+    87: 0.2675,
+    88: 0.2700,
+    89: 0.2750,
+    90: 0.2775,
+    91: 0.2800,
+    92: 0.2825,
+    93: 0.2875,
+    94: 0.2900,
+    95: 0.2925,
+    96: 0.2950,
+    97: 0.3000,
+    98: 0.3025,
+    99: 0.3050,
+    100: 0.3075,
+    101: 0.3125,
+    102: 0.3150,
+    103: 0.3175,
+    104: 0.3200,
+    105: 0.3250,
+    106: 0.3275,
+    107: 0.3300,
+    108: 0.3325,
+    109: 0.3350,
+    110: 0.3375,
+    111: 0.3425,
+    112: 0.3450,
+    113: 0.3475,
+    114: 0.3500,
+    115: 0.3525,
+    116: 0.3550,
+    117: 0.3600,
+    118: 0.3650,
+    119: 0.3700,
+    120: 0.3750,
 }
 
 _MAX_RANK_LEVEL = max(RANK_BONUS_TABLE)
@@ -221,6 +335,7 @@ def ammo_for_level(player_level: int) -> tuple[float, str]:
 
 # ── Core damage computation ──────────────────────────────────────────────────
 
+
 def compute_damage_per_8h(
     skills: SkillAllocation,
     player_level: int,
@@ -236,25 +351,25 @@ def compute_damage_per_8h(
     eq = equipment_for_level(player_level)
 
     # ── Derived combat stats (skill levels capped at MAX_SKILL_LEVEL) ────────
-    atk_lvl     = min(skills.attack,      MAX_SKILL_LEVEL)
-    pre_lvl     = min(skills.precision,   MAX_SKILL_LEVEL)
-    cc_lvl      = min(skills.crit_chance, MAX_SKILL_LEVEL)
-    cd_lvl      = min(skills.crit_dmg,    MAX_SKILL_LEVEL)
-    arm_lvl     = min(skills.armor,       MAX_SKILL_LEVEL)
-    dod_lvl     = min(skills.dodge,       MAX_SKILL_LEVEL)
-    hp_lvl      = min(skills.health,      MAX_SKILL_LEVEL)
-    hng_lvl     = min(skills.hunger,      MAX_SKILL_LEVEL)
+    atk_lvl = min(skills.attack, MAX_SKILL_LEVEL)
+    pre_lvl = min(skills.precision, MAX_SKILL_LEVEL)
+    cc_lvl = min(skills.crit_chance, MAX_SKILL_LEVEL)
+    cd_lvl = min(skills.crit_dmg, MAX_SKILL_LEVEL)
+    arm_lvl = min(skills.armor, MAX_SKILL_LEVEL)
+    dod_lvl = min(skills.dodge, MAX_SKILL_LEVEL)
+    hp_lvl = min(skills.health, MAX_SKILL_LEVEL)
+    hng_lvl = min(skills.hunger, MAX_SKILL_LEVEL)
 
-    attack      = (100.0 + 20.0 * atk_lvl) + eq["attack"]
-    precision   = min(1.0,  0.50 + 0.05 * pre_lvl + eq["precision"])
-    crit_chance = min(1.0,  0.10 + 0.05 * cc_lvl  + eq["crit_chance"])
+    attack = (100.0 + 20.0 * atk_lvl) + eq["attack"]
+    precision = min(1.0, 0.50 + 0.05 * pre_lvl + eq["precision"])
+    crit_chance = min(1.0, 0.10 + 0.05 * cc_lvl + eq["crit_chance"])
     # Base crit dmg bonus = 1.0 (=100% extra), each level +0.20; add equipment bonus.
     # Crit multiplier = 1 + crit_dmg_bonus
     crit_dmg_bonus = (1.0 + 0.20 * cd_lvl) + eq["crit_dmg"]
     armor = min(0.80, 0.04 * arm_lvl + eq["armor"])
     dodge = min(0.80, 0.04 * dod_lvl + eq["dodge"])
-    max_hp     = 50.0 + 10.0 * hp_lvl
-    max_hunger = 4.0  + hng_lvl
+    max_hp = 50.0 + 10.0 * hp_lvl
+    max_hunger = 4.0 + hng_lvl
 
     # ── Hits per 8 hours ─────────────────────────────────────────────────────
     # Expected HP consumed per hit action (armor reduces, dodge cancels entirely)
@@ -286,6 +401,7 @@ def compute_damage_per_8h(
 
 
 # ── Balanced skill allocator ─────────────────────────────────────────────────
+
 
 def optimal_skills(player_level: int) -> SkillAllocation:
     """Return a balanced skill allocation following the prescribed distribution:
@@ -328,16 +444,27 @@ def optimal_skills(player_level: int) -> SkillAllocation:
                     hp_lvl = hu_lvl = lvl
                     break
             leftover = remaining - _cost[hp_lvl] - _cost[hu_lvl]
-            if hp_lvl < MAX_SKILL_LEVEL and (_cost[hp_lvl + 1] - _cost[hp_lvl]) <= leftover:
+            if (
+                hp_lvl < MAX_SKILL_LEVEL
+                and (_cost[hp_lvl + 1] - _cost[hp_lvl]) <= leftover
+            ):
                 hp_lvl += 1
                 leftover -= _cost[hp_lvl] - _cost[hp_lvl - 1]
-            if hu_lvl < MAX_SKILL_LEVEL and (_cost[hu_lvl + 1] - _cost[hu_lvl]) <= leftover:
+            if (
+                hu_lvl < MAX_SKILL_LEVEL
+                and (_cost[hu_lvl + 1] - _cost[hu_lvl]) <= leftover
+            ):
                 hu_lvl += 1
 
             alloc = SkillAllocation(
-                attack=base, precision=base, crit_chance=base, crit_dmg=base,
-                armor=arm_lvl, dodge=dod_lvl,
-                health=hp_lvl, hunger=hu_lvl,
+                attack=base,
+                precision=base,
+                crit_chance=base,
+                crit_dmg=base,
+                armor=arm_lvl,
+                dodge=dod_lvl,
+                health=hp_lvl,
+                hunger=hu_lvl,
             )
             dmg = compute_damage_per_8h(alloc, player_level)
             if dmg > best_dmg:
@@ -356,6 +483,7 @@ def damage_for_level(player_level: int) -> float:
 
 
 # ── Military rank extraction ─────────────────────────────────────────────────
+
 
 def extract_rank_bonus(obj: Any) -> tuple[float, Optional[int]]:
     """Extract the military rank damage bonus from a getUserLite response dict.
@@ -388,8 +516,14 @@ def extract_rank_bonus(obj: Any) -> tuple[float, Optional[int]]:
             return rank_bonus_from_level(node), node
 
     # ── Fallback: explicit bonus percentage fields ────────────────────────
-    for key in ("militaryRankBonus", "rankBonus", "militaryBonus",
-                "rank_bonus", "rankDamageBonus", "militaryDamageBonus"):
+    for key in (
+        "militaryRankBonus",
+        "rankBonus",
+        "militaryBonus",
+        "rank_bonus",
+        "rankDamageBonus",
+        "militaryDamageBonus",
+    ):
         v = obj.get(key)
         if isinstance(v, (int, float)):
             val = float(v)
@@ -413,6 +547,7 @@ def extract_rank_bonus(obj: Any) -> tuple[float, Optional[int]]:
 
 # ── Helpers for formatting ───────────────────────────────────────────────────
 
+
 def fmt_damage(dmg: float) -> str:
     """Format a large damage number for display (e.g. 1_234_567 → '1.2M')."""
     if dmg >= 1_000_000_000:
@@ -426,6 +561,7 @@ def fmt_damage(dmg: float) -> str:
 
 # ── Full player breakdown ────────────────────────────────────────────────────
 
+
 def player_breakdown(player_level: int, rank_bonus: float = 0.0) -> dict:
     """Return a complete computation breakdown dict for a single player.
 
@@ -435,116 +571,114 @@ def player_breakdown(player_level: int, rank_bonus: float = 0.0) -> dict:
     if player_level <= 0:
         player_level = 1
 
-    skills  = optimal_skills(player_level)
-    eq      = equipment_for_level(player_level)
-    tier    = equipment_tier_name(player_level)
+    skills = optimal_skills(player_level)
+    eq = equipment_for_level(player_level)
+    tier = equipment_tier_name(player_level)
     sp_budget = 4 * player_level
-    sp_used   = skills.total_sp_spent()
+    sp_used = skills.total_sp_spent()
 
     # ── Derived stats (same logic as compute_damage_per_8h) ─────────────
-    atk_lvl = min(skills.attack,      MAX_SKILL_LEVEL)
-    pre_lvl = min(skills.precision,   MAX_SKILL_LEVEL)
-    cc_lvl  = min(skills.crit_chance, MAX_SKILL_LEVEL)
-    cd_lvl  = min(skills.crit_dmg,    MAX_SKILL_LEVEL)
-    arm_lvl = min(skills.armor,       MAX_SKILL_LEVEL)
-    dod_lvl = min(skills.dodge,       MAX_SKILL_LEVEL)
-    hp_lvl  = min(skills.health,      MAX_SKILL_LEVEL)
-    hng_lvl = min(skills.hunger,      MAX_SKILL_LEVEL)
+    atk_lvl = min(skills.attack, MAX_SKILL_LEVEL)
+    pre_lvl = min(skills.precision, MAX_SKILL_LEVEL)
+    cc_lvl = min(skills.crit_chance, MAX_SKILL_LEVEL)
+    cd_lvl = min(skills.crit_dmg, MAX_SKILL_LEVEL)
+    arm_lvl = min(skills.armor, MAX_SKILL_LEVEL)
+    dod_lvl = min(skills.dodge, MAX_SKILL_LEVEL)
+    hp_lvl = min(skills.health, MAX_SKILL_LEVEL)
+    hng_lvl = min(skills.hunger, MAX_SKILL_LEVEL)
 
-    attack         = (100.0 + 20.0 * atk_lvl) + eq["attack"]
+    attack = (100.0 + 20.0 * atk_lvl) + eq["attack"]
     skill_base_atk = 100.0 + 20.0 * atk_lvl
-    precision      = min(1.0, 0.50 + 0.05 * pre_lvl + eq["precision"])
-    crit_chance    = min(1.0, 0.10 + 0.05 * cc_lvl  + eq["crit_chance"])
+    precision = min(1.0, 0.50 + 0.05 * pre_lvl + eq["precision"])
+    crit_chance = min(1.0, 0.10 + 0.05 * cc_lvl + eq["crit_chance"])
     crit_dmg_bonus = (1.0 + 0.20 * cd_lvl) + eq["crit_dmg"]
-    armor          = min(0.80, 0.04 * arm_lvl + eq["armor"])
-    dodge          = min(0.80, 0.04 * dod_lvl + eq["dodge"])
-    max_hp         = 50.0 + 10.0 * hp_lvl
-    max_hunger     = 4.0  + hng_lvl
+    armor = min(0.80, 0.04 * arm_lvl + eq["armor"])
+    dodge = min(0.80, 0.04 * dod_lvl + eq["dodge"])
+    max_hp = 50.0 + 10.0 * hp_lvl
+    max_hunger = 4.0 + hng_lvl
 
     # ── HP & hits ────────────────────────────────────────────────────────
-    hp_regen        = max_hp * 0.8          # 10%/h × 8h
-    hunger_start    = int(max_hunger)
-    hunger_regen    = int(max_hunger * 0.8)  # floor to whole fish
-    food_hp_start   = hunger_start * FOOD_HP_PER_HUNGER
-    food_hp_regen   = hunger_regen * FOOD_HP_PER_HUNGER
-    food_hp         = food_hp_start + food_hp_regen
-    total_hp        = max_hp + hp_regen + food_hp
-    hp_per_hit      = max(0.001, 10.0 * (1.0 - armor) * (1.0 - dodge))
-    hits            = total_hp / hp_per_hit
+    hp_regen = max_hp * 0.8  # 10%/h × 8h
+    hunger_start = int(max_hunger)
+    hunger_regen = int(max_hunger * 0.8)  # floor to whole fish
+    food_hp_start = hunger_start * FOOD_HP_PER_HUNGER
+    food_hp_regen = hunger_regen * FOOD_HP_PER_HUNGER
+    food_hp = food_hp_start + food_hp_regen
+    total_hp = max_hp + hp_regen + food_hp
+    hp_per_hit = max(0.001, 10.0 * (1.0 - armor) * (1.0 - dodge))
+    hits = total_hp / hp_per_hit
 
     # ── Per-hit damage ────────────────────────────────────────────────────
-    miss_rate  = 1.0 - precision
+    miss_rate = 1.0 - precision
     hit_no_crit_rate = precision * (1.0 - crit_chance)
-    hit_crit_rate    = precision * crit_chance
-    e_per_hit  = attack * (
-        miss_rate * 0.5
-        + hit_no_crit_rate
-        + hit_crit_rate * (1.0 + crit_dmg_bonus)
+    hit_crit_rate = precision * crit_chance
+    e_per_hit = attack * (
+        miss_rate * 0.5 + hit_no_crit_rate + hit_crit_rate * (1.0 + crit_dmg_bonus)
     )
 
     # ── Multipliers ───────────────────────────────────────────────────────
-    pill_active         = player_level >= 15
-    base_global         = _BASE_GLOBAL_PILL if pill_active else _BASE_GLOBAL
+    pill_active = player_level >= 15
+    base_global = _BASE_GLOBAL_PILL if pill_active else _BASE_GLOBAL
     ammo_bonus, ammo_name = ammo_for_level(player_level)
-    total_mult          = base_global * (1.0 + rank_bonus) * (1.0 + ammo_bonus)
-    total_dmg           = hits * e_per_hit * total_mult
+    total_mult = base_global * (1.0 + rank_bonus) * (1.0 + ammo_bonus)
+    total_dmg = hits * e_per_hit * total_mult
 
     return {
         # ── Input ──────────────────────────────────────────────────────
-        "player_level":      player_level,
-        "rank_bonus":        rank_bonus,
-        "sp_budget":         sp_budget,
-        "sp_used":           sp_used,
+        "player_level": player_level,
+        "rank_bonus": rank_bonus,
+        "sp_budget": sp_budget,
+        "sp_used": sp_used,
         # ── Skills ─────────────────────────────────────────────────────
-        "skills":            skills,
+        "skills": skills,
         # ── Equipment ──────────────────────────────────────────────────
-        "equipment_tier":    tier,
-        "eq_attack":         eq["attack"],
-        "eq_crit_chance":    eq["crit_chance"],
-        "eq_crit_dmg":       eq["crit_dmg"],
-        "eq_armor":          eq["armor"],
-        "eq_precision":      eq["precision"],
-        "eq_dodge":          eq["dodge"],
+        "equipment_tier": tier,
+        "eq_attack": eq["attack"],
+        "eq_crit_chance": eq["crit_chance"],
+        "eq_crit_dmg": eq["crit_dmg"],
+        "eq_armor": eq["armor"],
+        "eq_precision": eq["precision"],
+        "eq_dodge": eq["dodge"],
         # ── Derived combat stats ────────────────────────────────────────
-        "attack":            attack,
-        "skill_base_atk":    skill_base_atk,
-        "precision":         precision,
-        "crit_chance":       crit_chance,
-        "crit_dmg_bonus":    crit_dmg_bonus,   # the EXTRA multiplier (not 1+…)
-        "armor":             armor,
-        "dodge":             dodge,
-        "max_hp":            max_hp,
-        "max_hunger":        max_hunger,
+        "attack": attack,
+        "skill_base_atk": skill_base_atk,
+        "precision": precision,
+        "crit_chance": crit_chance,
+        "crit_dmg_bonus": crit_dmg_bonus,  # the EXTRA multiplier (not 1+…)
+        "armor": armor,
+        "dodge": dodge,
+        "max_hp": max_hp,
+        "max_hunger": max_hunger,
         # ── HP & hit count ───────────────────────────────────────────────
-        "hp_regen":          hp_regen,
-        "hunger_start":      hunger_start,
-        "hunger_regen":      hunger_regen,
-        "food_hp_start":     food_hp_start,
-        "food_hp_regen":     food_hp_regen,
-        "food_hp":           food_hp,
-        "total_hp":          total_hp,
-        "hp_per_hit":        hp_per_hit,
-        "hp_per_landed":     10.0 * (1.0 - armor),   # HP cost ignoring dodge
-        "hits":              hits,
-        "n_dodges":          hits * dodge,
-        "n_landed":          hits * (1.0 - dodge),
+        "hp_regen": hp_regen,
+        "hunger_start": hunger_start,
+        "hunger_regen": hunger_regen,
+        "food_hp_start": food_hp_start,
+        "food_hp_regen": food_hp_regen,
+        "food_hp": food_hp,
+        "total_hp": total_hp,
+        "hp_per_hit": hp_per_hit,
+        "hp_per_landed": 10.0 * (1.0 - armor),  # HP cost ignoring dodge
+        "hits": hits,
+        "n_dodges": hits * dodge,
+        "n_landed": hits * (1.0 - dodge),
         # ── Per-hit probability / damage ────────────────────────────────
-        "miss_rate":         miss_rate,
-        "hit_no_crit_rate":  hit_no_crit_rate,
-        "hit_crit_rate":     hit_crit_rate,
-        "n_misses":          hits * miss_rate,
-        "n_hits":            hits * hit_no_crit_rate,
-        "n_crits":           hits * hit_crit_rate,
-        "dmg_miss":          attack * 0.5               * total_mult,
-        "dmg_hit":           attack * 1.0               * total_mult,
-        "dmg_crit":          attack * (1.0 + crit_dmg_bonus) * total_mult,
-        "e_per_hit":         e_per_hit,
+        "miss_rate": miss_rate,
+        "hit_no_crit_rate": hit_no_crit_rate,
+        "hit_crit_rate": hit_crit_rate,
+        "n_misses": hits * miss_rate,
+        "n_hits": hits * hit_no_crit_rate,
+        "n_crits": hits * hit_crit_rate,
+        "dmg_miss": attack * 0.5 * total_mult,
+        "dmg_hit": attack * 1.0 * total_mult,
+        "dmg_crit": attack * (1.0 + crit_dmg_bonus) * total_mult,
+        "e_per_hit": e_per_hit,
         # ── Multipliers ──────────────────────────────────────────────────
-        "pill_active":       pill_active,
-        "ammo_bonus":        ammo_bonus,
-        "ammo_name":         ammo_name,
-        "base_global_mult":  base_global,
-        "total_mult":        total_mult,
+        "pill_active": pill_active,
+        "ammo_bonus": ammo_bonus,
+        "ammo_name": ammo_name,
+        "base_global_mult": base_global,
+        "total_mult": total_mult,
         # ── Result ───────────────────────────────────────────────────────
-        "total_dmg":         total_dmg,
+        "total_dmg": total_dmg,
     }

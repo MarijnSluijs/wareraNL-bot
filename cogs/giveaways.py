@@ -15,6 +15,7 @@ from discord.ext.commands import Context
 
 class Giveaways(commands.Cog, name="giveaways"):
     """Cog for giveaway-related commands and interactions."""
+
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.config = getattr(self.bot, "config", {}) or {}

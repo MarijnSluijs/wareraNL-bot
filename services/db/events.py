@@ -1,4 +1,5 @@
 """Event-related DB methods (seen_articles, seen_events, war_events)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -73,10 +74,18 @@ class EventsMixin:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                event_id, event_type, battle_id, war_id,
-                attacker_country_id, defender_country_id,
-                region_id, region_name, attacker_name, defender_name,
-                created_at, raw_json,
+                event_id,
+                event_type,
+                battle_id,
+                war_id,
+                attacker_country_id,
+                defender_country_id,
+                region_id,
+                region_name,
+                attacker_name,
+                defender_name,
+                created_at,
+                raw_json,
             ),
         )
         await self._conn.commit()

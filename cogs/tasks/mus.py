@@ -76,7 +76,9 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
         except Exception:
             return None
 
-    def _normalize_entries(self, raw_entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _normalize_entries(
+        self, raw_entries: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []
         seen: set[str] = set()
 
@@ -150,7 +152,8 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
 
         existing_entries = self._normalize_entries(data.get("embeds", []))
         has_missing_metadata = any(
-            not str(entry.get("name") or "").strip() or not str(entry.get("thumbnail") or "").strip()
+            not str(entry.get("name") or "").strip()
+            or not str(entry.get("thumbnail") or "").strip()
             for entry in existing_entries
         )
 
@@ -223,7 +226,9 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
 
-        logger.info("refresh_mu_info: %d entries, %d fields updated", len(entries), updated)
+        logger.info(
+            "refresh_mu_info: %d entries, %d fields updated", len(entries), updated
+        )
         return {
             "path": path,
             "updated": updated,

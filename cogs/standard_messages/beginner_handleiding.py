@@ -1,5 +1,5 @@
 """
-This module defines the BeginnerHandleiding cog, which provides commands to post a series of embeds as a beginner guide in a Discord channel. 
+This module defines the BeginnerHandleiding cog, which provides commands to post a series of embeds as a beginner guide in a Discord channel.
 """
 
 import discord

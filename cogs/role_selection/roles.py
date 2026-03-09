@@ -1,5 +1,5 @@
 """
-This module defines the Roles cog, which provides commands to manage self-assignable roles in a Discord server. 
+This module defines the Roles cog, which provides commands to manage self-assignable roles in a Discord server.
 """
 
 import json
@@ -191,9 +191,11 @@ class RoleToggleView(discord.ui.View):
                     style=button_style(btn.get("style", "secondary")),
                     emoji=btn.get("emoji"),
                     row=btn.get("row"),
-                    secondary_role_id=int(btn["secondary_role_id"])
-                    if btn.get("secondary_role_id")
-                    else None,
+                    secondary_role_id=(
+                        int(btn["secondary_role_id"])
+                        if btn.get("secondary_role_id")
+                        else None
+                    ),
                 )
             )
 
@@ -201,8 +203,6 @@ class RoleToggleView(discord.ui.View):
 class Roles(commands.Cog, name="roles"):
     def __init__(self, bot) -> None:
         self.bot = bot
-
-    
 
     @app_commands.command(
         name="verwijderrol",

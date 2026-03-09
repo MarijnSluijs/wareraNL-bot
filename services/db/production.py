@@ -1,4 +1,5 @@
 """Production-related DB methods (snapshots, specialization tops, deposit tops)."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -25,7 +26,15 @@ class ProductionMixin:
             "INSERT OR REPLACE INTO country_snapshots"
             "(country_id, code, name, specialized_item, production_bonus, raw_json, updated_at)"
             " VALUES(?, ?, ?, ?, ?, ?, ?)",
-            (country_id, code, name, specialized_item, production_bonus, raw_json, updated_at),
+            (
+                country_id,
+                code,
+                name,
+                specialized_item,
+                production_bonus,
+                raw_json,
+                updated_at,
+            ),
         )
         await self._conn.commit()
 
@@ -61,16 +70,18 @@ class ProductionMixin:
             "FROM specialization_top"
         ) as cur:
             async for row in cur:
-                rows.append({
-                    "item": row[0],
-                    "country_id": row[1],
-                    "country_name": row[2],
-                    "production_bonus": row[3],
-                    "strategic_bonus": row[4],
-                    "ethic_bonus": row[5],
-                    "ethic_deposit_bonus": row[6],
-                    "updated_at": row[7],
-                })
+                rows.append(
+                    {
+                        "item": row[0],
+                        "country_id": row[1],
+                        "country_name": row[2],
+                        "production_bonus": row[3],
+                        "strategic_bonus": row[4],
+                        "ethic_bonus": row[5],
+                        "ethic_deposit_bonus": row[6],
+                        "updated_at": row[7],
+                    }
+                )
         return rows
 
     async def set_top_specialization(
@@ -90,8 +101,16 @@ class ProductionMixin:
             "(item, country_id, country_name, production_bonus, "
             "strategic_bonus, ethic_bonus, ethic_deposit_bonus, updated_at)"
             " VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-            (item, country_id, country_name, production_bonus,
-             strategic_bonus, ethic_bonus, ethic_deposit_bonus, updated_at),
+            (
+                item,
+                country_id,
+                country_name,
+                production_bonus,
+                strategic_bonus,
+                ethic_bonus,
+                ethic_deposit_bonus,
+                updated_at,
+            ),
         )
         await self._conn.commit()
 
@@ -128,12 +147,14 @@ class ProductionMixin:
             "SELECT item, country_id, strategic_bonus, ethic_bonus FROM country_item_ethic"
         ) as cur:
             async for row in cur:
-                rows.append({
-                    "item": row[0],
-                    "country_id": row[1],
-                    "strategic_bonus": row[2],
-                    "ethic_bonus": row[3],
-                })
+                rows.append(
+                    {
+                        "item": row[0],
+                        "country_id": row[1],
+                        "strategic_bonus": row[2],
+                        "ethic_bonus": row[3],
+                    }
+                )
         return rows
 
     async def get_country_spec_map(self) -> dict[str, str]:
@@ -182,19 +203,21 @@ class ProductionMixin:
             "FROM deposit_top"
         ) as cur:
             async for row in cur:
-                rows.append({
-                    "item": row[0],
-                    "region_id": row[1],
-                    "region_name": row[2],
-                    "country_id": row[3],
-                    "country_name": row[4],
-                    "bonus": row[5],
-                    "deposit_bonus": row[6],
-                    "ethic_deposit_bonus": row[7],
-                    "permanent_bonus": row[8],
-                    "deposit_end_at": row[9],
-                    "updated_at": row[10],
-                })
+                rows.append(
+                    {
+                        "item": row[0],
+                        "region_id": row[1],
+                        "region_name": row[2],
+                        "country_id": row[3],
+                        "country_name": row[4],
+                        "bonus": row[5],
+                        "deposit_bonus": row[6],
+                        "ethic_deposit_bonus": row[7],
+                        "permanent_bonus": row[8],
+                        "deposit_end_at": row[9],
+                        "updated_at": row[10],
+                    }
+                )
         return rows
 
     async def set_deposit_top(
@@ -217,7 +240,18 @@ class ProductionMixin:
             "(item, region_id, region_name, country_id, country_name, bonus, "
             "deposit_bonus, ethic_deposit_bonus, permanent_bonus, deposit_end_at, updated_at)"
             " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (item, region_id, region_name, country_id, country_name, bonus,
-             deposit_bonus, ethic_deposit_bonus, permanent_bonus, deposit_end_at, updated_at),
+            (
+                item,
+                region_id,
+                region_name,
+                country_id,
+                country_name,
+                bonus,
+                deposit_bonus,
+                ethic_deposit_bonus,
+                permanent_bonus,
+                deposit_end_at,
+                updated_at,
+            ),
         )
         await self._conn.commit()

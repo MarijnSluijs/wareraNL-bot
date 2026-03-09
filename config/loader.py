@@ -5,6 +5,7 @@ Configs live in config/ (preferred) with a fallback to the project root for
 backward compatibility.  All bot code accesses config via ``bot.config`` — use
 this module only in ``bot.py`` during startup.
 """
+
 from __future__ import annotations
 
 import json

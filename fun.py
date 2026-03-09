@@ -66,8 +66,9 @@ class RockPaperScissors(discord.ui.Select):
         bot_choice = random.choice(list(choices.keys()))
         bot_choice_index = choices[bot_choice]
 
-        result_embed = discord.Embed(color=int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16)
-)
+        result_embed = discord.Embed(
+            color=int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16)
+        )
         result_embed.set_author(
             name=interaction.user.name, icon_url=interaction.user.display_avatar.url
         )
@@ -112,13 +113,25 @@ class Fun(commands.Cog, name="fun"):
             ) as request:
                 if request.status == 200:
                     data = await request.json()
-                    embed = discord.Embed(description=data["text"], color=int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16)
-)
+                    embed = discord.Embed(
+                        description=data["text"],
+                        color=int(
+                            self.bot.config.get("colors", {}).get(
+                                "primary", "0x154273"
+                            ),
+                            16,
+                        ),
+                    )
                 else:
                     embed = discord.Embed(
                         title="Error!",
                         description="There is something wrong with the API, please try again later",
-                        color=int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16)
+                        color=int(
+                            self.bot.config.get("colors", {}).get(
+                                "primary", "0x154273"
+                            ),
+                            16,
+                        ),
                     )
                 await context.send(embed=embed)
 
@@ -132,7 +145,10 @@ class Fun(commands.Cog, name="fun"):
         :param context: The hybrid command context.
         """
         buttons = Choice()
-        embed = discord.Embed(description="What is your bet?", color=int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16))
+        embed = discord.Embed(
+            description="What is your bet?",
+            color=int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16),
+        )
         message = await context.send(embed=embed, view=buttons)
         await buttons.wait()  # We wait for the user to click a button.
         result = random.choice(["heads", "tails"])

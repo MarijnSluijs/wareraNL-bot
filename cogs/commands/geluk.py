@@ -16,6 +16,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from services.api_client import APIClient
+from cogs.commands._base import citizen_autocomplete
 
 logger = logging.getLogger("discord_bot")
 
@@ -126,20 +127,29 @@ def _unwrap(resp: dict) -> dict:
 def _luck_indicator(actual_n: int, expected_n: float) -> str:
     """Return a luck emoji based on deviation from expected count.
 
-    When expected_n < 1 (rarity so low you weren't statistically due one),
-    getting zero is neutral — only flag positively if you got one anyway.
+    Scale: 💀💀  💀  👎  ➖  👍  🍀  🍀🍀
+
+    For expected_n in [0.5, 1.0): you were statistically ~40–60% likely to
+    get at least one drop; getting zero is slightly unlucky (👎).
+    Below 0.5 expected the drop was unlikely anyway, so zero is neutral (➖).
     """
     if expected_n <= 0:
         return ""
     if expected_n < 1.0:
-        return "🍀🍀" if actual_n >= 1 else "➖"
+        if actual_n >= 1:
+            return "🍀🍀" if expected_n < 0.5 else "🍀"
+        return "👎" if expected_n >= 0.5 else "➖"
     ratio = actual_n / expected_n
     if ratio >= 1.5:
         return "🍀🍀"
     if ratio >= 1.2:
         return "🍀"
-    if ratio >= 0.8:
+    if ratio >= 1.05:
+        return "👍"
+    if ratio >= 0.95:
         return "➖"
+    if ratio >= 0.8:
+        return "👎"
     if ratio >= 0.5:
         return "💀"
     return "💀💀"
@@ -406,6 +416,7 @@ class Geluk(commands.Cog, name="geluk"):
         speler="De gebruikersnaam van de speler om te controleren",
         gebruiker_id="Optioneel: WarEra user ID van de speler",
     )
+    @app_commands.autocomplete(speler=citizen_autocomplete)
     async def geluk(
         self,
         interaction: discord.Interaction,
@@ -533,10 +544,11 @@ class Geluk(commands.Cog, name="geluk"):
                     from datetime import timezone as _tz, datetime as _dt
 
                     _luck = calc_luck_pct(counts, _tc)
+                    _rarity_json = __import__("json").dumps(counts)
                     _now = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                     _db = await self._get_db()
                     await _db.upsert_luck_score(
-                        resolved_user_id, _nl_cid, username, _luck, _tc, _now
+                        resolved_user_id, _nl_cid, username, _luck, _tc, _rarity_json, _now
                     )
                     await _db.flush_luck_scores()
                     logger.info(
@@ -564,6 +576,10 @@ class Geluk(commands.Cog, name="geluk"):
                         rank_total = int(_stored) if _stored else len(ranking)
                     except Exception:
                         rank_total = len(ranking)
+                    # rank_total from poll state may exceed the number of actual DB rows;
+                    # clamp to len(ranking) so index arithmetic stays in bounds.
+                    actual_len = len(ranking)
+                    rank_total = min(rank_total, actual_len)
                     rank_target_idx: int | None = None
                     for idx, entry in enumerate(ranking):
                         if entry["user_id"] == resolved_user_id:
@@ -651,6 +667,7 @@ class Geluk(commands.Cog, name="geluk"):
         gebruiker_id="Optioneel: WarEra user ID van de speler",
         top_n="Hoeveel spelers in de top tonen (standaard: 10)",
     )
+    @app_commands.autocomplete(speler=citizen_autocomplete)
     async def caserang(
         self,
         interaction: discord.Interaction,
