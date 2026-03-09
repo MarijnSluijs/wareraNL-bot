@@ -73,9 +73,9 @@ class LuckTasks(TaskCogBase, name="luck_tasks"):
     # Daily luck score sweep                                               #
     # ------------------------------------------------------------------ #
 
-    @tasks.loop(hours=24)
+    @tasks.loop(hours=1)
     async def daily_luck_refresh(self):
-        """Calculate and cache luck scores for all NL citizens once per day."""
+        """Calculate and cache luck scores for all NL citizens once per hour."""
         if not self._client or not self._db:
             return
 
@@ -89,16 +89,16 @@ class LuckTasks(TaskCogBase, name="luck_tasks"):
         if not nl_country_id:
             return
 
-        # 23-hour cooldown guard
+        # 0.9-hour cooldown guard (prevents double-runs on restart)
         try:
             last_run_str = await self._db.get_poll_state("luck_refresh_last_run")
             if last_run_str:
                 elapsed_h = (
                     now_utc - datetime.fromisoformat(last_run_str)
                 ).total_seconds() / 3600
-                if elapsed_h < 23:
+                if elapsed_h < 0.9:
                     logger.info(
-                        "daily_luck_refresh: skipping — last run %.1fh ago (< 23h)",
+                        "daily_luck_refresh: skipping — last run %.1fh ago (< 0.9h)",
                         elapsed_h,
                     )
                     return

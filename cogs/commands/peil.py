@@ -42,6 +42,7 @@ class PeilCog(CommandCogBase, name="peil"):
         app_commands.Choice(name="productie",  value="productie"),
         app_commands.Choice(name="events",     value="events"),
         app_commands.Choice(name="weerstand",  value="weerstand"),
+        app_commands.Choice(name="weekschade", value="weekschade"),
         app_commands.Choice(name="alles",      value="alles"),
     ])
     @app_commands.autocomplete(land=country_autocomplete)
@@ -78,6 +79,8 @@ class PeilCog(CommandCogBase, name="peil"):
             await self._peil_events(ctx)
         if onderdeel in ("weerstand", "alles"):
             await self._peil_weerstand(ctx)
+        if onderdeel in ("weekschade", "alles"):
+            await self._peil_weekschade(ctx)
 
     # ------------------------------------------------------------------ #
     # Burgers subsystem                                                    #
@@ -237,6 +240,25 @@ class PeilCog(CommandCogBase, name="peil"):
         except Exception as exc:
             logger.exception("peil weerstand: error")
             await status_msg.edit(content=f"❌ Verzetspeiling mislukt: {exc}")
+
+    # ------------------------------------------------------------------ #
+    # Weekschade subsystem                                                 #
+    # ------------------------------------------------------------------ #
+
+    async def _peil_weekschade(self, ctx: Context) -> None:
+        damage_cog = self.bot.get_cog("damage_tasks")
+        if not damage_cog:
+            await ctx.send("❌ Damage task cog niet geladen.", ephemeral=True)
+            return
+        status_msg = await ctx.send("🔄 Wekelijkse schade ophalen…", ephemeral=True)
+        try:
+            updated, zeroed = await damage_cog.run_damage_refresh_once()
+            await status_msg.edit(
+                content=f"✅ Weekschade verversing klaar — {updated} met schade, {zeroed} op nul."
+            )
+        except Exception as exc:
+            logger.exception("peil weekschade: error")
+            await status_msg.edit(content=f"❌ Weekschade verversing mislukt: {exc}")
 
 
 async def setup(bot) -> None:
