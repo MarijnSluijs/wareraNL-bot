@@ -8,7 +8,7 @@ Mixin                Tables
 ===================  ========================================
 :mod:`.state`        ``poll_state``, ``jobs``
 :mod:`.production`   ``country_snapshots``, ``specialization_top``, ``deposit_top``
-:mod:`.citizens`     ``citizen_levels``
+:mod:`.citizens`     ``citizen_levels``, ``citizen_weekly_damages``
 :mod:`.events`       ``seen_articles``, ``seen_events``, ``war_events``
 :mod:`.luck`         ``citizen_luck``
 :mod:`.resistance`   ``resistance_state``

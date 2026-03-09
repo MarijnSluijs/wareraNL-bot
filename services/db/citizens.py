@@ -93,26 +93,37 @@ class CitizensMixin:
 
     async def get_level_distribution(
         self, country_id: Optional[str]
-    ) -> tuple[dict[int, int], Optional[str]]:
-        """Return (level_counts, last_updated_at)."""
+    ) -> tuple[dict[int, int], dict[int, int], Optional[str]]:
+        """Return (level_counts, active_counts, last_updated_at).
+
+        active_counts contains only citizens whose last_login_at is within
+        the last 24 hours.
+        """
+        from datetime import datetime, timezone, timedelta
         counts: dict[int, int] = {}
+        active_counts: dict[int, int] = {}
         last_updated: Optional[str] = None
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=24)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         if country_id:
-            sql = "SELECT level, updated_at FROM citizen_levels WHERE country_id = ?"
+            sql = "SELECT level, updated_at, last_login_at FROM citizen_levels WHERE country_id = ?"
             params: tuple = (country_id,)
         else:
-            sql = "SELECT level, updated_at FROM citizen_levels"
+            sql = "SELECT level, updated_at, last_login_at FROM citizen_levels"
             params = ()
         async with self._conn.execute(sql, params) as cur:
             async for row in cur:
-                lvl, updated_at = row
+                lvl, updated_at, last_login_at = row
                 if lvl is not None:
                     lvl = int(lvl)
                     counts[lvl] = counts.get(lvl, 0) + 1
+                    if last_login_at and last_login_at >= cutoff:
+                        active_counts[lvl] = active_counts.get(lvl, 0) + 1
                 if last_updated is None or updated_at > last_updated:
                     last_updated = updated_at
-        return counts, last_updated
+        return counts, active_counts, last_updated
 
     async def get_skill_mode_distribution(
         self, country_id: Optional[str]
@@ -586,3 +597,101 @@ class CitizensMixin:
                 best_ratio = ratio
                 best = (uid, name)
         return best
+
+    # ── Weekly damage ──────────────────────────────────────────────────
+
+    async def get_nl_citizen_ids(self, country_id: str) -> list[tuple[str, str]]:
+        """Return [(user_id, citizen_name)] for all citizens of *country_id*."""
+        sql = (
+            "SELECT user_id, COALESCE(citizen_name, user_id) "
+            "FROM citizen_levels WHERE country_id = ?"
+        )
+        rows: list[tuple[str, str]] = []
+        async with self._conn.execute(sql, (country_id,)) as cur:
+            async for row in cur:
+                rows.append((str(row[0]), str(row[1])))
+        return rows
+
+    async def upsert_weekly_damage(
+        self,
+        user_id: str,
+        citizen_name: Optional[str],
+        country_id: str,
+        weekly_damage: float,
+        updated_at: str,
+    ) -> None:
+        """Insert or update a citizen's weekly damage record."""
+        await self._conn.execute(
+            "INSERT INTO citizen_weekly_damages"
+            " (user_id, citizen_name, country_id, weekly_damage, updated_at)"
+            " VALUES(?, ?, ?, ?, ?)"
+            " ON CONFLICT(user_id) DO UPDATE SET"
+            "  citizen_name  = COALESCE(excluded.citizen_name, citizen_weekly_damages.citizen_name),"
+            "  country_id    = excluded.country_id,"
+            "  weekly_damage = excluded.weekly_damage,"
+            "  updated_at    = excluded.updated_at",
+            (user_id, citizen_name, country_id, weekly_damage, updated_at),
+        )
+
+    async def flush_weekly_damages(self) -> None:
+        """Commit pending weekly-damage changes."""
+        await self._conn.commit()
+
+    async def get_top_weekly_damages(
+        self, country_id: str, limit: int = 10
+    ) -> tuple[list[tuple[str, str, float]], Optional[str]]:
+        """Return (rows, last_updated) for the top *limit* weekly-damage citizens.
+
+        rows: [(user_id, citizen_name, weekly_damage)] sorted descending.
+        last_updated: ISO timestamp of last refresh, or None.
+        """
+        sql = (
+            "SELECT user_id, COALESCE(citizen_name, user_id), weekly_damage, updated_at "
+            "FROM citizen_weekly_damages "
+            "WHERE country_id = ? AND weekly_damage > 0 "
+            "ORDER BY weekly_damage DESC LIMIT ?"
+        )
+        rows: list[tuple[str, str, float]] = []
+        last_updated: Optional[str] = None
+        async with self._conn.execute(sql, (country_id, limit)) as cur:
+            async for row in cur:
+                rows.append((str(row[0]), str(row[1]), float(row[2])))
+                if last_updated is None:
+                    last_updated = row[3]
+        return rows, last_updated
+
+    async def get_weekly_damage_for_player(
+        self, country_id: str, query: str
+    ) -> Optional[tuple[str, str, float, str]]:
+        """Return (user_id, citizen_name, weekly_damage, updated_at) for one player.
+
+        Matches by user_id or citizen_name (case-insensitive, partial).
+        """
+        sql = (
+            "SELECT user_id, COALESCE(citizen_name, user_id), weekly_damage, updated_at "
+            "FROM citizen_weekly_damages "
+            "WHERE country_id = ? AND ("
+            "  user_id = ? OR lower(citizen_name) = lower(?)"
+            "  OR lower(citizen_name) LIKE lower(?) "
+            ") ORDER BY weekly_damage DESC LIMIT 1"
+        )
+        async with self._conn.execute(sql, (country_id, query, query, f"%{query}%")) as cur:
+            row = await cur.fetchone()
+        if row:
+            return str(row[0]), str(row[1]), float(row[2]), str(row[3])
+        return None
+
+    async def get_player_nl_rank(
+        self, country_id: str, user_id: str
+    ) -> Optional[int]:
+        """Return the 1-based NL rank of *user_id* by weekly_damage, or None."""
+        sql = (
+            "SELECT COUNT(*) + 1 FROM citizen_weekly_damages "
+            "WHERE country_id = ? AND weekly_damage > ("
+            "  SELECT weekly_damage FROM citizen_weekly_damages "
+            "  WHERE country_id = ? AND user_id = ?"
+            ")"
+        )
+        async with self._conn.execute(sql, (country_id, country_id, user_id)) as cur:
+            row = await cur.fetchone()
+        return int(row[0]) if row else None

@@ -3,110 +3,118 @@
         {
             "id": "695c10139cddbde0503e0d36",
             "type": "Elite",
-            "role_id": 0,
+            "role_id": 1475464742209327204,
             "name": "De Heeren XVII",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-695c10139cddbde0503e0d36-1767642365469-1s8cvy38.jpg"
         },
         {
-            "id": "695c338ec617ea3c92421bc3",
-            "type": "Elite",
-            "role_id": 0,
-            "name": "Korps Mariniers",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-695c338ec617ea3c92421bc3-1770834028326-m4wudnb7.png"
-        },
-        {
             "id": "695acce63ae9eac7fb6e59e1",
             "type": "Elite",
-            "role_id": 0,
+            "role_id": 1475465823685443604,
             "name": "Korps Commando's",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-695acce63ae9eac7fb6e59e1-1770820823243-v7bl6nyb.png"
         },
         {
-            "id": "6970dd1ebea7a2698be2e84e",
-            "type": "Standaard",
-            "role_id": 0,
-            "name": "The Flying Dutchman",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-6970dd1ebea7a2698be2e84e-1770831355728-6mctkthl.png"
+            "id": "695c338ec617ea3c92421bc3",
+            "type": "Elite",
+            "role_id": 1475465021491380298,
+            "name": "Korps Mariniers",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-695c338ec617ea3c92421bc3-1770834028326-m4wudnb7.png"
         },
         {
             "id": "697de1e370af1f7f8aa169ea",
             "type": "Eco",
-            "role_id": 0,
+            "role_id": 1475470788957175943,
             "name": "De Nederlandse Bank",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-697de1e370af1f7f8aa169ea-1771079953581-leqour4i.png"
         },
         {
-            "id": "6980b01819decffdc7848ef9",
-            "type": "Standaard",
-            "role_id": 0,
-            "name": "Regiment Huzaren",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-6980b01819decffdc7848ef9-1770821860524-yd1m6m7w.png"
-        },
-        {
-            "id": "69843f617cf831a523014e15",
-            "type": "Standaard",
-            "role_id": 0,
-            "name": "Reg. Genietroepen",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-69843f617cf831a523014e15-1772439217531-wpl0xk8z.png"
-        },
-        {
-            "id": "69848b1d7922e416bbcca4e9",
-            "type": "Standaard",
-            "role_id": 0,
-            "name": "Regiment van Oranje",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-69848b1d7922e416bbcca4e9-1770821085430-y1gtahvp.png"
-        },
-        {
-            "id": "698f253efffb3268e9276ac1",
-            "type": "Standaard",
-            "role_id": 0,
-            "name": "Van Speijk Eskader",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-698f253efffb3268e9276ac1-1770991320655-qtu0zz2n.png"
-        },
-        {
-            "id": "69906c5a8b9151ad2ba50435",
-            "type": "Standaard",
-            "role_id": 0,
-            "name": "Oranje Huurlingen",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-69906c5a8b9151ad2ba50435-1771584723193-r0xr7d1l.png"
-        },
-        {
             "id": "699b1d30b34e1837aaf9c1bf",
             "type": "Eco",
-            "role_id": 0,
+            "role_id": 1478029996764168324,
             "name": "Duytenberg",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-699b1d30b34e1837aaf9c1bf-1771774830441-nfjy03l9.png"
         },
         {
+            "id": "699f7d14c629e138fa86ec9c",
+            "type": "Eco",
+            "role_id": 1478029998085374242,
+            "name": "EBITDA Compagnie",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-699f7d14c629e138fa86ec9c-1772468380534-mayiwkxz.png"
+        },
+        {
+            "id": "69a42247cedfd3ae87863a6c",
+            "type": "Standaard",
+            "role_id": 1480300807424442511,
+            "name": "Baronie Wachteenheid",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69a42247cedfd3ae87863a6c-1772376765723-d00juucz.png"
+        },
+        {
             "id": "699bf0f5b232a1efde5b9aed",
             "type": "Standaard",
-            "role_id": 0,
+            "role_id": 1478037356442423336,
             "name": "MIVD",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-699bf0f5b232a1efde5b9aed-1772095865354-sivps2wd.png"
         },
         {
-            "id": "699f7d14c629e138fa86ec9c",
-            "type": "Eco",
-            "role_id": 0,
-            "name": "EBITDA Compagnie",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-699f7d14c629e138fa86ec9c-1772468380534-mayiwkxz.png"
+            "id": "69906c5a8b9151ad2ba50435",
+            "type": "Standaard",
+            "role_id": 1478030000211886174,
+            "name": "Oranje Huurlingen",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69906c5a8b9151ad2ba50435-1771584723193-r0xr7d1l.png"
+        },
+        {
+            "id": "69843f617cf831a523014e15",
+            "type": "Standaard",
+            "role_id": 1478030001541742715,
+            "name": "Reg. Genietroepen",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69843f617cf831a523014e15-1772439217531-wpl0xk8z.png"
+        },
+        {
+            "id": "6980b01819decffdc7848ef9",
+            "type": "Standaard",
+            "role_id": 1475471406186889236,
+            "name": "Regiment Huzaren",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-6980b01819decffdc7848ef9-1770821860524-yd1m6m7w.png"
+        },
+        {
+            "id": "69848b1d7922e416bbcca4e9",
+            "type": "Standaard",
+            "role_id": 1478030002107973909,
+            "name": "Regiment van Oranje",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69848b1d7922e416bbcca4e9-1770821085430-y1gtahvp.png"
+        },
+        {
+            "id": "6970dd1ebea7a2698be2e84e",
+            "type": "Standaard",
+            "role_id": 1475466801730158707,
+            "name": "The Flying Dutchman",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-6970dd1ebea7a2698be2e84e-1770831355728-6mctkthl.png"
+        },
+        {
+            "id": "698f253efffb3268e9276ac1",
+            "type": "Standaard",
+            "role_id": 1480300332679692388,
+            "name": "Van Speijk Eskader",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-698f253efffb3268e9276ac1-1770991320655-qtu0zz2n.png"
         }
     ],
     "posted_message_ids": [
-        1477715900382580778,
-        1477715903012667554,
-        1477715911157747712,
-        1477715912004993056,
-        1477715913292906641,
-        1477715914525769748,
-        1477715915520082073,
-        1477715916480450793,
-        1477715937242382366,
-        1477715938395816090,
-        1477715939117105235,
-        1477715940429791382,
-        1477715941336027358,
-        1477715959174402110
+        1480300872931213352,
+        1480300873946234964,
+        1480300875175039037,
+        1480300876433326291,
+        1480300878211579915,
+        1480300879520206951,
+        1480300899275509984,
+        1480300899833479473,
+        1480300900714156315,
+        1480300902165254144,
+        1480300903138595099,
+        1480300922117558383,
+        1480300923967242300,
+        1480300926202810591,
+        1480300927255843020
     ],
-    "mu_info_updated_at": "2026-03-06T15:13:45.632183+00:00"
+    "mu_info_updated_at": "2026-03-09T09:53:43.612348+00:00"
 }
