@@ -7,7 +7,7 @@ import json
 import logging
 import math as _luck_math
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from discord.ext import tasks
 
@@ -31,6 +31,15 @@ _LUCK_WEIGHTS: dict[str, float] = {
 _LUCK_WEIGHT_TOTAL: float = sum(_LUCK_WEIGHTS.values())
 
 MIN_OPENS = 20
+
+
+def _seconds_until_hour(target_hour: int) -> float:
+    """Seconds to sleep until the next target_hour:00:00 UTC."""
+    now = datetime.now(timezone.utc)
+    target = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return max(1.0, (target - now).total_seconds())
 
 
 def _calc_luck_pct(counts: dict, total: int) -> float:
@@ -98,6 +107,8 @@ class GlobalLuckTasks(TaskCogBase, name="global_luck_tasks"):
     @global_luck_refresh.before_loop
     async def before_global_luck_refresh(self) -> None:
         await self._wait_for_services()
+        # Align to next 03:00 UTC so the heavy sweep runs overnight
+        await asyncio.sleep(_seconds_until_hour(3))
 
     async def run_global_luck_refresh(self) -> None:
         """Public entry point for /peil or debug commands."""
