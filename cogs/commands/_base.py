@@ -50,6 +50,18 @@ async def country_autocomplete(
         if q in name.lower()
     ][:25]
 
+async def dreigingsniveau_autocomplete(
+    interaction: discord.Interaction, current: str
+) -> list[app_commands.Choice[str]]:
+    """Module-level autocomplete callback for dreigingsniveau parameters."""
+    q = current.strip().lower()
+    options = ["groen", "geel", "oranje", "rood"]
+    return [
+        app_commands.Choice(name=option.capitalize(), value=option)
+        for option in options
+        if q in option
+    ]
+
 
 class CommandCogBase(commands.Cog):
     """Mixin providing service properties and shared utilities for command cogs."""
