@@ -43,8 +43,10 @@ intents.presences = False
 
 # Setup both of the loggers
 
+
 class LoggingFormatter(logging.Formatter):
     """Custom logging formatter with colors and timestamps."""
+
     # Colors
     black = "\x1b[30m"
     red = "\x1b[31m"
@@ -85,7 +87,9 @@ os.makedirs("logs", exist_ok=True)
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(LoggingFormatter())
 # File handler
-file_handler = logging.FileHandler(filename="logs/discord.log", encoding="utf-8", mode="a")
+file_handler = logging.FileHandler(
+    filename="logs/discord.log", encoding="utf-8", mode="a"
+)
 file_handler_formatter = logging.Formatter(
     "[{asctime}] [{levelname:<8}] {name}: {message}", "%Y-%m-%d %H:%M:%S", style="{"
 )
@@ -128,6 +132,7 @@ class DiscordBot(commands.Bot):
         self.config = self.load_config(config_path)
         self.start_time = discord.utils.utcnow()
         self.testing = False
+
     def load_config(self, config_path: str | Path | None = None) -> dict:
         """Load configuration from given JSON path (relative paths supported).
 
@@ -145,12 +150,19 @@ class DiscordBot(commands.Bot):
                 return config
         except Exception as e:
             self.logger.error(f"Failed to load config {cfg}: {e}")
-            return {"colors": {"primary": "0x154273", "success": "0x57F287", "error": "0xE02B2B", "warning": "0xF59E42"}}
+            return {
+                "colors": {
+                    "primary": "0x154273",
+                    "success": "0x57F287",
+                    "error": "0xE02B2B",
+                    "warning": "0xF59E42",
+                }
+            }
 
     async def init_db(self) -> None:
         ext_db_path = self.config.get("external_db_path", "database/external.db")
         async with aiosqlite.connect(ext_db_path) as db:
-            with open(Path("database") / "schema.sql", encoding = "utf-8") as file:
+            with open(Path("database") / "schema.sql", encoding="utf-8") as file:
                 await db.executescript(file.read())
             # Idempotent column migrations for DBs created before schema update
             for _sql in [
@@ -170,6 +182,7 @@ class DiscordBot(commands.Bot):
         Called once during setup_hook after all cogs are loaded.
         """
         import discord.app_commands as _app
+
         catalogue: dict[str, dict] = {}  # label -> {slash: [], prefix: []}
 
         _cog_labels: dict[str, str] = {
@@ -199,7 +212,9 @@ class DiscordBot(commands.Bot):
         def _label(cog_name: str | None) -> str:
             if not cog_name:
                 return "🔧 Overig"
-            return _cog_labels.get(cog_name.lower(), f"🔧 {cog_name.replace('_', ' ').title()}")
+            return _cog_labels.get(
+                cog_name.lower(), f"🔧 {cog_name.replace('_', ' ').title()}"
+            )
 
         def _collect_slash(cmd, cog_label: str) -> None:
             if isinstance(cmd, _app.Group):
@@ -210,15 +225,26 @@ class DiscordBot(commands.Bot):
                 return  # context menus have no description, skip them
             params = []
             for p in getattr(cmd, "parameters", []):
-                params.append({"name": p.name, "required": p.required,
-                                "description": p.description or ""})
+                params.append(
+                    {
+                        "name": p.name,
+                        "required": p.required,
+                        "description": p.description or "",
+                    }
+                )
             parts, parent = [cmd.name], getattr(cmd, "parent", None)
             while parent and hasattr(parent, "name"):
                 parts.insert(0, parent.name)
                 parent = getattr(parent, "parent", None)
-            entry = {"name": "/" + " ".join(parts), "description": cmd.description or "",
-                     "params": params, "type": "slash"}
-            catalogue.setdefault(cog_label, {"slash": [], "prefix": []})["slash"].append(entry)
+            entry = {
+                "name": "/" + " ".join(parts),
+                "description": cmd.description or "",
+                "params": params,
+                "type": "slash",
+            }
+            catalogue.setdefault(cog_label, {"slash": [], "prefix": []})[
+                "slash"
+            ].append(entry)
 
         for cmd in self.tree.get_commands():
             cog_name: str | None = None
@@ -236,10 +262,19 @@ class DiscordBot(commands.Bot):
             cog_name = type(cmd.cog).__name__ if cmd.cog else None
             lbl = _label(cog_name)
             desc = (cmd.help or cmd.brief or "").strip().split("\n")[0]
-            params = [{"name": p, "required": True, "description": ""} for p in cmd.clean_params]
-            entry = {"name": f"!{cmd.qualified_name}", "description": desc,
-                     "params": params, "type": "prefix"}
-            catalogue.setdefault(lbl, {"slash": [], "prefix": []})["prefix"].append(entry)
+            params = [
+                {"name": p, "required": True, "description": ""}
+                for p in cmd.clean_params
+            ]
+            entry = {
+                "name": f"!{cmd.qualified_name}",
+                "description": desc,
+                "params": params,
+                "type": "prefix",
+            }
+            catalogue.setdefault(lbl, {"slash": [], "prefix": []})["prefix"].append(
+                entry
+            )
 
         result = [
             {"category": lbl, "slash": v["slash"], "prefix": v["prefix"]}
@@ -251,7 +286,9 @@ class DiscordBot(commands.Bot):
         out_path = out_dir / "commands.json"
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
-        self.logger.info(f"Command catalogue written to {out_path} ({len(result)} categories)")
+        self.logger.info(
+            f"Command catalogue written to {out_path} ({len(result)} categories)"
+        )
 
     async def load_cogs(self) -> None:
         """
@@ -269,7 +306,9 @@ class DiscordBot(commands.Bot):
                     if file.startswith("_"):
                         continue
                     # Calculate relative path from cogs directory
-                    relative_path = os.path.relpath(os.path.join(root, file), str(cogs_path))
+                    relative_path = os.path.relpath(
+                        os.path.join(root, file), str(cogs_path)
+                    )
                     # Convert file path to module path (e.g., standard_messages/beginner_handleiding.py -> standard_messages.beginner_handleiding)
                     extension = relative_path.replace(os.sep, ".")[:-3]
                     await self.load_extension(f"cogs.{extension}")
@@ -285,10 +324,12 @@ class DiscordBot(commands.Bot):
         """
         Setup the game status task of the bot.
         """
-        statuses = ["Werelddominantie aan het voorbereiden...", 
-                    "Regiment Wielrijders aan het verzamelen...", 
-                    "Tulpen aan het handelen...",
-                    "Polders aan het inpolderen...",]
+        statuses = [
+            "Werelddominantie aan het voorbereiden...",
+            "Regiment Wielrijders aan het verzamelen...",
+            "Tulpen aan het handelen...",
+            "Polders aan het inpolderen...",
+        ]
         await self.change_presence(activity=discord.Game(random.choice(statuses)))
 
     @status_task.before_loop
@@ -338,23 +379,39 @@ class DiscordBot(commands.Bot):
         self.logger.error(f"An error occurred in {event_method}", exc_info=True)
 
     # ...existing code...
-    async def on_app_command_error(self, interaction: discord.Interaction, error: Exception) -> None:
+    async def on_app_command_error(
+        self, interaction: discord.Interaction, error: Exception
+    ) -> None:
         """Handle errors from application (slash) commands."""
-        
+
         # always print full traceback to stderr (visible in terminal) and to logger
-        traceback.print_exception(type(error), error, error.__traceback__, limit=None, file=sys.stderr)
-        self.logger.error(f"An error occurred in app command {getattr(interaction, 'command', None)}: {error}", exc_info=True)
+        traceback.print_exception(
+            type(error), error, error.__traceback__, limit=None, file=sys.stderr
+        )
+        self.logger.error(
+            f"An error occurred in app command {getattr(interaction, 'command', None)}: {error}",
+            exc_info=True,
+        )
         # try to notify the user if possible (avoid raising another exception)
         try:
             if interaction.response.is_done():
-                await interaction.followup.send("An internal error occurred while running this command.", ephemeral=True)
+                await interaction.followup.send(
+                    "An internal error occurred while running this command.",
+                    ephemeral=True,
+                )
             else:
-                await interaction.response.send_message("An internal error occurred while running this command.", ephemeral=True)
+                await interaction.response.send_message(
+                    "An internal error occurred while running this command.",
+                    ephemeral=True,
+                )
         except Exception:
             # ensure any follow-up failure is also visible
             traceback.print_exc(file=sys.stderr)
-            self.logger.error("Failed to notify user about app command error", exc_info=True)
-# ...existing code...
+            self.logger.error(
+                "Failed to notify user about app command error", exc_info=True
+            )
+
+    # ...existing code...
 
     async def on_message(self, message: discord.Message) -> None:
         """
@@ -448,20 +505,26 @@ class DiscordBot(commands.Bot):
 # Terminal command runner (--testing mode)                            #
 # ------------------------------------------------------------------ #
 
+
 class _TerminalMessage:
     """Returned by _TerminalContext.send(); supports .edit() for status messages."""
+
     async def edit(self, *, content=None, **kwargs):
         if content:
             print(content, flush=True)
 
 
 class _TerminalTyping:
-    async def __aenter__(self): return self
-    async def __aexit__(self, *_): pass
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        pass
 
 
 class _TerminalContext:
     """Minimal duck-typed Context for invoking commands from stdin in --testing mode."""
+
     def __init__(self, bot):
         self.bot = bot
         self.guild = bot.guilds[0] if bot.guilds else None
@@ -469,9 +532,10 @@ class _TerminalContext:
         class _Author:
             name = "Terminal"
             bot = False
+
         _Author.id = bot.owner_id or 0
         self.author = _Author()
-        self.message = type("_M", (), {"content": "", "attachments": []})() 
+        self.message = type("_M", (), {"content": "", "attachments": []})()
 
     async def send(self, content=None, *, embed=None, **kwargs):
         if content:
@@ -516,11 +580,11 @@ async def _run_terminal_loop(bot) -> None:
         line = line.strip()
         if not line:
             continue
-        if line.startswith('/'):
+        if line.startswith("/"):
             line = prefix + line[1:]
         elif not line.startswith(prefix):
             line = prefix + line
-        rest = line[len(prefix):]
+        rest = line[len(prefix) :]
         try:
             parts = shlex.split(rest)
         except ValueError as e:
@@ -541,8 +605,14 @@ async def _run_terminal_loop(bot) -> None:
         for param in params:
             if param.kind is inspect.Parameter.KEYWORD_ONLY:
                 joined = " ".join(raw_args[pos_i:])
-                call_kwargs[param.name] = joined if joined else (
-                    None if param.default is inspect.Parameter.empty else param.default
+                call_kwargs[param.name] = (
+                    joined
+                    if joined
+                    else (
+                        None
+                        if param.default is inspect.Parameter.empty
+                        else param.default
+                    )
                 )
                 pos_i = len(raw_args)
             elif param.kind is inspect.Parameter.VAR_POSITIONAL:
@@ -562,6 +632,7 @@ async def _run_terminal_loop(bot) -> None:
                 await cmd.callback(ctx, **call_kwargs)
         except Exception:
             import traceback as _tb
+
             _tb.print_exc()
 
 
@@ -587,10 +658,21 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+
     parser = argparse.ArgumentParser(description="Run the WarEraNL Discord bot")
-    parser.add_argument("--testing", action="store_true", help="Run using testing_config.json and TOKEN_TEST env var")
-    parser.add_argument("--config", type=str, help="Path to config JSON to use (overrides --testing)")
-    parser.add_argument("--token-env", type=str, help="Environment variable name that contains the bot token (overrides default)")
+    parser.add_argument(
+        "--testing",
+        action="store_true",
+        help="Run using testing_config.json and TOKEN_TEST env var",
+    )
+    parser.add_argument(
+        "--config", type=str, help="Path to config JSON to use (overrides --testing)"
+    )
+    parser.add_argument(
+        "--token-env",
+        type=str,
+        help="Environment variable name that contains the bot token (overrides default)",
+    )
     args = parser.parse_args()
 
     # Determine config path
@@ -603,13 +685,16 @@ if __name__ == "__main__":
             if candidate.exists():
                 config_path = str(candidate)
     else:
-        config_path = "config/testing_config.json" if args.testing else "config/config.json"
+        config_path = (
+            "config/testing_config.json" if args.testing else "config/config.json"
+        )
 
     # Auto-detect testing mode from config file when --testing flag wasn't given
     if not args.testing:
         try:
             with open(config_path) as _f:
                 import json as _json
+
                 if _json.load(_f).get("test"):
                     args.testing = True
         except Exception:

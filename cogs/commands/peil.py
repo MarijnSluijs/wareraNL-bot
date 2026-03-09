@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import time
 
+import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
@@ -42,8 +43,10 @@ class PeilCog(CommandCogBase, name="peil"):
         app_commands.Choice(name="productie",  value="productie"),
         app_commands.Choice(name="events",     value="events"),
         app_commands.Choice(name="weerstand",  value="weerstand"),
-        app_commands.Choice(name="weekschade", value="weekschade"),
-        app_commands.Choice(name="alles",      value="alles"),
+        app_commands.Choice(name="weekschade",  value="weekschade"),
+        app_commands.Choice(name="geluk",       value="geluk"),
+        app_commands.Choice(name="globalluck",   value="globalluck"),
+        app_commands.Choice(name="alles",        value="alles"),
     ])
     @app_commands.autocomplete(land=country_autocomplete)
     @has_privileged_role()
@@ -81,6 +84,10 @@ class PeilCog(CommandCogBase, name="peil"):
             await self._peil_weerstand(ctx)
         if onderdeel in ("weekschade", "alles"):
             await self._peil_weekschade(ctx)
+        if onderdeel in ("geluk", "alles"):
+            await self._peil_geluk(ctx)
+        if onderdeel == "globalluck":
+            await self._peil_globalluck(ctx)
 
     # ------------------------------------------------------------------ #
     # Burgers subsystem                                                    #
@@ -259,6 +266,61 @@ class PeilCog(CommandCogBase, name="peil"):
         except Exception as exc:
             logger.exception("peil weekschade: error")
             await status_msg.edit(content=f"❌ Weekschade verversing mislukt: {exc}")
+
+
+    # ------------------------------------------------------------------ #
+    # NL Luck subsystem                                                    #
+    # ------------------------------------------------------------------ #
+
+    async def _peil_geluk(self, ctx: Context) -> None:
+        luck_cog = self.bot.get_cog("luck_tasks")
+        if not luck_cog:
+            await ctx.send("❌ Luck task cog niet geladen.", ephemeral=True)
+            return
+        status_msg = await ctx.send("🔄 NL geluksranking verversen…", ephemeral=True)
+        try:
+            await luck_cog.run_luck_refresh()
+            total_str = await self._db.get_poll_state("luck_ranking_total")
+            total = int(total_str or 0)
+            try:
+                await status_msg.edit(
+                    content=f"✅ NL geluksranking klaar — {total:,} spelers gescoord."
+                )
+            except discord.HTTPException:
+                logger.warning("peil geluk: interaction token expired, result saved to DB")
+        except Exception as exc:
+            logger.exception("peil geluk: error")
+            try:
+                await status_msg.edit(content=f"❌ NL geluksranking mislukt: {exc}")
+            except discord.HTTPException:
+                logger.warning("peil geluk: interaction token expired while reporting error")
+
+    # ------------------------------------------------------------------ #
+    # Global luck subsystem                                                #
+    # ------------------------------------------------------------------ #
+
+    async def _peil_globalluck(self, ctx: Context) -> None:
+        cog = self.bot.get_cog("global_luck_tasks")
+        if not cog:
+            await ctx.send("❌ Global luck task cog niet geladen.", ephemeral=True)
+            return
+        status_msg = await ctx.send("🔄 Globale geluksweep gestart… (dit kan lang duren)", ephemeral=True)
+        try:
+            await cog.run_global_luck_refresh()
+            total_str = await self._db.get_poll_state("global_luck_ranking_total")
+            total = int(total_str or 0)
+            try:
+                await status_msg.edit(
+                    content=f"✅ Globale gelukranking klaar — {total:,} spelers gescoord."
+                )
+            except discord.HTTPException:
+                logger.warning("peil globalluck: interaction token expired, result saved to DB")
+        except Exception as exc:
+            logger.exception("peil globalluck: error")
+            try:
+                await status_msg.edit(content=f"❌ Globale geluksweep mislukt: {exc}")
+            except discord.HTTPException:
+                logger.warning("peil globalluck: interaction token expired while reporting error")
 
 
 async def setup(bot) -> None:

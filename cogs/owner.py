@@ -20,6 +20,7 @@ from discord.ext.commands import Context
 
 class Owner(commands.Cog, name="owner"):
     """Cog for owner-only commands like syncing slash commands, checking uptime, loading/unloading cogs, and other administrative tasks."""
+
     def __init__(self, bot) -> None:
         self.bot = bot
         self.color = int(
@@ -230,12 +231,13 @@ class Owner(commands.Cog, name="owner"):
         :param message: The message that should be repeated by the bot.
         """
         # Prevent @everyone and @here pings even if the owner accidentally includes them
-        sanitized = (
-            message
-            .replace("@everyone", "@​everyone")
-            .replace("@here", "@​here")
+        sanitized = message.replace("@everyone", "@​everyone").replace(
+            "@here", "@​here"
         )
-        await context.send(sanitized, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False))
+        await context.send(
+            sanitized,
+            allowed_mentions=discord.AllowedMentions(everyone=False, roles=False),
+        )
 
     @commands.hybrid_command(
         name="purge",
@@ -243,7 +245,9 @@ class Owner(commands.Cog, name="owner"):
     )
     @commands.has_guild_permissions(manage_messages=True)
     @commands.bot_has_permissions(manage_messages=True)
-    @app_commands.describe(amount="The amount of messages that should be deleted (max 200).")
+    @app_commands.describe(
+        amount="The amount of messages that should be deleted (max 200)."
+    )
     async def purge(self, context: Context, amount: int) -> None:
         """
         Delete a number of messages.

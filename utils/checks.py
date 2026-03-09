@@ -16,6 +16,7 @@ PRIVILEGED_ROLE_IDS: set[int] = {
 
 def has_privileged_role() -> app_commands.check:
     """app_commands check: owner OR one of the privileged roles (bypassed in test mode)."""
+
     async def predicate(interaction: discord.Interaction) -> bool:
         bot = interaction.client
         # In test mode everyone is allowed
@@ -30,4 +31,5 @@ def has_privileged_role() -> app_commands.check:
             if user_role_ids & PRIVILEGED_ROLE_IDS:
                 return True
         raise app_commands.MissingPermissions(["privileged_role"])
+
     return app_commands.check(predicate)

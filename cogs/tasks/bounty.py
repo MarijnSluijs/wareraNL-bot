@@ -27,27 +27,47 @@ def _extract_bounty(side: dict) -> tuple[float, float] | None:
     Tries a range of field names to be resilient to API changes.
     """
     # Nested bounty object under various keys
-    for b_key in ("bounty", "activeBounty", "currentBounty", "battleBounty", "countryBounty"):
+    for b_key in (
+        "bounty",
+        "activeBounty",
+        "currentBounty",
+        "battleBounty",
+        "countryBounty",
+    ):
         b = side.get(b_key)
         if isinstance(b, dict):
             rate = float(
-                b.get("rate") or b.get("perThousand") or b.get("ratePerThousand")
-                or b.get("damageRate") or b.get("rewardPerThousand") or 0
+                b.get("rate")
+                or b.get("perThousand")
+                or b.get("ratePerThousand")
+                or b.get("damageRate")
+                or b.get("rewardPerThousand")
+                or 0
             )
             total = float(
-                b.get("total") or b.get("totalPool") or b.get("pool")
-                or b.get("totalAmount") or b.get("amount") or b.get("value") or 0
+                b.get("total")
+                or b.get("totalPool")
+                or b.get("pool")
+                or b.get("totalAmount")
+                or b.get("amount")
+                or b.get("value")
+                or 0
             )
             if rate > 0 or total > 0:
                 return rate, total
     # Flat fields at root of side object — actual API field names
     rate = float(
-        side.get("moneyPer1kDamages") or side.get("bountyRate")
-        or side.get("bountyPerThousand") or 0
+        side.get("moneyPer1kDamages")
+        or side.get("bountyRate")
+        or side.get("bountyPerThousand")
+        or 0
     )
     total = float(
-        side.get("moneyPool") or side.get("bountyTotal")
-        or side.get("bountyPool") or side.get("bountyAmount") or 0
+        side.get("moneyPool")
+        or side.get("bountyTotal")
+        or side.get("bountyPool")
+        or side.get("bountyAmount")
+        or 0
     )
     if rate > 0 or total > 0:
         return rate, total
@@ -61,6 +81,9 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
         self._known: dict[str, tuple[float, float]] = {}
         # country_id -> country_name cache
         self._country_names: dict[str, str] = {}
+        # Set of country IDs that should never be targeted by bounty alerts
+        # (NL itself + all current allies).  Refreshed each poll cycle.
+        self._protected_ids: set[str] = set()
 
     def cog_load(self) -> None:
         self.bounty_poll.start()
@@ -124,7 +147,9 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
         try:
             c_resp = await self._client.get("/country.getAllCountries")
             c_inner = c_resp.get("result", c_resp) if isinstance(c_resp, dict) else {}
-            c_data = c_inner.get("data", c_inner) if isinstance(c_inner, dict) else c_resp
+            c_data = (
+                c_inner.get("data", c_inner) if isinstance(c_inner, dict) else c_resp
+            )
             if isinstance(c_data, list):
                 self._country_names = {
                     str(c["_id"]): c.get("name") or c.get("shortName") or str(c["_id"])
@@ -134,11 +159,34 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
         except Exception:
             pass  # country names cache not refreshed; fall back to IDs
 
+        # Refresh protected-country set (NL + allies)
+        nl_country_id: str = self.config.get("nl_country_id", "")
+        protected: set[str] = {nl_country_id} if nl_country_id else set()
+        if nl_country_id:
+            try:
+                nl_resp = await self._client.post(
+                    "/country.getCountryById",
+                    json={"countryId": nl_country_id},
+                )
+                nl_inner = (
+                    nl_resp.get("result", nl_resp) if isinstance(nl_resp, dict) else {}
+                )
+                nl_data = (
+                    nl_inner.get("data", nl_inner)
+                    if isinstance(nl_inner, dict)
+                    else nl_resp
+                )
+                if isinstance(nl_data, dict):
+                    allies = nl_data.get("allies") or []
+                    protected.update(str(a) for a in allies if a)
+            except Exception:
+                pass  # keep previous protected set on error
+        self._protected_ids = protected
+
         # Remove stale entries for battles that are no longer active
         active_ids = {str(b.get("_id") or "") for b in battles}
         self._known = {
-            k: v for k, v in self._known.items()
-            if k.split(":")[0] in active_ids
+            k: v for k, v in self._known.items() if k.split(":")[0] in active_ids
         }
 
         channel = self.bot.get_channel(int(channel_id))
@@ -149,7 +197,8 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
         def _cname(side: dict) -> str:
             cid = str(side.get("country") or "")
             return (
-                side.get("countryName") or side.get("name")
+                side.get("countryName")
+                or side.get("name")
                 or self._country_names.get(cid)
                 or (cid[:8] if cid else "?")
             )
@@ -164,16 +213,31 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
 
             att_name = _cname(attacker)
             def_name = _cname(defender)
-            region_raw = defender.get("region") or attacker.get("region") or battle.get("region")
+            region_raw = (
+                defender.get("region") or attacker.get("region") or battle.get("region")
+            )
             region_name: str | None = (
                 (region_raw.get("name") if isinstance(region_raw, dict) else None)
-                or defender.get("regionName") or defender.get("region_name")
+                or defender.get("regionName")
+                or defender.get("region_name")
                 or None
             )
             battle_url = _BATTLE_URL.format(battle_id=battle_id)
 
+            # Country IDs for both sides
+            att_country_id = str(attacker.get("country") or "")
+            def_country_id = str(defender.get("country") or "")
+
             # Evaluate each side independently so both bounties are reported
-            for side_key, side in (("atk", attacker), ("dfn", defender)):
+            for side_key, side, side_country_id in (
+                ("atk", attacker, att_country_id),
+                ("dfn", defender, def_country_id),
+            ):
+                # Skip bounties placed ON NL or one of its allies — these are
+                # enemy bounties incentivising people to fight our side.
+                if side_country_id and side_country_id in self._protected_ids:
+                    continue
+
                 b = _extract_bounty(side)
                 if not b:
                     continue
@@ -184,6 +248,9 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
 
                 if rate < 1.0:
                     continue  # Below minimum threshold
+
+                if total < 1000:
+                    continue  # Pool too small
 
                 known_key = f"{battle_id}:{side_key}"
                 prev = self._known.get(known_key)
@@ -200,7 +267,7 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                     lines.append(f"**Regio:** {region_name}")
                 lines.append(f"**Aangeboden door:** {funder_name}")
                 if rate > 0:
-                    lines.append(f"**Beloning:** {rate:.3f} CC per 1.000 schade")
+                    lines.append(f"**Beloning:** {rate:.1f} CC per 1k schade")
                 if total > 0:
                     lines.append(f"**Totale pool:** {total:,.2f} CC")
 
@@ -218,7 +285,9 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                 except Exception as exc:
                     logger.warning(
                         "bounty_poll: failed to send embed for battle %s [%s]: %s",
-                        battle_id, side_key, exc,
+                        battle_id,
+                        side_key,
+                        exc,
                     )
 
 

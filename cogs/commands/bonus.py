@@ -376,9 +376,12 @@ class BonusCog(CommandCogBase, name="bonus"):
 
         table = (
             "```ansi\n"
-            + eng_header + "\n"
-            + hdr + "\n"
-            + sep + "\n"
+            + eng_header
+            + "\n"
+            + hdr
+            + "\n"
+            + sep
+            + "\n"
             + "\n".join(rows)
             + "\n```"
         )

@@ -70,6 +70,44 @@ class CitizensMixin:
         """Commit any pending changes to the citizen_levels table."""
         await self._conn.commit()
 
+    async def search_citizen_names(
+        self, query: str, limit: int = 25
+    ) -> list[tuple[str, str]]:
+        """Return (citizen_name, user_id) pairs where citizen_name matches query.
+
+        Case-insensitive prefix + substring match, ordered by name.
+        """
+        q = query.strip()
+        if not q:
+            # Return a broad sample when no query typed yet
+            rows: list[tuple[str, str]] = []
+            async with self._conn.execute(
+                "SELECT citizen_name, user_id FROM citizen_levels"
+                " WHERE citizen_name IS NOT NULL"
+                " ORDER BY citizen_name LIMIT ?",
+                (limit,),
+            ) as cur:
+                async for row in cur:
+                    rows.append((row[0], row[1]))
+            return rows
+        pattern = f"%{q}%"
+        rows = []
+        async with self._conn.execute(
+            "SELECT citizen_name, user_id FROM citizen_levels"
+            " WHERE citizen_name IS NOT NULL"
+            "   AND citizen_name LIKE ? ESCAPE '\\'"
+            " ORDER BY"
+            "   CASE WHEN lower(citizen_name) = lower(?) THEN 0"
+            "        WHEN lower(citizen_name) LIKE lower(?) || '%' THEN 1"
+            "        ELSE 2 END,"
+            "   citizen_name"
+            " LIMIT ?",
+            (pattern, q, q, limit),
+        ) as cur:
+            async for row in cur:
+                rows.append((row[0], row[1]))
+        return rows
+
     async def delete_citizens_for_country(self, country_id: str) -> None:
         """Delete all citizen level records for a specific country."""
         await self._conn.execute(
@@ -552,15 +590,6 @@ class CitizensMixin:
                     if can_reset:
                         m["can_reset"] += 1
         return mus
-
-    async def get_citizen_name_by_id(self, user_id: str) -> Optional[str]:
-        """Return the citizen name for a given user_id, or None if not found."""
-        sql = "SELECT citizen_name FROM citizen_levels WHERE user_id = ?"
-        async with self._conn.execute(sql, (user_id,)) as cur:
-            row = await cur.fetchone()
-            if row and row[0]:
-                return row[0]
-        return None
 
     async def fuzzy_citizen_by_name(
         self,

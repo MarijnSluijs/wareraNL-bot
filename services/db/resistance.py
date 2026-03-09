@@ -1,4 +1,5 @@
 """Resistance state DB methods (resistance_state table)."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -52,6 +53,13 @@ class ResistanceMixin:
                 resistance_max    = excluded.resistance_max,
                 updated_at        = excluded.updated_at
             """,
-            (region_id, region_name, occupying_country, resistance_value, resistance_max, updated_at),
+            (
+                region_id,
+                region_name,
+                occupying_country,
+                resistance_value,
+                resistance_max,
+                updated_at,
+            ),
         )
         await self._conn.commit()

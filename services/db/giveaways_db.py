@@ -1,10 +1,12 @@
 """Giveaway-related DB methods."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Optional
 
 import aiosqlite
+
 
 class GiveawaysMixin:
     _conn: aiosqlite.Connection  # provided by DatabaseBase
@@ -49,7 +51,7 @@ class GiveawaysMixin:
         ) as cur:
             row = await cur.fetchone()
             return row[0] if row else 0
-        
+
     async def get_transaction_history(
         self, user_id: str, limit: int = 10, offset: int = 0
     ) -> list[dict]:
@@ -69,7 +71,7 @@ class GiveawaysMixin:
                 {"amount": row[0], "tx_type": row[1], "created_at": row[2]}
                 for row in rows
             ]
-        
+
     async def remove_balance(self, user_id: str, amount: int) -> None:
         """Remove a specified amount from a user's giveaway balance."""
         now = datetime.now(timezone.utc).isoformat()

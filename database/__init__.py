@@ -1,5 +1,5 @@
 """
-This module contains the DatabaseManager class, which is responsible for managing database operations related to warnings in the bot. 
+This module contains the DatabaseManager class, which is responsible for managing database operations related to warnings in the bot.
 """
 
 import aiosqlite
@@ -7,6 +7,7 @@ import aiosqlite
 
 class DatabaseManager:
     """Manager for database operations related to warnings."""
+
     def __init__(self, *, connection: aiosqlite.Connection) -> None:
         self.connection = connection
 

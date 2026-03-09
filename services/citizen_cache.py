@@ -22,7 +22,9 @@ class CitizenCache:
     # Public interface                                                     #
     # ------------------------------------------------------------------ #
 
-    async def refresh_country(self, country_id: str, country_name: str, *, progress_msg=None) -> int:
+    async def refresh_country(
+        self, country_id: str, country_name: str, *, progress_msg=None
+    ) -> int:
         """Fetch every citizen's level for a country and write to DB cache.
 
         Uses tRPC HTTP batching (30 users per request) with automatic fallback
@@ -58,10 +60,16 @@ class CitizenCache:
             mu_id, mu_name = self._extract_mu_info(obj)
             if lvl is not None:
                 await self._db.upsert_citizen_level(
-                    uid, country_id, lvl, updated_at,
-                    skill_mode=mode, last_skills_reset_at=reset_at,
-                    citizen_name=name, last_login_at=last_login,
-                    mu_id=mu_id, mu_name=mu_name,
+                    uid,
+                    country_id,
+                    lvl,
+                    updated_at,
+                    skill_mode=mode,
+                    last_skills_reset_at=reset_at,
+                    citizen_name=name,
+                    last_login_at=last_login,
+                    mu_id=mu_id,
+                    mu_name=mu_name,
                 )
                 recorded += 1
 
@@ -84,7 +92,9 @@ class CitizenCache:
         # Remove any citizens not seen in this refresh (they left the country)
         pruned = await self._db.prune_stale_citizens(country_id, updated_at)
         if pruned:
-            logger.debug("refresh_country: pruned %d stale citizens for %s", pruned, country_id)
+            logger.debug(
+                "refresh_country: pruned %d stale citizens for %s", pruned, country_id
+            )
         return recorded
 
     async def refresh_mu_memberships(self, country_id: str, mus_json_path: str) -> int:
@@ -103,7 +113,9 @@ class CitizenCache:
             with open(mus_json_path, encoding="utf-8") as f:
                 mus_data = json.load(f)
         except Exception as exc:
-            logger.warning("refresh_mu_memberships: failed to load %s: %s", mus_json_path, exc)
+            logger.warning(
+                "refresh_mu_memberships: failed to load %s: %s", mus_json_path, exc
+            )
             return 0
 
         embeds = mus_data.get("embeds", [])
@@ -127,7 +139,9 @@ class CitizenCache:
             mu_entries.append((mu_id, mu_name))
 
         if not mu_entries:
-            logger.warning("refresh_mu_memberships: no MU IDs found in %s", mus_json_path)
+            logger.warning(
+                "refresh_mu_memberships: no MU IDs found in %s", mus_json_path
+            )
             return 0
 
         # Reset all MU assignments for this country first
@@ -141,7 +155,11 @@ class CitizenCache:
                 await self._db.update_citizen_mu(uid, mu_id, effective_name)
                 updated += 1
             await self._db.flush_citizen_levels()
-            logger.debug("refresh_mu_memberships: %s → %d members", effective_name, len(member_ids))
+            logger.debug(
+                "refresh_mu_memberships: %s → %d members",
+                effective_name,
+                len(member_ids),
+            )
 
         return updated
 
@@ -149,7 +167,9 @@ class CitizenCache:
     # Private helpers                                                      #
     # ------------------------------------------------------------------ #
 
-    async def _fetch_mu_members_and_name(self, mu_id: str) -> tuple[list[str], str | None]:
+    async def _fetch_mu_members_and_name(
+        self, mu_id: str
+    ) -> tuple[list[str], str | None]:
         """Call /mu.getById and return (member user IDs, MU name)."""
         user_ids: list[str] = []
         mu_name: str | None = None
@@ -160,7 +180,9 @@ class CitizenCache:
                 params={"input": json.dumps({"muId": mu_id})},
             )
         except Exception as exc:
-            logger.warning("_fetch_mu_members_and_name(%s): request failed: %s", mu_id, exc)
+            logger.warning(
+                "_fetch_mu_members_and_name(%s): request failed: %s", mu_id, exc
+            )
             return user_ids, mu_name
 
         # Navigate the response to find the members list
@@ -298,9 +320,24 @@ class CitizenCache:
         if skills is None:
             return None
 
-        eco_names = {"entrepreneurship", "energy", "production", "companies", "management"}
-        war_names = {"attack", "health", "hunger", "criticalChance", "criticalDamages",
-                     "armor", "precision", "dodge", "lootChance"}
+        eco_names = {
+            "entrepreneurship",
+            "energy",
+            "production",
+            "companies",
+            "management",
+        }
+        war_names = {
+            "attack",
+            "health",
+            "hunger",
+            "criticalChance",
+            "criticalDamages",
+            "armor",
+            "precision",
+            "dodge",
+            "lootChance",
+        }
         eco_pts = 0
         war_pts = 0
 
@@ -398,9 +435,7 @@ class CitizenCache:
         for mu_key in ("mu", "militaryUnit", "regiment", "unit", "militaryUnits"):
             mu_obj = obj.get(mu_key)
             if isinstance(mu_obj, dict):
-                mu_id = (
-                    mu_obj.get("_id") or mu_obj.get("id") or mu_obj.get("muId")
-                )
+                mu_id = mu_obj.get("_id") or mu_obj.get("id") or mu_obj.get("muId")
                 mu_name = (
                     mu_obj.get("name") or mu_obj.get("title") or mu_obj.get("muName")
                 )
@@ -429,12 +464,24 @@ class CitizenCache:
         # Try nested ``dates`` object first (same location as lastSkillsResetAt)
         dates = obj.get("dates")
         if isinstance(dates, dict):
-            for key in ("lastLoginAt", "lastSeenAt", "lastOnlineAt", "lastActiveAt", "lastLogin"):
+            for key in (
+                "lastLoginAt",
+                "lastSeenAt",
+                "lastOnlineAt",
+                "lastActiveAt",
+                "lastLogin",
+            ):
                 val = dates.get(key)
                 if isinstance(val, str) and val:
                     return val
         # Fall back to root-level keys
-        for key in ("lastLoginAt", "lastSeenAt", "lastOnlineAt", "lastActiveAt", "lastLogin"):
+        for key in (
+            "lastLoginAt",
+            "lastSeenAt",
+            "lastOnlineAt",
+            "lastActiveAt",
+            "lastLogin",
+        ):
             val = obj.get(key)
             if isinstance(val, str) and val:
                 return val

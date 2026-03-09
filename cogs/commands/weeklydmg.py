@@ -18,7 +18,7 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
 
-from cogs.commands._base import CommandCogBase
+from cogs.commands._base import CommandCogBase, citizen_autocomplete
 from services.damage_calc import fmt_damage
 
 logger = logging.getLogger("discord_bot")
@@ -41,6 +41,7 @@ class WeeklydmgCog(CommandCogBase, name="weeklydmg"):
         speler="Optioneel: zoek een specifieke speler op naam of ID.",
         top_n="Optioneel: toon de top N spelers (standaard 10, max 50).",
     )
+    @app_commands.autocomplete(speler=citizen_autocomplete)
     async def weeklydmg(
         self,
         ctx: Context,

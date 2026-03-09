@@ -239,7 +239,9 @@ class ProductionTasks(TaskCogBase, name="production_tasks"):
                                 )
                             except Exception:
                                 logger.exception(
-                                    "Failed to save country_item_ethic for %s/%s", item, cid
+                                    "Failed to save country_item_ethic for %s/%s",
+                                    item,
+                                    cid,
                                 )
 
                 # ---- Short-term top (deposit) ----

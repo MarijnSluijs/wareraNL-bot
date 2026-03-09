@@ -11,6 +11,7 @@ from cogs.standard_messages.generate import GenerateEmbeds
 
 class dreiging(GenerateEmbeds, name="dreiging"):
     """A cog that provides commands to post a series of embeds explaining the threat levels."""
+
     def __init__(self, bot) -> None:
         super().__init__(bot)
         self.load_json("templates/dreigingsniveau.json")

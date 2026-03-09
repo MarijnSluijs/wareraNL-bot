@@ -308,12 +308,6 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
                     if nl_country_id:
                         author_country = user_data.get("country", "")
                         if author_country != nl_country_id:
-                            logger.debug(
-                                "Skipping article %s — author %s is from country %s (not NL)",
-                                article_id,
-                                author_id,
-                                author_country,
-                            )
                             return False
 
                     for key in ("name", "username", "displayName", "nick"):

@@ -1,5 +1,5 @@
 """
-This module defines the Introductie cog, which provides commands to post a series of embeds as an introduction in a Discord channel. 
+This module defines the Introductie cog, which provides commands to post a series of embeds as an introduction in a Discord channel.
 """
 
 import discord

@@ -23,14 +23,14 @@ Usage::
 """
 
 from .base import DatabaseBase
-from .state import StateMixin
-from .production import ProductionMixin
 from .citizens import CitizensMixin
 from .events import EventsMixin
 from .giveaways_db import GiveawaysMixin
 from .identities import IdentityLinksMixin
 from .luck import LuckMixin
+from .production import ProductionMixin
 from .resistance import ResistanceMixin
+from .state import StateMixin
 
 
 class Database(

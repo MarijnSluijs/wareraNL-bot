@@ -14,6 +14,28 @@ from discord.ext.commands import Context
 from services.country_utils import ALL_COUNTRY_NAMES, extract_country_list
 
 
+async def citizen_autocomplete(
+    interaction: discord.Interaction, current: str
+) -> list[app_commands.Choice[str]]:
+    """Module-level autocomplete callback for player name parameters.
+
+    Queries citizen_levels table (populated by /peil burgers) for a
+    case-insensitive substring match. Falls back to empty list if DB
+    is not yet available.
+    """
+    db = getattr(interaction.client, "_ext_db", None)
+    if not db:
+        return []
+    try:
+        matches = await db.search_citizen_names(current, limit=25)
+        return [
+            app_commands.Choice(name=name, value=name)
+            for name, _uid in matches
+        ]
+    except Exception:
+        return []
+
+
 async def country_autocomplete(
     interaction: discord.Interaction, current: str
 ) -> list[app_commands.Choice[str]]:
