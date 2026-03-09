@@ -21,8 +21,16 @@ from discord import app_commands
 from discord.ext import commands
 
 from cogs.standard_messages.mu_bericht import has_mu_privilige
+from cogs.commands._base import dreigingsniveau_autocomplete
 
 logger = logging.getLogger("discord_bot")
+
+TEMPLATES = {
+    "groen": "Code Groen: Geen bekende oorlogsdreiging. Blijf in eco-stand en werk aan je bedrijven.",
+    "geel": "Code Geel: Mogelijke oorlog op komst. Zorg dat je geen cooldown van de skills-reset activeert, en begin met het inslaan van gear, munitie, pillen, en voedsel.",
+    "oranje": "Code Oranje: Oorlog verwacht op korte termijn. Zorg dat je voorraad op peil is.",
+    "rood": "Code Rood: In oorlog. Zet je skills om naar een fighter build, en volg de instructies van de regering."
+}
 
 
 class MUOnboardingView(discord.ui.View):
@@ -319,22 +327,76 @@ class MURequest(commands.Cog, name="murequest"):
                 "MU aanmelden channel not found. Please check the channel ID in bot config."
             )
             return
+        
+        # check for existing dreigingsniveau message
+        dreigingsniveau_embed = None
+        async for message in channel.history(limit=100):
+            if message.author == self.bot.user and message.embeds:
+                embed = message.embeds[0]
+                if embed.title and "Huidig dreigingsniveau" in embed.title:
+                    # found existing dreigingsniveau message, repost it after the new welcome message
+                    dreigingsniveau_embed = embed
+                    break
 
         # clear channel to repost button
-        await channel.purge(limit=1)
+        await channel.purge(limit=3)
 
         await channel.send(embed=embed, view=MUOnboardingView(self.bot))
+
+        # repost current dreigingsniveau code if exists
+        if dreigingsniveau_embed:
+            await channel.send(embed=embed)
 
     @app_commands.command(
         name="kleurcode",
         description="Plaats het bericht over het huidige dreigingsniveau"
     )
     @app_commands.describe(
-        code="De kleurcode die je wilt posten (rood, oranje, geel, groen)"
+        code="De kleurcode die je wilt posten (rood, oranje, geel, groen)",
+        bericht="[Optioneel] Extra toelichting om toe te voegen aan het bericht"
     )
+    @app_commands.autocomplete(code=dreigingsniveau_autocomplete)
     @has_mu_privilige()
-    async def post_kleurcodes(self, ctx: commands.Context, code: str):
-        pass
+    async def post_kleurcodes(self, ctx: commands.Context, code: str, bericht: str = None):
+        # find and remove old kleurcode message
+        channel_id = self.bot.config.get("channels", {}).get("mu_aanmelden")
+        if not channel_id:
+            await ctx.send("MU aanmelden channel ID not configured in bot config.")
+            return
+        
+        channel = ctx.guild.get_channel(channel_id)
+        if not channel:
+            await ctx.send(
+                "MU aanmelden channel not found. Please check the channel ID in bot config."
+            )
+            return
+        
+        async for message in channel.history(limit=100):
+            if message.author == self.bot.user and message.embeds:
+                embed = message.embeds[0]
+                if embed.title and "Huidig dreigingsniveau" in embed.title:
+                    await message.delete()
+                    break
+
+        # get circle emoji for the code
+        circle_emoji = {
+            "rood": "🔴",
+            "oranje": "🟠",
+            "geel": "🟡",
+            "groen": "🟢"
+        }.get(code.lower())
+
+        embed = discord.Embed(
+            title=f"Huidig dreigingsniveau: {circle_emoji} Code {code.capitalize()}",
+            description=TEMPLATES.get(code.lower()) + (f"\n\n{bericht}" if bericht else ""),
+            color=discord.Color.red() if code.lower() == "rood" else
+                  discord.Color.orange() if code.lower() == "oranje" else
+                  discord.Color.yellow() if code.lower() == "geel" else
+                  discord.Color.green()
+        )
+        
+        await channel.send(embed=embed)
+        await ctx.response.send_message(f"Kleurcode {code.capitalize()} gepost in {channel.mention}", ephemeral=True)
 
 
 
