@@ -116,6 +116,8 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
                 logger.exception("citizen_refresh: error refreshing %s", name)
         logger.info("citizen_refresh: full sweep complete (%d countries)", total)
 
+    
+
 
 async def setup(bot) -> None:
     """Add the CitizenTasks cog to the bot."""
