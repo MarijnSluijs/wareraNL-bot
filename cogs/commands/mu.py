@@ -404,9 +404,7 @@ class MU(commands.Cog, name="mu"):
                 for mu_entry in mus_data.get("embeds", []):
                     if mu_entry.get("id") == mu:
                         selected_mu_name = str(
-                            mu_entry.get("name")
-                            or mu_entry.get("title")
-                            or f"MU {mu[:8]}"
+                            mu_entry.get("name") or f"MU {mu[:8]}"
                         )
                         eco_mus = [{"title": selected_mu_name, "mu_id": mu}]
                         break
@@ -419,7 +417,7 @@ class MU(commands.Cog, name="mu"):
                     mu_id = str(item.get("id", "")).strip()
                     if not mu_id:
                         continue
-                    name = str(item.get("name") or item.get("title") or f"MU {mu_id[:8]}")
+                    name = str(item.get("name") or f"MU {mu_id[:8]}")
                     eco_mus.append({"title": name, "mu_id": mu_id})
         except Exception as exc:
             logger.warning("eco_donations: failed to load %s: %s", mus_json_path, exc)
@@ -459,7 +457,7 @@ class MU(commands.Cog, name="mu"):
                 )
                 data = _unwrap(resp)
                 if isinstance(data, dict):
-                    mu_name = str(data.get("name") or data.get("title") or fallback_name)
+                    mu_name = str(data.get("name") or fallback_name)
                     members = data.get("members", [])
                     mu_members[mu_id] = (mu_name, members)
             except Exception as exc:

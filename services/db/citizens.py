@@ -553,6 +553,15 @@ class CitizensMixin:
                         m["can_reset"] += 1
         return mus
 
+    async def get_citizen_name_by_id(self, user_id: str) -> Optional[str]:
+        """Return the citizen name for a given user_id, or None if not found."""
+        sql = "SELECT citizen_name FROM citizen_levels WHERE user_id = ?"
+        async with self._conn.execute(sql, (user_id,)) as cur:
+            row = await cur.fetchone()
+            if row and row[0]:
+                return row[0]
+        return None
+
     async def fuzzy_citizen_by_name(
         self,
         query: str,
