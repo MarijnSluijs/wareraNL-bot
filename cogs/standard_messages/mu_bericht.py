@@ -42,6 +42,30 @@ def _extract_mu_id_from_description(description: str) -> str | None:
     return match.group(1) if match else None
 
 
+def has_mu_privilige() -> commands.check:
+    """commands check for mulijst using cog-configured role IDs (owner bypass)."""
+
+    async def predicate(ctx: Context) -> bool:
+        bot = ctx.bot
+        if getattr(bot, "testing", False):
+            return True
+
+        if await bot.is_owner(ctx.author):
+            return True
+
+        if not isinstance(ctx.author, discord.Member):
+            raise commands.CheckFailure("Dit commando kan alleen in een server gebruikt worden.")
+
+        role_ids = [bot.config.get("roles", {}).get(r) for r in ["officier", "government"]]
+
+        if role_ids and any(role.id in role_ids for role in ctx.author.roles):
+            return True
+
+        raise commands.CheckFailure("Je hebt geen permissie om dit commando te gebruiken.")
+
+    return commands.check(predicate)
+
+
 class MUs(GenerateEmbeds, name="mus"):
     """Cog for managing and posting the Military Units list in a Discord channel."""
 
@@ -121,7 +145,7 @@ class MUs(GenerateEmbeds, name="mus"):
     @commands.hybrid_command(
         name="mulijst", description="Post de MU lijst in het MU-kanaal."
     )
-    @has_privileged_role()
+    @has_mu_privilige()
     async def mulijst(self, context: Context) -> None:
         if not self.json_data or not self.json_data.get("embeds"):
             embed = discord.Embed(
@@ -383,6 +407,7 @@ class MUs(GenerateEmbeds, name="mus"):
         name="repostmu",
         description="Herplaats de MU-lijst en synchroniseer MU namen/thumbnails via API.",
     )
+    @has_mu_privilige()
     async def repostmu(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         channel = await self._mu_channel(interaction.channel)
@@ -428,8 +453,7 @@ class MUs(GenerateEmbeds, name="mus"):
             app_commands.Choice(name="Standaard", value="Standaard"),
         ]
     )
-    @app_commands.default_permissions(manage_messages=True)
-    @has_privileged_role()
+    @has_mu_privilige()
     async def wijzigmu(
         self,
         interaction: discord.Interaction,

@@ -20,6 +20,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from cogs.standard_messages.mu_bericht import has_mu_privilige
+
 logger = logging.getLogger("discord_bot")
 
 
@@ -269,7 +271,7 @@ class MURequest(commands.Cog, name="murequest"):
         name="postmuapp",
         description="Post the MU application message with verification buttons (admin only)",
     )
-    @commands.has_permissions(administrator=True)
+    @has_mu_privilige()
     async def post_mu_application(self, ctx: commands.Context):
         # Create the welcome embed
         embed = discord.Embed(
@@ -302,6 +304,17 @@ class MURequest(commands.Cog, name="murequest"):
         await channel.purge(limit=1)
 
         await channel.send(embed=embed, view=MUOnboardingView(self.bot))
+
+    @app_commands.command(
+        name="kleurcode",
+        description="Plaats het bericht over het huidige dreigingsniveau"
+    )
+    @app_commands.describe(
+        code="De kleurcode die je wilt posten (rood, oranje, geel, groen)"
+    )
+    @has_mu_privilige()
+    async def post_kleurcodes(self, ctx: commands.Context, code: str):
+        pass
 
 
 async def setup(bot) -> None:
