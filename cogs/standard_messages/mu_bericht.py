@@ -312,14 +312,14 @@ class MUs(GenerateEmbeds, name="mus"):
                     "label": mu_name,
                     "role_id": role.id,
                     "style": "primary",
-                    "row": idx // 5,
+                    "row": min(idx // 5, 4),
                 }
                 if secondary_role_id:
                     button["secondary_role_id"] = secondary_role_id
                 mu_buttons.append(button)
 
             pinned_buttons = [b for b in all_buttons if b.get("label") in pinned_labels]
-            pinned_row = (len(mu_buttons) + 4) // 5
+            pinned_row = min((len(mu_buttons) + 4) // 5, 4)
             for b in pinned_buttons:
                 b["row"] = pinned_row
 
