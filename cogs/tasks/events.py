@@ -104,6 +104,7 @@ _EVENT_TYPE_TO_CATEGORY: dict[str, str] = {
 class EventTasks(TaskCogBase, name="event_tasks"):
     def __init__(self, bot) -> None:
         self.bot = bot
+        self._poll_lock = asyncio.Lock()
 
     def cog_load(self) -> None:
         self.event_poll.start()
@@ -120,10 +121,14 @@ class EventTasks(TaskCogBase, name="event_tasks"):
         """Poll for new war/battle events and post them to the events channel."""
         if not self._client or not self._db:
             return
-        try:
-            await self._run_event_poll()
-        except Exception:
-            logger.exception("event_poll: unexpected error")
+        if self._poll_lock.locked():
+            logger.debug("event_poll: skipping — poll already running")
+            return
+        async with self._poll_lock:
+            try:
+                await self._run_event_poll()
+            except Exception:
+                logger.exception("event_poll: unexpected error")
 
     @event_poll.before_loop
     async def before_event_poll(self) -> None:
@@ -134,7 +139,8 @@ class EventTasks(TaskCogBase, name="event_tasks"):
 
     async def run_event_poll(self) -> None:
         """Public wrapper so /peil and debug commands can trigger an event poll."""
-        await self._run_event_poll()
+        async with self._poll_lock:
+            await self._run_event_poll()
 
     # ------------------------------------------------------------------ #
     # Internals                                                            #
@@ -236,6 +242,17 @@ class EventTasks(TaskCogBase, name="event_tasks"):
             posted = 0
             for cat, (event, eid) in category_latest.items():
                 if cat not in uninit_cats:
+                    continue
+                # Skip re-posting events that were already sent before (e.g. when
+                # /peil events clears the init flags on a running bot).
+                if await self._db.has_seen_event(eid):
+                    await self._db.set_poll_state(f"event_cat_init_{cat}", "1")
+                    logger.info(
+                        "event_poll: catch-up cat '%s' — event %s already seen, "
+                        "marking initialised without re-posting",
+                        cat,
+                        eid,
+                    )
                     continue
                 await self._post_event(event, eid, channel_id, country_names)
                 await self._db.set_poll_state(f"event_cat_init_{cat}", "1")
