@@ -20,7 +20,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from standard_messages.mu_bericht import has_mu_privilige
+from cogs.standard_messages.mu_bericht import has_mu_privilige
 
 logger = logging.getLogger("discord_bot")
 
@@ -325,16 +325,16 @@ class MURequest(commands.Cog, name="murequest"):
 
         await channel.send(embed=embed, view=MUOnboardingView(self.bot))
 
-    @commands.command(
+    @app_commands.command(
         name="kleurcode",
         description="Plaats het bericht over het huidige dreigingsniveau"
     )
-    @commands.describe(
+    @app_commands.describe(
         code="De kleurcode die je wilt posten (rood, oranje, geel, groen)"
     )
     @has_mu_privilige()
-    async def post_kleurcodes(self, ctx: commands.Context):
-
+    async def post_kleurcodes(self, ctx: commands.Context, code: str):
+        pass
 
 
 
