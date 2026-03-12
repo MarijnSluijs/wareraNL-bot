@@ -529,6 +529,46 @@ class Welcome(commands.Cog, name="welcome"):
                 f"<@{conflicting_discord}> (`{conflicting_discord}`)."
             )
 
+    def _resolve_embassy_categories(
+        self, guild: discord.Guild
+    ) -> list[discord.CategoryChannel]:
+        """Resolve configured embassy categories in priority order."""
+        channels_cfg = self.bot.config.get("channels", {}) if self.bot.config else {}
+
+        raw_ids: list[int] = []
+
+        # Backward-compatible primary key.
+        primary = channels_cfg.get("embassy_category")
+        if primary:
+            raw_ids.append(primary)
+
+        # Optional explicit list support.
+        explicit_list = channels_cfg.get("embassy_categories")
+        if isinstance(explicit_list, list):
+            raw_ids.extend(explicit_list)
+
+        # Support numbered keys such as embassy_category_2, embassy_category_3, etc.
+        for key, value in channels_cfg.items():
+            if key.startswith("embassy_category_"):
+                raw_ids.append(value)
+
+        categories: list[discord.CategoryChannel] = []
+        seen: set[int] = set()
+        for raw_id in raw_ids:
+            try:
+                category_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            if category_id in seen or category_id <= 0:
+                continue
+            seen.add(category_id)
+
+            category = guild.get_channel(category_id)
+            if isinstance(category, discord.CategoryChannel):
+                categories.append(category)
+
+        return categories
+
     @staticmethod
     def _normalize_ingame_id(in_game_id: str) -> str:
         """Normalize and validate in-game ID or WarEra profile URL input."""
@@ -1386,11 +1426,24 @@ class Welcome(commands.Cog, name="welcome"):
                         f"Creating embassy channel for country: {country}"
                     )
                     channel_name = f"{country.lower()}-embassy"
-                    # choose a category from config when available
-                    cat_id = self.bot.config.get("channels", {}).get(
-                        "embassy_category"
-                    ) or self.bot.config.get("channels", {}).get("verification")
-                    category = interaction.guild.get_channel(cat_id) if cat_id else None
+                    # Choose an embassy category with available capacity.
+                    category = None
+                    embassy_categories = self._resolve_embassy_categories(interaction.guild)
+                    for configured_category in embassy_categories:
+                        # Discord allows up to 50 channels in a category.
+                        if len(configured_category.channels) < 50:
+                            category = configured_category
+                            break
+
+                    if category is None:
+                        # Fallback to verification category for older configs.
+                        verification_cat_id = self.bot.config.get("channels", {}).get(
+                            "verification"
+                        )
+                        if verification_cat_id:
+                            candidate = interaction.guild.get_channel(verification_cat_id)
+                            if isinstance(candidate, discord.CategoryChannel):
+                                category = candidate
 
                     # Set up channel permissions
                     overwrites = {
@@ -1439,6 +1492,13 @@ class Welcome(commands.Cog, name="welcome"):
                             error_msg += f"• Voeg de bot toe aan de **{category.name}** categorie met 'Kanalen beheren' toestemming\n"
                         error_msg += f"\n**Fout:** {e}"
                         await interaction.followup.send(error_msg, ephemeral=True)
+                        return
+                    except discord.HTTPException as e:
+                        await interaction.followup.send(
+                            "Kon ambassadekanaal niet aanmaken. Controleer of de ingestelde categorieen niet vol zijn en of de bot voldoende rechten heeft.\n"
+                            f"**Fout:** {e}",
+                            ephemeral=True,
+                        )
                         return
 
             if embassy_channel:
