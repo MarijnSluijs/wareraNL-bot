@@ -79,25 +79,33 @@ class LoggingFormatter(logging.Formatter):
 
 logger = logging.getLogger("discord_bot")
 logger.setLevel(logging.DEBUG)
+logger.propagate = False
 
-# Ensure logs directory exists
-os.makedirs("logs", exist_ok=True)
+PROJECT_ROOT = Path(__file__).resolve().parent
+LOG_DIR = PROJECT_ROOT / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-# Console handler
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(LoggingFormatter())
-# File handler
-file_handler = logging.FileHandler(
-    filename="logs/discord.log", encoding="utf-8", mode="a"
-)
-file_handler_formatter = logging.Formatter(
-    "[{asctime}] [{levelname:<8}] {name}: {message}", "%Y-%m-%d %H:%M:%S", style="{"
-)
-file_handler.setFormatter(file_handler_formatter)
+# Avoid duplicate handlers if this module is imported more than once.
+if not logger.handlers:
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.DEBUG)
+    console_handler.setFormatter(LoggingFormatter())
 
-# Add the handlers
-logger.addHandler(console_handler)
-logger.addHandler(file_handler)
+    # File handler (always resolves to <repo>/logs/discord.log)
+    file_handler = logging.FileHandler(
+        filename=LOG_DIR / "discord.log", encoding="utf-8", mode="a"
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_handler_formatter = logging.Formatter(
+        "[{asctime}] [{levelname:<8}] {name}: {message}",
+        "%Y-%m-%d %H:%M:%S",
+        style="{",
+    )
+    file_handler.setFormatter(file_handler_formatter)
+
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
 
 
 class DiscordBot(commands.Bot):
@@ -350,6 +358,9 @@ class DiscordBot(commands.Bot):
             f"Running on: {platform.system()} {platform.release()} ({os.name})"
         )
         self.logger.info("-------------------")
+        # Ensure slash-command exceptions are always routed through our logger.
+        self.tree.on_error = self.on_app_command_error
+
         await self.init_db()
         await self.load_cogs()
         await self._write_command_catalogue()
@@ -390,7 +401,7 @@ class DiscordBot(commands.Bot):
         )
         self.logger.error(
             f"An error occurred in app command {getattr(interaction, 'command', None)}: {error}",
-            exc_info=True,
+            exc_info=(type(error), error, error.__traceback__),
         )
         # try to notify the user if possible (avoid raising another exception)
         try:
