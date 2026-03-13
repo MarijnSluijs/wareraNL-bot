@@ -22,7 +22,6 @@ import unicodedata
 
 import discord
 from discord import app_commands
-from discord.ext import commands
 
 from cogs.commands._base import CommandCogBase
 
@@ -198,6 +197,131 @@ class Users(CommandCogBase, name="users"):
             inline=False,
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="linkid",
+        description="Link een Discord gebruiker aan een in-game ID (of update bestaande mapping)",
+    )
+    @app_commands.describe(
+        user="Discord gebruiker",
+        in_game_id="In-game ID of profiel-URL (https://app.warera.io/user/{id})",
+        nationality="Optioneel: nationaliteit (bijv. nederlander, belgian, foreigner)",
+        request_type="Optioneel: request type (standaard: manual_link)",
+        embassy_country="Optioneel: embassy-land (alleen voor embassy mappings)",
+        force="Sta toe dat dit in-game ID al aan een andere Discord gebruiker hangt",
+    )
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def link_id(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+        in_game_id: str,
+        nationality: str | None = None,
+        request_type: str | None = None,
+        embassy_country: str | None = None,
+        force: bool = False,
+    ) -> None:
+        """Manually create or update a Discord ↔ in-game mapping."""
+        try:
+            normalized = self._normalize_ingame_id(in_game_id)
+        except ValueError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+            return
+
+        guild_id = str(interaction.guild_id)
+        discord_id = str(user.id)
+        db = await self._get_db()
+
+        existing_for_discord = await db.get_identity_link_by_discord(
+            discord_user_id=discord_id,
+            guild_id=guild_id,
+        )
+        existing_for_ingame = await db.get_identity_links_by_ingame(
+            in_game_user_id=normalized,
+            guild_id=guild_id,
+        )
+        conflicting_discord = next(
+            (
+                link.get("discord_user_id")
+                for link in existing_for_ingame
+                if str(link.get("discord_user_id")) != discord_id
+            ),
+            None,
+        )
+
+        if conflicting_discord and not force:
+            await interaction.response.send_message(
+                (
+                    "Dit in-game ID is al gekoppeld aan een andere Discord gebruiker: "
+                    f"<@{conflicting_discord}> (`{conflicting_discord}`). "
+                    "Gebruik `force=True` als je deze mapping bewust wilt overschrijven."
+                ),
+                ephemeral=True,
+            )
+            return
+
+        final_nationality = (
+            str(nationality).strip().lower()
+            if nationality and str(nationality).strip()
+            else str((existing_for_discord or {}).get("nationality") or "manual")
+        )
+        final_request_type = (
+            str(request_type).strip().lower()
+            if request_type and str(request_type).strip()
+            else str((existing_for_discord or {}).get("request_type") or "manual_link")
+        )
+        final_embassy_country = (
+            str(embassy_country).strip() if embassy_country and embassy_country.strip() else None
+        )
+        approved_at = datetime.datetime.now(datetime.UTC).isoformat()
+
+        await db.upsert_identity_link(
+            discord_user_id=discord_id,
+            guild_id=guild_id,
+            in_game_user_id=normalized,
+            nationality=final_nationality,
+            request_type=final_request_type,
+            embassy_country=final_embassy_country,
+            approved_by_discord_id=str(interaction.user.id),
+            approved_at=approved_at,
+        )
+
+        embed = discord.Embed(
+            title="✅ Mapping opgeslagen",
+            color=discord.Color.green(),
+        )
+        embed.add_field(name="Discord", value=f"{user.mention} (`{user.id}`)", inline=False)
+        embed.add_field(name="In-game ID", value=f"`{normalized}`", inline=True)
+        embed.add_field(name="Nationaliteit", value=final_nationality, inline=True)
+        embed.add_field(name="Type", value=final_request_type, inline=True)
+        if final_embassy_country:
+            embed.add_field(
+                name="Embassy-land",
+                value=final_embassy_country,
+                inline=True,
+            )
+
+        if existing_for_discord and existing_for_discord.get("in_game_user_id"):
+            previous = str(existing_for_discord.get("in_game_user_id"))
+            if previous != normalized:
+                embed.add_field(name="Vorige in-game ID", value=f"`{previous}`", inline=False)
+            else:
+                embed.add_field(name="Info", value="Bestaande mapping bijgewerkt.", inline=False)
+        else:
+            embed.add_field(name="Info", value="Nieuwe mapping aangemaakt.", inline=False)
+
+        if conflicting_discord and force:
+            embed.add_field(
+                name="⚠️ Force override",
+                value=(
+                    "Dit in-game ID stond ook op een andere Discord gebruiker. "
+                    "Controleer met `/discordid` of aanvullende opschoning nodig is."
+                ),
+                inline=False,
+            )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
     @app_commands.command(
         name="discordid",

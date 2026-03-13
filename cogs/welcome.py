@@ -810,6 +810,7 @@ class Welcome(commands.Cog, name="welcome"):
             nickname = user_info.get("result", {}).get("data", {}).get("username")
             if not nickname:
                 raise ValueError("username not found in API response")
+            return nickname
         except Exception as e:
             self.bot.logger.error(
                 f"Error fetching username for in-game ID {in_game_id}: {e}"
@@ -817,7 +818,6 @@ class Welcome(commands.Cog, name="welcome"):
             raise ValueError(
                 "Failed to fetch username from API for the provided in-game ID."
             )
-            return
 
     @app_commands.command(
         name="approve", description="Keur een verificatieverzoek goed"
