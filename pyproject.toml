@@ -1,9 +1,33 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wareranl-bot"
+version = "0.1.0"
+
+[tool.setuptools.packages.find]
+include = ["cogs*", "services*", "database*", "config*", "utils*"]
+
 [tool.black]
 line-length = 88
+extend-exclude = ".venv"
 
 [tool.isort]
 profile = "black"
 line_length = 88
+skip_glob = [".venv/*"]
 
 [tool.ruff]
 line-length = 88
+exclude = [".venv"]
+
+[tool.mypy]
+exclude = ["^\\.venv/"]
+ignore_missing_imports = true
+
+[tool.pylint.main]
+ignore-paths = ["^\\.venv/.*$"]
+
+[tool.pylint.format]
+max-line-length = 150

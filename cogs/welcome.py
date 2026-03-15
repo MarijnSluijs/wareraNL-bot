@@ -15,12 +15,11 @@ import datetime
 import json
 import logging
 import re
+import traceback
 
 import discord
 from discord import app_commands
 from discord.ext import commands
-
-from services.api_client import APIClient
 
 logger = logging.getLogger("discord_bot")
 
@@ -44,7 +43,7 @@ class WelcomeView(discord.ui.View):
         emoji="🇳🇱",
     )
     async def citizen_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction, _button: discord.ui.Button
     ):
         """Handle citizen verification request."""
         await interaction.response.send_modal(VerificationQuestionnaireModal("citizen"))
@@ -207,7 +206,10 @@ async def create_verification_channel(
     guild = interaction.guild
     config = getattr(interaction.client, "config", {}) or {}
     logger.info(
-        f"Creating verification channel for {user.name} ({request_type}) in guild {guild.name}"
+        "Creating verification channel for %s (%s) in guild %s",
+        user.name,
+        request_type,
+        guild.name,
     )
 
     # check if the user already has the requested role to prevent duplicate requests
@@ -253,7 +255,8 @@ async def create_verification_channel(
 
     if existing_channel:
         await interaction.response.send_message(
-            f"Je hebt al een open ticket: {existing_channel.mention}. Los dit eerst op voordat je een nieuw ticket aanmaakt.",
+            f"Je hebt al een open ticket: {existing_channel.mention}. "
+            "Los dit eerst op voordat je een nieuw ticket aanmaakt.",
             ephemeral=True,
         )
         return
@@ -340,8 +343,10 @@ async def create_verification_channel(
         bot_permissions = category.permissions_for(guild.me)
         if not bot_permissions.manage_channels:
             await interaction.response.send_message(
-                f"Ik heb geen toestemming om kanalen aan te maken in de **{category.name}** categorie.\n\n"
-                "**Oplossing:** Ga naar kanaalinstellingen > Rechten > Voeg de botrol toe met 'Kanalen beheren' ingeschakeld.",
+                f"Ik heb geen toestemming om kanalen aan te maken"
+                f" in de **{category.name}** categorie.\n\n"
+                "**Oplossing:** Ga naar kanaalinstellingen > Rechten > "
+                "Voeg de botrol toe met 'Kanalen beheren' ingeschakeld.",
                 ephemeral=True,
             )
             return
@@ -352,7 +357,10 @@ async def create_verification_channel(
             name=channel_name,
             category=category,
             overwrites=overwrites,
-            topic=f"Verification request by {user.name} | Type: {request_type} | ID: {ticket_id} | User ID: {user.id}",
+            topic=(
+                f"Verification request by {user.name} | Type: {request_type}"
+                f" | ID: {ticket_id} | User ID: {user.id}"
+            ),
         )
     except discord.Forbidden as e:
         error_msg = (
@@ -361,7 +369,10 @@ async def create_verification_channel(
             "• Zorg dat de bot 'Kanalen beheren' toestemming heeft op de hele server\n"
         )
         if category:
-            error_msg += f"• Voeg de bot toe aan de **{category.name}** categorie met 'Kanalen beheren' toestemming\n"
+            error_msg += (
+                f"• Voeg de bot toe aan de **{category.name}** categorie "
+                "met 'Kanalen beheren' toestemming\n"
+            )
         error_msg += f"\n**Fout:** {e}"
         await interaction.response.send_message(error_msg, ephemeral=True)
         return
@@ -377,14 +388,21 @@ async def create_verification_channel(
     # Create the ticket embed with request details
     embed = discord.Embed(
         title=f"📋 {request_title}",
-        description=f"**Gebruiker:** {user.mention}\n**Type:** {request_type.title()}\n**Ticket ID:** #{ticket_id}",
+        description=(
+            f"**Gebruiker:** {user.mention}\n"
+            f"**Type:** {request_type.title()}\n"
+            f"**Ticket ID:** #{ticket_id}"
+        ),
         color=embed_color,
         timestamp=datetime.datetime.now(datetime.UTC),
     )
     embed.set_thumbnail(url=user.display_avatar.url)
     embed.add_field(
         name="Instructies voor Moderators",
-        value="Gebruik `/approve` om dit verzoek goed te keuren\nGebruik `/deny` om dit verzoek af te wijzen",
+        value=(
+            "Gebruik `/approve` om dit verzoek goed te keuren\n"
+            "Gebruik `/deny` om dit verzoek af te wijzen"
+        ),
         inline=False,
     )
     embed.set_footer(text=f"User ID: {user.id}")
@@ -408,9 +426,15 @@ async def create_verification_channel(
         await channel.send(embed=questionnaire_embed)
 
     if request_type == "citizen":
-        instruction_text = "Hallo, stuur alsjeblieft een screenshot van je WarEra profiel om je verificatieverzoek af te ronden."
+        instruction_text = (
+            "Hallo, stuur alsjeblieft een screenshot van je WarEra profiel "
+            "om je verificatieverzoek af te ronden."
+        )
     else:
-        instruction_text = "Hello, please send a screenshot of your WarEra profile to complete your verification request."
+        instruction_text = (
+            "Hello, please send a screenshot of your WarEra profile "
+            "to complete your verification request."
+        )
 
     instructions_embed = discord.Embed(
         description=instruction_text,
@@ -548,7 +572,8 @@ class Welcome(commands.Cog, name="welcome"):
             normalized = raw_value
             if "://" in raw_value:
                 raise ValueError(
-                    "Invalid WarEra profile URL. Use `https://app.warera.io/user/{id}` or provide the raw in-game ID."
+                    "Invalid WarEra profile URL. "
+                    "Use `https://app.warera.io/user/{id}` or provide the raw in-game ID."
                 )
 
         if not normalized:
@@ -664,7 +689,9 @@ class Welcome(commands.Cog, name="welcome"):
 
         embed = discord.Embed(
             title="🇳🇱 Welcome to Nederland!",
-            description=f"Welcome {member.mention}! We're glad to have you here.\n\nPlease head over to <#{welcome_channel_id}> and click one of the buttons to verify your status and gain access to the rest of the server!",
+            description=f"Welcome {member.mention}! We're glad to have you here.\n\nPlease head "
+            f"over to <#{welcome_channel_id}> and click one of the buttons to verify your status "
+            f"and gain access to the rest of the server!",
             color=int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16),
         )
         # optionally send to a dedicated welcome/announcement channel if configured
@@ -791,7 +818,7 @@ class Welcome(commands.Cog, name="welcome"):
         self,
         interaction: discord.Interaction,
         in_game_id: str,
-        nickname: str = None,
+        nickname: str | None = None,
         reason: str = "Geen reden opgegeven",
     ):
         """
@@ -913,12 +940,14 @@ class Welcome(commands.Cog, name="welcome"):
             try:
                 await member.add_roles(role_to_give)
                 self.bot.logger.info(
-                    f"Assigned role {role_to_give.name} to {member.name} for {request_type} verification"
+                    f"Assigned role {role_to_give.name} to "
+                    f"{member.name} for {request_type} verification"
                 )
             except discord.Forbidden:
                 await interaction.followup.send(
                     f"I don't have permission to assign the {role_to_give.name} role. "
-                    "Make sure my bot role is **higher** than this role in Server Settings > Roles.",
+                    "Make sure my bot role is **higher** than "
+                    f"this role in Server Settings > Roles.",
                     ephemeral=True,
                 )
                 return
@@ -942,7 +971,8 @@ class Welcome(commands.Cog, name="welcome"):
                 await member.remove_roles(old_role)
             except discord.Forbidden:
                 self.bot.logger.error(
-                    f"Could not remove role {old_role.name} from {member.name} due to permission issues."
+                    f"Could not remove role {old_role.name} from "
+                    f"{member.name} due to permission issues."
                 )
             except discord.HTTPException as e:
                 self.bot.logger.error(
@@ -1061,7 +1091,9 @@ class Welcome(commands.Cog, name="welcome"):
             if support_ch:
                 parts.append(f". Voor vragen kun terecht in <#{support_ch}>")
             parts.append(
-                f".\n\nAls laatste: je kan op je profiel bij `Settings > Referrals` een referrer opgeven, vul hier het liefst een **Nederlander** in (bijvoorbeeld *{refferer_name}*), dan krijgen jij en de referrer muntjes."
+                f".\n\nAls laatste: je kan op je profiel bij `Settings > Referrals` een referrer "
+                f"opgeven, vul hier het liefst een **Nederlander** in (bijvoorbeeld "
+                f"*{refferer_name}*), dan krijgen jij en de referrer muntjes."
             )
 
             welcome_embed = discord.Embed(
@@ -1235,7 +1267,6 @@ class Welcome(commands.Cog, name="welcome"):
 
         This command is similar to /approve but also assigns the specific embassy role.
         """
-        import traceback
 
         try:
             # avoid "The application did not respond" (Discord requires a response within 3s)
@@ -1344,7 +1375,8 @@ class Welcome(commands.Cog, name="welcome"):
             except discord.Forbidden:
                 await interaction.followup.send(
                     f"I don't have permission to assign the {embassy_role.name} role. "
-                    "Make sure my bot role is **higher** than this role in Server Settings > Roles.",
+                    f"Make sure my bot role is **higher** than this role "
+                    f"in Server Settings > Roles.",
                     ephemeral=True,
                 )
                 return
@@ -1357,7 +1389,8 @@ class Welcome(commands.Cog, name="welcome"):
                     await member.remove_roles(old_role)
                 except discord.Forbidden:
                     self.bot.logger.error(
-                        f"Could not remove role {old_role.name} from {member.name} due to permission issues."
+                        f"Could not remove role {old_role.name} from {member.name} "
+                        f"due to permission issues."
                     )
                 except discord.HTTPException as e:
                     self.bot.logger.error(
@@ -1433,10 +1466,14 @@ class Welcome(commands.Cog, name="welcome"):
                         error_msg = (
                             "Ik heb geen toestemming om kanalen aan te maken.\n\n"
                             "**Mogelijke oplossingen:**\n"
-                            "• Zorg dat de bot 'Kanalen beheren' toestemming heeft op de hele server\n"
+                            "• Zorg dat de bot 'Kanalen beheren' toestemming heeft "
+                            "op de hele server\n"
                         )
                         if category:
-                            error_msg += f"• Voeg de bot toe aan de **{category.name}** categorie met 'Kanalen beheren' toestemming\n"
+                            error_msg += (
+                                f"• Voeg de bot toe aan de **{category.name}** categorie "
+                                "met 'Kanalen beheren' toestemming\n"
+                            )
                         error_msg += f"\n**Fout:** {e}"
                         await interaction.followup.send(error_msg, ephemeral=True)
                         return
@@ -1444,7 +1481,8 @@ class Welcome(commands.Cog, name="welcome"):
             if embassy_channel:
                 self.bot.logger.debug(
                     "Failed to edit member nickname: {e}"
-                    f"Setting permissions for member {member} in embassy channel {embassy_channel.name}"
+                    f"Setting permissions for member {member} in "
+                    f"embassy channel {embassy_channel.name}"
                 )
                 # try:
                 await embassy_channel.set_permissions(
@@ -1562,4 +1600,5 @@ class Welcome(commands.Cog, name="welcome"):
 
 
 async def setup(bot) -> None:
+    """Add the Welcome cog to the bot."""
     await bot.add_cog(Welcome(bot))

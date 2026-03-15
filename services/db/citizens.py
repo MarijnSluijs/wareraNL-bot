@@ -1,4 +1,5 @@
 """Citizen-level DB methods (citizen_levels table)."""
+
 from __future__ import annotations
 
 import difflib
@@ -45,8 +46,18 @@ class CitizensMixin:
             "  mu_id   = COALESCE(excluded.mu_id,   citizen_levels.mu_id),"
             "  mu_name = COALESCE(excluded.mu_name, citizen_levels.mu_name),"
             "  updated_at           = excluded.updated_at",
-            (user_id, country_id, level, skill_mode, last_skills_reset_at,
-             citizen_name, last_login_at, mu_id, mu_name, updated_at),
+            (
+                user_id,
+                country_id,
+                level,
+                skill_mode,
+                last_skills_reset_at,
+                citizen_name,
+                last_login_at,
+                mu_id,
+                mu_name,
+                updated_at,
+            ),
         )
 
     async def update_citizen_mu(
@@ -137,13 +148,14 @@ class CitizensMixin:
         active_counts contains only citizens whose last_login_at is within
         the last 24 hours.
         """
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
+
         counts: dict[int, int] = {}
         active_counts: dict[int, int] = {}
         last_updated: Optional[str] = None
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(hours=24)
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
 
         if country_id:
             sql = "SELECT level, updated_at, last_login_at FROM citizen_levels WHERE country_id = ?"
@@ -170,7 +182,9 @@ class CitizensMixin:
         eco = war = unknown = 0
         last_updated: Optional[str] = None
         if country_id:
-            sql = "SELECT skill_mode, updated_at FROM citizen_levels WHERE country_id = ?"
+            sql = (
+                "SELECT skill_mode, updated_at FROM citizen_levels WHERE country_id = ?"
+            )
             params: tuple = (country_id,)
         else:
             sql = "SELECT skill_mode, updated_at FROM citizen_levels"
@@ -216,9 +230,7 @@ class CitizensMixin:
                     last_updated = upd
         return buckets, last_updated
 
-    async def get_skill_mode_by_mu(
-        self, country_id: Optional[str]
-    ) -> dict[str, dict]:
+    async def get_skill_mode_by_mu(self, country_id: Optional[str]) -> dict[str, dict]:
         """Eco/war/unknown counts + player list grouped by MU name."""
         if country_id:
             sql = (
@@ -245,11 +257,13 @@ class CitizensMixin:
                     mus[key]["war"] += 1
                 else:
                     mus[key]["unknown"] += 1
-                mus[key]["players"].append({
-                    "citizen_name": name or "?",
-                    "level": level,
-                    "skill_mode": mode,
-                })
+                mus[key]["players"].append(
+                    {
+                        "citizen_name": name or "?",
+                        "level": level,
+                        "skill_mode": mode,
+                    }
+                )
         return mus
 
     async def get_citizen_cooldowns_by_mu(
@@ -275,7 +289,13 @@ class CitizensMixin:
                 mu, name, level, reset_at = row
                 key = mu or ""
                 if key not in mus:
-                    mus[key] = {"count": 0, "sum_days": 0.0, "available": 0, "no_data": 0, "players": []}
+                    mus[key] = {
+                        "count": 0,
+                        "sum_days": 0.0,
+                        "available": 0,
+                        "no_data": 0,
+                        "players": [],
+                    }
                 b = mus[key]
                 days_ago: Optional[float] = None
                 can_reset = True
@@ -294,12 +314,14 @@ class CitizensMixin:
                 else:
                     b["no_data"] += 1
                     b["available"] += 1
-                b["players"].append({
-                    "citizen_name": name or "?",
-                    "level": level,
-                    "days_ago": days_ago,
-                    "can_reset": can_reset,
-                })
+                b["players"].append(
+                    {
+                        "citizen_name": name or "?",
+                        "level": level,
+                        "days_ago": days_ago,
+                        "can_reset": can_reset,
+                    }
+                )
         return mus
 
     async def get_skill_reset_cooldown_by_level_buckets(
@@ -326,7 +348,12 @@ class CitizensMixin:
                 level, reset_at, upd = row
                 bucket = ((int(level or 1) - 1) // 5) * 5 + 1
                 if bucket not in buckets:
-                    buckets[bucket] = {"count": 0, "sum_days": 0.0, "available": 0, "no_data": 0}
+                    buckets[bucket] = {
+                        "count": 0,
+                        "sum_days": 0.0,
+                        "available": 0,
+                        "no_data": 0,
+                    }
                 b = buckets[bucket]
                 if reset_at:
                     try:
@@ -379,14 +406,16 @@ class CitizensMixin:
                         can_reset = days_ago >= 7
                     except Exception:
                         pass
-                rows.append({
-                    "user_id": uid,
-                    "citizen_name": name or uid,
-                    "level": level,
-                    "last_skills_reset_at": reset_at,
-                    "days_ago": days_ago,
-                    "can_reset": can_reset,
-                })
+                rows.append(
+                    {
+                        "user_id": uid,
+                        "citizen_name": name or uid,
+                        "level": level,
+                        "last_skills_reset_at": reset_at,
+                        "days_ago": days_ago,
+                        "can_reset": can_reset,
+                    }
+                )
         return rows
 
     async def find_citizen_cooldown(self, query: str) -> list[dict]:
@@ -412,15 +441,17 @@ class CitizensMixin:
                         can_reset = days_ago >= 7
                     except Exception:
                         pass
-                rows.append({
-                    "user_id": uid,
-                    "citizen_name": name or uid,
-                    "level": level,
-                    "country_id": country_id,
-                    "last_skills_reset_at": reset_at,
-                    "days_ago": days_ago,
-                    "can_reset": can_reset,
-                })
+                rows.append(
+                    {
+                        "user_id": uid,
+                        "citizen_name": name or uid,
+                        "level": level,
+                        "country_id": country_id,
+                        "last_skills_reset_at": reset_at,
+                        "days_ago": days_ago,
+                        "can_reset": can_reset,
+                    }
+                )
         return rows
 
     async def find_citizen_readiness(self, query: str) -> list[dict]:
@@ -446,16 +477,18 @@ class CitizensMixin:
                         can_reset = days_ago >= 7
                     except Exception:
                         pass
-                rows.append({
-                    "user_id": uid,
-                    "citizen_name": name or uid,
-                    "level": level,
-                    "country_id": country_id,
-                    "skill_mode": mode,
-                    "last_skills_reset_at": reset_at,
-                    "days_ago": days_ago,
-                    "can_reset": can_reset,
-                })
+                rows.append(
+                    {
+                        "user_id": uid,
+                        "citizen_name": name or uid,
+                        "level": level,
+                        "country_id": country_id,
+                        "skill_mode": mode,
+                        "last_skills_reset_at": reset_at,
+                        "days_ago": days_ago,
+                        "can_reset": can_reset,
+                    }
+                )
         return rows
 
     async def get_mu_readiness_players(
@@ -509,13 +542,15 @@ class CitizensMixin:
                         can_reset = days_ago >= 7
                     except Exception:
                         pass
-                players.append({
-                    "citizen_name": name or "?",
-                    "level": level,
-                    "skill_mode": mode,
-                    "days_ago": days_ago,
-                    "can_reset": can_reset,
-                })
+                players.append(
+                    {
+                        "citizen_name": name or "?",
+                        "level": level,
+                        "skill_mode": mode,
+                        "days_ago": days_ago,
+                        "can_reset": can_reset,
+                    }
+                )
         return mu_name, players
 
     async def get_distinct_mu_names(
@@ -565,8 +600,12 @@ class CitizensMixin:
                 level_int = int(level) if level is not None else 0
                 if mu_name not in mus:
                     mus[mu_name] = {
-                        "war": 0, "total": 0, "can_reset": 0,
-                        "waiting_days": [], "war_15": 0, "war_20": 0,
+                        "war": 0,
+                        "total": 0,
+                        "can_reset": 0,
+                        "waiting_days": [],
+                        "war_15": 0,
+                        "war_20": 0,
                     }
                 m = mus[mu_name]
                 m["total"] += 1
@@ -704,15 +743,15 @@ class CitizensMixin:
             "  OR lower(citizen_name) LIKE lower(?) "
             ") ORDER BY weekly_damage DESC LIMIT 1"
         )
-        async with self._conn.execute(sql, (country_id, query, query, f"%{query}%")) as cur:
+        async with self._conn.execute(
+            sql, (country_id, query, query, f"%{query}%")
+        ) as cur:
             row = await cur.fetchone()
         if row:
             return str(row[0]), str(row[1]), float(row[2]), str(row[3])
         return None
 
-    async def get_player_nl_rank(
-        self, country_id: str, user_id: str
-    ) -> Optional[int]:
+    async def get_player_nl_rank(self, country_id: str, user_id: str) -> Optional[int]:
         """Return the 1-based NL rank of *user_id* by weekly_damage, or None."""
         sql = (
             "SELECT COUNT(*) + 1 FROM citizen_weekly_damages "

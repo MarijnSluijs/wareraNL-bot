@@ -25,6 +25,7 @@ class EmbedModal(discord.ui.Modal, title="Create Embed"):
     )
 
     async def on_submit(self, interaction: discord.Interaction):
+        """When the modal is submitted, create and send the embed to the selected channel."""
         embed = discord.Embed(
             description=str(self.message),
             color=int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16),
@@ -57,6 +58,7 @@ class ChannelSelectView(discord.ui.View):
     async def channel_select(
         self, interaction: discord.Interaction, select: discord.ui.ChannelSelect
     ):
+        """When a channel is selected, open the embed creation modal."""
         channel_id = select.values[0].id
         selected_channel = interaction.guild.get_channel(channel_id)
         modal = EmbedModal(self.bot, selected_channel)
@@ -64,7 +66,10 @@ class ChannelSelectView(discord.ui.View):
 
 
 class Embeds(commands.Cog, name="embeds"):
-    """Cog for the !embed command, allowing the bot owner to create and post rich embeds via an interactive modal."""
+    """
+    Cog for the !embed command, allowing the bot owner to create
+    and post rich embeds via an interactive modal.
+    """
 
     def __init__(self, bot) -> None:
         self.bot = bot

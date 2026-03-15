@@ -10,11 +10,8 @@ Commands and listeners:
     /embassyapprove (country, in_game_id) — approve an embassy membership request
 """
 
-import asyncio
 import datetime
-import json
 import logging
-import re
 
 import discord
 from discord import app_commands
@@ -307,7 +304,7 @@ class MURequest(commands.Cog, name="murequest"):
 
     @app_commands.command(
         name="kleurcode",
-        description="Plaats het bericht over het huidige dreigingsniveau"
+        description="Plaats het bericht over het huidige dreigingsniveau",
     )
     @app_commands.describe(
         code="De kleurcode die je wilt posten (rood, oranje, geel, groen)"
