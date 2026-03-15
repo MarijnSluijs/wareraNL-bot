@@ -666,18 +666,6 @@ class CitizensMixin:
                 best = (uid, name)
         return best
 
-    
-    # ── Eco donations ──────────────────────────────────────────────────
-
-    async def get_citizen_name_by_id(self, user_id: str) -> Optional[str]:
-        """Return the citizen name for a given user_id, or None if not found."""
-        sql = "SELECT citizen_name FROM citizen_levels WHERE user_id = ?"
-        async with self._conn.execute(sql, (user_id,)) as cur:
-            row = await cur.fetchone()
-            if row and row[0]:
-                return row[0]
-        return None
-    
     # ── Weekly damage ──────────────────────────────────────────────────
 
     async def get_nl_citizen_ids(self, country_id: str) -> list[tuple[str, str]]:
@@ -775,3 +763,22 @@ class CitizensMixin:
         async with self._conn.execute(sql, (country_id, country_id, user_id)) as cur:
             row = await cur.fetchone()
         return int(row[0]) if row else None
+    async def get_weekly_damages_for_users(
+        self, user_ids: list[str]
+    ) -> dict[str, tuple[str, float]]:
+        """Return {user_id: (citizen_name, weekly_damage)} for each id in *user_ids*.
+
+        Users not found in the DB (or with 0 damage) are omitted from the result.
+        """
+        if not user_ids:
+            return {}
+        placeholders = ",".join("?" for _ in user_ids)
+        sql = (
+            "SELECT user_id, COALESCE(citizen_name, user_id), weekly_damage "
+            f"FROM citizen_weekly_damages WHERE user_id IN ({placeholders})"
+        )
+        result: dict[str, tuple[str, float]] = {}
+        async with self._conn.execute(sql, user_ids) as cur:
+            async for row in cur:
+                result[str(row[0])] = (str(row[1]), float(row[2]))
+        return result
