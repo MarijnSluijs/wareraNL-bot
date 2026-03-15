@@ -85,6 +85,12 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
             logger.info("citizen_refresh: NL done")
         except Exception:
             logger.exception("citizen_refresh: NL refresh failed")
+            return
+
+        try:
+            await self._sync_discord_nicknames_for_country(nl_country_id, name)
+        except Exception:
+            logger.exception("citizen_refresh: NL nickname sync failed")
 
     async def _do_all_countries_refresh(self, now_utc: datetime) -> None:
         """Refresh citizen level cache for all countries."""
@@ -114,7 +120,102 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
                 await self._citizen_cache.refresh_country(cid, name)
             except Exception:
                 logger.exception("citizen_refresh: error refreshing %s", name)
+                continue
+
+            try:
+                await self._sync_discord_nicknames_for_country(cid, name)
+            except Exception:
+                logger.exception("citizen_refresh: nickname sync error for %s", name)
         logger.info("citizen_refresh: full sweep complete (%d countries)", total)
+
+    async def _sync_discord_nicknames_for_country(
+        self,
+        country_id: str,
+        country_name: str,
+    ) -> None:
+        """Sync Discord nicknames to latest citizen names for mapped users."""
+        if not self._db:
+            return
+
+        try:
+            citizens = await self._db.get_nl_citizen_ids(country_id)
+        except Exception:
+            logger.exception(
+                "citizen_refresh: failed loading citizens for nickname sync (%s)",
+                country_name,
+            )
+            return
+
+        if not citizens:
+            return
+
+        name_by_ingame = {
+            str(user_id): str(citizen_name).strip()
+            for user_id, citizen_name in citizens
+            if str(citizen_name).strip()
+        }
+        if not name_by_ingame:
+            return
+
+        updated = 0
+        skipped = 0
+        failed = 0
+
+        for guild in self.bot.guilds:
+            try:
+                links = await self._db.get_identity_links_for_guild(str(guild.id))
+            except Exception:
+                logger.exception(
+                    "citizen_refresh: failed loading identity links for guild %s",
+                    guild.id,
+                )
+                continue
+
+            for link in links:
+                in_game_user_id = str(link.get("in_game_user_id") or "").strip()
+                target_nick = name_by_ingame.get(in_game_user_id)
+                if not target_nick:
+                    continue
+
+                target_nick = target_nick[:32]
+                if not target_nick:
+                    continue
+
+                discord_user_id = str(link.get("discord_user_id") or "").strip()
+                if not discord_user_id.isdigit():
+                    continue
+
+                member = guild.get_member(int(discord_user_id))
+                if member is None or member.bot:
+                    continue
+
+                current_nick = (member.nick or "").strip()
+                if current_nick == target_nick:
+                    skipped += 1
+                    continue
+
+                if member.nick is None and member.name == target_nick:
+                    skipped += 1
+                    continue
+
+                try:
+                    await member.edit(
+                        nick=target_nick,
+                        reason=f"Sync met WarEra citizen naam ({country_name})",
+                    )
+                    updated += 1
+                except Exception:
+                    failed += 1
+
+        logger.info(
+            "citizen_refresh: nickname sync %s finished (updated=%d skipped=%d failed=%d)",
+            country_name,
+            updated,
+            skipped,
+            failed,
+        )
+
+    
 
 
 async def setup(bot) -> None:

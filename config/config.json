@@ -23,20 +23,21 @@
         "verification": 1467976282968166706,
         "logs": 1456287198780457134,
         "bot_mededelingen": 1474472809215299706,
-        "orders": 1475790386936152186,
+        "orders": 1479460408220844124,
         "rules": 0,
         "handleiding": 1457351757444419769,
         "roles": 1456612515902390353,
         "roles_claim": 1456612515902390353,
         "vragen": 1456252976967581877,
-        "embassy_category": 1456259898349453433,
+        "embassy_categories": [1456259898349453433, 1481707074445381723],
         "reddit": 1474728411338641488,
         "articles": 1474728499242860645,
         "congres": 1469622838368669768,
         "debat": 1471160014097092822,
         "stembureau": 1466165467155665080,
         "events": 1474472809215299706,
-        "mu_aanmelden": 1479460408220844124
+        "mu_aanmelden": 1480649484819235019
+        
     },
     "welcome_message": "# Welcome to the Official Nederland War Era Server!\n\nGreetings, traveler! You have arrived at the gates of Nederland.\n\nPlease select your status below to proceed with verification:",
     "colors": {

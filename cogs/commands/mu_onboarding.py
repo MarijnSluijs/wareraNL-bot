@@ -1,3 +1,4 @@
+# pylint: disable=arguments-differ
 """
 Member verification and welcome flow.
 
@@ -18,8 +19,16 @@ from discord import app_commands
 from discord.ext import commands
 
 from cogs.standard_messages.mu_bericht import has_mu_privilige
+from cogs.commands._base import dreigingsniveau_autocomplete
 
 logger = logging.getLogger("discord_bot")
+
+TEMPLATES = {
+    "groen": "Code Groen: Geen bekende oorlogsdreiging. Blijf in eco-stand en werk aan je bedrijven.",
+    "geel": "Code Geel: Mogelijke oorlog op komst. Zorg dat je geen cooldown van de skills-reset activeert, en begin met het inslaan van gear, munitie, pillen, en voedsel.",
+    "oranje": "Code Oranje: Oorlog verwacht op korte termijn. Zorg dat je voorraad op peil is.",
+    "rood": "Code Rood: In oorlog. Wacht met het omzetten van je skills tot instructies van de regering."
+}
 
 
 class MUOnboardingView(discord.ui.View):
@@ -44,7 +53,20 @@ class MUOnboardingView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         """Handle citizen verification request."""
-        await interaction.response.send_modal(MUApplicationModal())
+        try:
+            await interaction.response.send_modal(MUApplicationModal())
+        except Exception as e:
+            logger.error(f"Error sending MU application modal: {e}", exc_info=True)
+            try:
+                await interaction.response.send_message(
+                    "Er is een fout opgetreden bij het openen van het formulier. Probeer het later opnieuw.",
+                    ephemeral=True
+                )
+            except discord.InteractionResponded:
+                await interaction.followup.send(
+                    "Er is een fout opgetreden bij het openen van het formulier. Probeer het later opnieuw.",
+                    ephemeral=True
+                )
 
 
 class MUApplicationModal(discord.ui.Modal):
@@ -80,10 +102,10 @@ class MUApplicationModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         questionnaire_answers = {
-            ("WarEra gebruikersnaam"): str(self.warera_name).strip(),
-            ("MU URL"): str(self.mu_link).strip(),
+            "WarEra gebruikersnaam": self.warera_name.value.strip(),
+            "MU URL": self.mu_link.value.strip(),
         }
-        extra = str(self.extra_info).strip()
+        extra = self.extra_info.value.strip()
         if extra:
             questionnaire_answers["Aanvullende info"] = extra
 
@@ -113,7 +135,9 @@ async def create_mu_request_channel(
     guild = interaction.guild
     config = getattr(interaction.client, "config", {}) or {}
     logger.info(
-        f"Creating verification channel for {user.name} (MU request) in guild {guild.name}"
+        "Creating verification channel for %s (MU request) in guild %s",
+        user.name,
+        guild.name
     )
 
     ticket_id = int(datetime.datetime.utcnow().timestamp())
@@ -264,54 +288,144 @@ class MURequest(commands.Cog, name="murequest"):
         # Use the central bot configuration
         self.config = getattr(self.bot, "config", {}) or {}
 
-    @commands.command(
+    @app_commands.command(
         name="postmuapp",
         description="Post the MU application message with verification buttons (admin only)",
     )
+    @app_commands.describe(
+        plek="[Optioneel]: of we op zoek zijn naar nieuwe MU's"
+    )
     @has_mu_privilige()
-    async def post_mu_application(self, ctx: commands.Context):
+    async def post_mu_application(self, interaction: discord.Interaction, plek: bool = False):
         # Create the welcome embed
-        embed = discord.Embed(
-            title="🇳🇱 MU Aanmelden",
-            description="Klik op de onderstaande knop om je MU aan te melden bij de overheid.\n\n"
-            "Momenteel zijn we **niet** op zoek naar nieuwe MU's, maar het staat je vrij om er eentje op te richten.",
-            color=discord.Color.gold(),
-            timestamp=datetime.datetime.now(datetime.UTC),
-        )
-        embed.set_thumbnail(
-            url="https://jorisvanderbijl.nl/wp-content/uploads/2022/05/ministerie-defensie-logo-480x480.png"
-        )
+        try:
+            if plek:
+                zoekend = "Momenteel zijn we op zoek naar nieuwe MU's, richt er eentje op als je de middelen hebt."
+            else:
+                zoekend = "Momenteel zijn we **niet** op zoek naar nieuwe MU's, maar het staat je vrij om er eentje op te richten."
+            app_embed = discord.Embed(
+                title="🇳🇱 MU Aanmelden",
+                description=f"Klik op de onderstaande knop om je MU aan te melden bij de overheid.\n\n"
+                f"{zoekend}",
+                color=discord.Color.gold(),
+                timestamp=datetime.datetime.now(datetime.UTC),
+            )
+            app_embed.set_thumbnail(
+                url="https://jorisvanderbijl.nl/wp-content/uploads/2022/05/ministerie-defensie-logo-480x480.png"
+            )
         # embed.set_author(name=member.name, icon_url=member.display_avatar.url)
         # embed.set_footer(text=f"Member #{self.bot.guild.member_count}")
+        except Exception as e:
+            await interaction.response.send_message(f"{e}")
 
         # Send welcome message with verification buttons
         channel_id = self.bot.config.get("channels", {}).get("mu_aanmelden")
         if not channel_id:
-            await ctx.send("MU aanmelden channel ID not configured in bot config.")
+            await interaction.response.send_message("MU aanmelden channel ID not configured in bot config.", ephemeral=True)
             return
 
-        channel = ctx.guild.get_channel(channel_id)
+        channel = interaction.guild.get_channel(channel_id)
         if not channel:
-            await ctx.send(
-                "MU aanmelden channel not found. Please check the channel ID in bot config."
+            await interaction.response.send_message(
+                "MU aanmelden channel not found. Please check the channel ID in bot config.",
+                ephemeral=True
             )
             return
+        
+        # check for existing dreigingsniveau message
+        dreigingsniveau_embed = None
+        async for message in channel.history(limit=100):
+            if message.author == self.bot.user and message.embeds:
+                embed = message.embeds[0]
+                if embed.title and "Huidig dreigingsniveau" in embed.title:
+                    # found existing dreigingsniveau message, repost it after the new welcome message
+                    dreigingsniveau_embed = embed
+                    break
 
         # clear channel to repost button
-        await channel.purge(limit=1)
+        await channel.purge(limit=3)
 
-        await channel.send(embed=embed, view=MUOnboardingView(self.bot))
+        await channel.send(embed=app_embed, view=MUOnboardingView(self.bot))
+
+        # repost current dreigingsniveau code if exists
+        if dreigingsniveau_embed:
+            await channel.send(embed=embed)
+
+        await interaction.response.send_message(f"MU application message posted in {channel.mention}", ephemeral=True)
 
     @app_commands.command(
         name="kleurcode",
         description="Plaats het bericht over het huidige dreigingsniveau",
     )
     @app_commands.describe(
-        code="De kleurcode die je wilt posten (rood, oranje, geel, groen)"
+        code="De kleurcode die je wilt posten (rood, oranje, geel, groen)",
+        bericht="[Optioneel] Eigen versie van het bericht om de template te vervangen",
+        toelichting="[Optioneel] Extra toelichting om toe te voegen aan het bericht"
     )
+    @app_commands.autocomplete(code=dreigingsniveau_autocomplete)
     @has_mu_privilige()
-    async def post_kleurcodes(self, ctx: commands.Context, code: str):
-        pass
+    async def post_kleurcodes(self, ctx: commands.Context, code: str, bericht: str = None, toelichting: str = None):
+        # find and remove old kleurcode message
+        channel_id = self.bot.config.get("channels", {}).get("orders")
+        if not channel_id:
+            await ctx.send("MU aanmelden channel ID not configured in bot config.")
+            return
+        
+        channel = ctx.guild.get_channel(channel_id)
+        if not channel:
+            await ctx.send(
+                "MU aanmelden channel not found. Please check the channel ID in bot config."
+            )
+            return
+        
+        async for message in channel.history(limit=100):
+            if message.author == self.bot.user and message.embeds:
+                embed = message.embeds[0]
+                if embed.title and "Huidig dreigingsniveau" in embed.title:
+                    await message.delete()
+                    break
+
+        # get circle emoji for the code
+        circle_emoji = {
+            "rood": "🔴",
+            "oranje": "🟠",
+            "geel": "🟡",
+            "groen": "🟢"
+        }.get(code.lower())
+
+        # put the emoji in the channel name
+        if channel:
+            base_name = channel.name
+            # remove old emoji if exists
+            for emoji in ["🔴", "🟠", "🟡", "🟢"]:
+                if base_name.startswith(emoji):
+                    base_name = base_name[1:].strip()
+                    break
+            new_name = f"{circle_emoji}|{base_name}"
+            try:
+                await channel.edit(name=new_name)
+            except Exception as e:
+                logger.error(f"Error updating channel name with emoji: {e}", exc_info=True)
+
+        if not bericht:
+            description = TEMPLATES.get(code.lower())
+        else:
+            description = bericht
+
+        if toelichting:
+            description += f"\n\n{toelichting}"
+
+        embed = discord.Embed(
+            title=f"Huidig dreigingsniveau: {circle_emoji} Code {code.capitalize()}",
+            description=description,
+            color=discord.Color.red() if code.lower() == "rood" else
+                  discord.Color.orange() if code.lower() == "oranje" else
+                  discord.Color.yellow() if code.lower() == "geel" else
+                  discord.Color.green()
+        )
+        
+        await channel.send(embed=embed)
+        await ctx.response.send_message(f"Kleurcode {code.capitalize()} gepost in {channel.mention}", ephemeral=True)
 
 
 async def setup(bot) -> None:

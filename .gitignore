@@ -159,3 +159,4 @@ cython_debug/
 
 # Log file
 discord.log
+*.csv

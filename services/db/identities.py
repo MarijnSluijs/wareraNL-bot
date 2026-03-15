@@ -230,3 +230,28 @@ class IdentityLinksMixin:
                     }
                 )
         return results
+
+    async def get_identity_links_for_guild(self, guild_id: str) -> list[dict]:
+        """Return all identity mappings for one guild."""
+        sql = (
+            "SELECT discord_user_id, guild_id, in_game_user_id, nationality, request_type, "
+            "embassy_country, approved_by_discord_id, approved_at, updated_at "
+            "FROM identity_links WHERE guild_id = ?"
+        )
+        results: list[dict] = []
+        async with self._conn.execute(sql, (guild_id,)) as cur:
+            async for row in cur:
+                results.append(
+                    {
+                        "discord_user_id": row[0],
+                        "guild_id": row[1],
+                        "in_game_user_id": row[2],
+                        "nationality": row[3],
+                        "request_type": row[4],
+                        "embassy_country": row[5],
+                        "approved_by_discord_id": row[6],
+                        "approved_at": row[7],
+                        "updated_at": row[8],
+                    }
+                )
+        return results
