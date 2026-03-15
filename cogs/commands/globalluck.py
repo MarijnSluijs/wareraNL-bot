@@ -4,54 +4,72 @@
 - /globalluck               — top 5 luckiest + bottom 5 unluckiest worldwide
 - /globalluck speler:naam   — full luck analysis + worldwide rank for a player
 """
+
 from __future__ import annotations
 
 import difflib
 import json
 import logging
 import math as _luck_math
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from services.api_client import APIClient
 from cogs.commands._base import citizen_autocomplete
+from services.api_client import APIClient
+
+if TYPE_CHECKING:
+    from bot import DiscordBot
 
 logger = logging.getLogger("discord_bot")
 
 # ── Luck constants (mirrored from geluk.py) ───────────────────────────────────
 
 EXPECTED_RATES: dict[str, float] = {
-    "mythic":   0.0001,
-    "legendary":0.0004,
-    "epic":     0.0085,
-    "rare":     0.071,
+    "mythic": 0.0001,
+    "legendary": 0.0004,
+    "epic": 0.0085,
+    "rare": 0.071,
     "uncommon": 0.30,
-    "common":   0.62,
+    "common": 0.62,
 }
 RARITY_ORDER = ["mythic", "legendary", "epic", "rare", "uncommon", "common"]
 RARITY_LABELS: dict[str, str] = {
-    "mythic":   "Mythic",
-    "legendary":"Legendary",
-    "epic":     "Epic",
-    "rare":     "Rare",
+    "mythic": "Mythic",
+    "legendary": "Legendary",
+    "epic": "Epic",
+    "rare": "Rare",
     "uncommon": "Uncommon",
-    "common":   "Common",
+    "common": "Common",
 }
 _LUCK_WEIGHTS: dict[str, float] = {
     r: -_luck_math.log2(p) for r, p in EXPECTED_RATES.items()
 }
 _LUCK_WEIGHT_TOTAL: float = sum(_LUCK_WEIGHTS.values())
 
+
+def _calc_luck_score(counts: dict[str, int], total: int) -> float:
+    """Poisson z-score luck % (0 = average, positive = luckier)."""
+    if total == 0:
+        return 0.0
+    score = 0.0
+    for rarity, expected_rate in EXPECTED_RATES.items():
+        expected_n = total * expected_rate
+        if expected_n <= 0:
+            continue
+        deviation = (counts.get(rarity, 0) - expected_n) / _luck_math.sqrt(expected_n)
+        score += _LUCK_WEIGHTS[rarity] * deviation
+    return score / _LUCK_WEIGHT_TOTAL * 100.0
+
 _ANSI_RARITY: dict[str, str] = {
-    "mythic":    "\033[31m",
+    "mythic": "\033[31m",
     "legendary": "\033[33m",
-    "epic":      "\033[35m",
-    "rare":      "\033[34m",
-    "uncommon":  "\033[32m",
-    "common":    "\033[90m",
+    "epic": "\033[35m",
+    "rare": "\033[34m",
+    "uncommon": "\033[32m",
+    "common": "\033[90m",
 }
 _ANSI_RST = "\033[0m"
 
@@ -120,7 +138,7 @@ def _build_luck_table(total: int, counts: dict[str, int]) -> str:
 class GlobalLuck(commands.Cog, name="globalluck"):
     """Global case-opening luck ranking."""
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: DiscordBot) -> None:
         self.bot = bot
         self.config: dict = getattr(bot, "config", {}) or {}
         self._db = None
@@ -146,9 +164,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
             data: list = []
             if isinstance(resp, dict):
                 inner = resp.get("result", resp)
-                data = (
-                    inner.get("data", inner) if isinstance(inner, dict) else resp
-                )
+                data = inner.get("data", inner) if isinstance(inner, dict) else resp
             if isinstance(data, list):
                 for c in data:
                     if isinstance(c, dict):
@@ -159,6 +175,89 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         except Exception:
             logger.exception("globalluck: failed to fetch country names")
         return self._country_name_cache
+
+    async def _get_item_rarities(self) -> dict[str, str]:
+        """Return {item_code: rarity} from gameConfig (cached per cog instance)."""
+        if hasattr(self, "_item_rarities_cache") and self._item_rarities_cache:
+            return self._item_rarities_cache  # type: ignore[attr-defined]
+        client = await self._get_client()
+        if not client:
+            return {}
+        try:
+            raw = await client.get("/gameConfig.getGameConfig", params={"input": "{}"})
+            data = {}
+            if isinstance(raw, dict):
+                inner = raw.get("result", raw)
+                data = inner.get("data", inner) if isinstance(inner, dict) else raw
+            rarities = {
+                code: item.get("rarity")
+                for code, item in (data.get("items") or {}).items()
+                if item.get("rarity")
+            }
+        except Exception:
+            logger.exception("globalluck: failed to load item rarities")
+            rarities = {}
+        self._item_rarities_cache: dict[str, str] = rarities  # type: ignore[attr-defined]
+        return rarities
+
+    async def _fetch_live_luck(
+        self,
+        user_id: str,
+    ) -> tuple[dict[str, int], int] | None:
+        """Fetch and return (rarity_counts, total_opens) live from the API.
+
+        Mirrors the logic in global_luck.py._fetch_luck_data.
+        Returns None if the client is unavailable.
+        """
+        client = await self._get_client()
+        if not client:
+            return None
+        item_rarities = await self._get_item_rarities()
+        counts: dict[str, int] = {r: 0 for r in RARITY_ORDER}
+        cursor = None
+        while True:
+            payload: dict = {
+                "userId": user_id,
+                "transactionType": "openCase",
+                "limit": 100,
+            }
+            if cursor:
+                payload["cursor"] = cursor
+            try:
+                raw = await client.get(
+                    "/transaction.getPaginatedTransactions",
+                    params={"input": json.dumps(payload)},
+                )
+            except Exception:
+                break
+            if isinstance(raw, dict):
+                inner = raw.get("result", raw)
+                data = inner.get("data", inner) if isinstance(inner, dict) else raw
+            else:
+                data = {}
+            if isinstance(data, dict):
+                items_list = data.get("items") or data.get("transactions") or []
+                cursor = data.get("nextCursor") or data.get("cursor")
+            elif isinstance(data, list):
+                items_list = data
+                cursor = None
+            else:
+                break
+            for tx in items_list:
+                if not isinstance(tx, dict):
+                    continue
+                # Skip elite cases (same filter as geluk.py)
+                if item_rarities.get(tx.get("itemCode", "")) == "mythic":
+                    continue
+                received = tx.get("item") or {}
+                item_code = (
+                    received.get("code") if isinstance(received, dict) else received
+                ) or ""
+                rarity = item_rarities.get(item_code, "common")
+                counts[rarity] = counts.get(rarity, 0) + 1
+            if not cursor or not items_list:
+                break
+        return counts, sum(counts.values())
 
     # ------------------------------------------------------------------ #
     # /globalluck                                                          #
@@ -224,7 +323,9 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         # bot5 comes back in ASC order (worst first) — reverse for display
         bot5 = list(reversed(bot5))
 
-        updated_at = (top5[0].get("updated_at") or "")[:16].replace("T", " ") if top5 else "?"
+        updated_at = (
+            (top5[0].get("updated_at") or "")[:16].replace("T", " ") if top5 else "?"
+        )
 
         embed = discord.Embed(
             title="🌍 Wereldwijde Gelukranking",
@@ -244,7 +345,9 @@ class GlobalLuck(commands.Cog, name="globalluck"):
             ind = _luck_indicator_overall(score)
             return f"#{rank:<4} {name:<18} {sign}{score:>7.1f}%  {ind}  {opens:>6,} ({country})"
 
-        header = f"{'rang':<5} {'naam':<18} {'score':>8}   {'geluk':<5}  {'cases':>6}  land"
+        header = (
+            f"{'rang':<5} {'naam':<18} {'score':>8}   {'geluk':<5}  {'cases':>6}  land"
+        )
         sep = "─" * 72
 
         # Top 5
@@ -304,7 +407,11 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         # Exact match first, then best fuzzy match
         s_low = speler.lower().strip()
         target = next(
-            (c for c in candidates if (c.get("citizen_name") or "").lower().strip() == s_low),
+            (
+                c
+                for c in candidates
+                if (c.get("citizen_name") or "").lower().strip() == s_low
+            ),
             None,
         )
         if target is None:
@@ -325,13 +432,29 @@ class GlobalLuck(commands.Cog, name="globalluck"):
             return
 
         username = target.get("citizen_name") or target.get("user_id") or "?"
-        luck_score = target["luck_score"]
-        opens = target["opens_count"]
+        user_id = target["user_id"]
         country_id = target.get("country_id", "")
-        updated_at = (target.get("updated_at") or "")[:16].replace("T", " ")
+        rank_updated_at = (target.get("updated_at") or "")[:16].replace("T", " ")
 
-        rank, _total = await db.get_global_luck_rank(target["user_id"])
+        rank, _total = await db.get_global_luck_rank(user_id)
         rank_str = f"#{rank:,}" if rank is not None else "?"
+
+        # Fetch live case data (same query as /geluk) so the analysis is always
+        # up-to-date, regardless of when the last global sweep ran.
+        live = await self._fetch_live_luck(user_id)
+
+        if live is not None:
+            counts, opens = live
+            luck_score = _calc_luck_score(counts, opens)
+            analysis_note = "🔴 Live"
+        else:
+            # Fall back to cached data
+            counts_raw = target.get("rarity_json")
+            counts = json.loads(counts_raw) if counts_raw else {}
+            opens = target["opens_count"]
+            luck_score = target["luck_score"]
+            analysis_note = f"Cache {rank_updated_at} UTC"
+
         sign = "+" if luck_score >= 0 else ""
         ind = _luck_indicator_overall(luck_score)
 
@@ -360,30 +483,24 @@ class GlobalLuck(commands.Cog, name="globalluck"):
             inline=True,
         )
 
-        # Rarity breakdown (if available)
-        rarity_raw = target.get("rarity_json")
-        if rarity_raw:
-            try:
-                counts: dict[str, int] = json.loads(rarity_raw)
-                total_counted = sum(counts.values())
-                table = _build_luck_table(total_counted, counts)
-                embed.add_field(
-                    name="Geluksanalyse",
-                    value=f"```ansi\n{table}\n```",
-                    inline=False,
-                )
-            except Exception:
-                logger.exception("globalluck: failed to parse rarity_json for %s", username)
+        if opens > 0 and counts:
+            table = _build_luck_table(opens, counts)
+            embed.add_field(
+                name="Geluksanalyse",
+                value=f"```ansi\n{table}\n```",
+                inline=False,
+            )
 
         embed.set_footer(
             text=(
                 f"Kansen: mythic 0.01% • legendary 0.04% • epic 0.85% • rare 7.1%  "
-                f"•  Min. 20 cases vereist  •  Cache bijgewerkt: {updated_at} UTC"
+                f"•  Min. 20 cases vereist  •  Analyse: {analysis_note}  "
+                f"•  Rang bijgewerkt: {rank_updated_at} UTC"
             )
         )
         await interaction.followup.send(embed=embed)
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: DiscordBot) -> None:
     """Add the GlobalLuck cog to the bot."""
     await bot.add_cog(GlobalLuck(bot))

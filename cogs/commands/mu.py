@@ -12,13 +12,17 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
+import aiosqlite
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from services.api_client import APIClient
+
+if TYPE_CHECKING:
+    from bot import DiscordBot
 
 logger = logging.getLogger("discord_bot")
 
@@ -73,7 +77,7 @@ def _fmt_duration(hours: float) -> str:
 class MU(commands.Cog, name="mu"):
     """MU-related commands."""
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: DiscordBot) -> None:
         self.bot = bot
         self.config: dict = getattr(bot, "config", {}) or {}
         self._client: Optional[APIClient] = None
@@ -158,7 +162,7 @@ class MU(commands.Cog, name="mu"):
         description="Laat zien hoeveel plekken er vrij zijn in de Nederlandse MU's.",
     )
     async def muplek(self, interaction: discord.Interaction) -> None:
-        """Show how many free spots are available in Dutch MUs."""
+        """Show how many free spots are available in Dutch MUs, grouped by type."""
         await interaction.response.defer()
 
         mus = await self._get_all_dutch_mus()
@@ -171,34 +175,72 @@ class MU(commands.Cog, name="mu"):
             )
             return
 
-        rows: list[tuple[str, int, int, int]] = []
+        # Build id→type map from the template so we can group by type.
+        mu_type_map: dict[str, str] = {}
+        try:
+            with open(self._mus_path(), "r", encoding="utf-8") as _f:
+                _tpl = json.load(_f)
+            for _entry in _tpl.get("embeds", []):
+                if isinstance(_entry, dict) and _entry.get("id"):
+                    mu_type_map[str(_entry["id"])] = str(_entry.get("type") or "Standaard")
+        except Exception as exc:
+            logger.warning("muplek: failed to read type map from %s: %s", self._mus_path(), exc)
+
+        # Row: (mu_id, name, type, members, capacity, free)
+        rows: list[tuple[str, str, str, int, int, int]] = []
         for mu in mus:
+            mu_id = str(mu.get("_id") or mu.get("id") or "")
             name = mu.get("name", "?")
+            mu_type = mu_type_map.get(mu_id, "Standaard")
             members = len(mu.get("members", []))
             dorm_lvl = mu.get("activeUpgradeLevels", {}).get("dormitories", 1)
             capacity = DORM_CAPACITY.get(dorm_lvl, dorm_lvl * 5)
             free = max(0, capacity - members)
-            rows.append((name, members, capacity, free))
+            rows.append((mu_id, name, mu_type, members, capacity, free))
 
-        total_free = sum(r[3] for r in rows)
-        total_members = sum(r[1] for r in rows)
-        total_capacity = sum(r[2] for r in rows)
+        total_free = sum(r[5] for r in rows)
+        total_members = sum(r[3] for r in rows)
+        total_capacity = sum(r[4] for r in rows)
 
-        # Sort: most free spots first, then alphabetically
-        rows.sort(key=lambda r: (-r[3], r[0].lower()))
+        # Display order for types
+        TYPE_ORDER = ["Elite", "Eco", "Standaard"]
 
-        # Build monospace table
-        max_mu_name = 20
-        col1 = min(max(len(r[0]) for r in rows), max_mu_name)
+        def _type_sort_key(t: str) -> int:
+            try:
+                return TYPE_ORDER.index(t)
+            except ValueError:
+                return len(TYPE_ORDER)
+
+        rows.sort(key=lambda r: (_type_sort_key(r[2]), -r[5], r[1].lower()))
+
+        # Build per-type sections
+        max_mu_name = 22
+        col1 = min(max((len(r[1]) for r in rows), default=4), max_mu_name)
         col1 = max(col1, len("MU"))
-        header = f"{'MU':<{col1}}  Leden  Max  Vrij"
-        separator = "-" * len(header)
-        lines = [header, separator]
-        for name, members, capacity, free in rows:
+
+        _row_suffix = "  Leden  Max  Vrij"
+        separator = "─" * (col1 + len(_row_suffix))
+
+        lines: list[str] = []
+        type_labels = {"Elite": "🎖️ Elite", "Eco": "💰 Eco", "Standaard": "🪖 Standaard"}
+
+        prev_type: str | None = None
+        for _mu_id, name, mu_type, members, capacity, free in rows:
+            if mu_type != prev_type:
+                if lines:
+                    lines.append("")
+                label = type_labels.get(mu_type, mu_type)
+                mu_col_hdr = f"{label} MU"
+                header = f"{mu_col_hdr:<{col1}}{_row_suffix}"
+                lines.append(header)
+                lines.append(separator)
+                prev_type = mu_type
             free_str = f"+{free}" if free > 0 else " 0"
             lines.append(
                 f"{name[:col1]:<{col1}}  {members:>5}  {capacity:>3}  {free_str:>4}"
             )
+
+        lines.append("")
         lines.append(separator)
         lines.append(
             f"{'TOTAAL':<{col1}}  {total_members:>5}  {total_capacity:>3}  +{total_free:>3}"
@@ -266,9 +308,9 @@ class MU(commands.Cog, name="mu"):
         )
 
         now = datetime.now(timezone.utc)
-        inactive: list[tuple[float, str, str, str]] = (
-            []
-        )  # (hours_ago, uid, name, mu_name)
+        inactive: list[
+            tuple[float, str, str, str]
+        ] = []  # (hours_ago, uid, name, mu_name)
 
         for uid, obj in zip(all_member_ids, results):
             last_conn = _last_connection(obj)
@@ -454,9 +496,9 @@ class MU(commands.Cog, name="mu"):
 
         # Fetch MU details and collect members
         logger.debug("eco_donations: fetching MU details for %d eco MUs", len(eco_mus))
-        mu_members: dict[str, tuple[str, list[str]]] = (
-            {}
-        )  # mu_id -> (mu_name, [user_ids])
+        mu_members: dict[
+            str, tuple[str, list[str]]
+        ] = {}  # mu_id -> (mu_name, [user_ids])
         for eco_mu in eco_mus:
             mu_id = eco_mu["mu_id"]
             fallback_name = eco_mu["title"]
@@ -674,6 +716,6 @@ class MU(commands.Cog, name="mu"):
             )
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: DiscordBot) -> None:
     """Add the MU cog to the bot."""
     await bot.add_cog(MU(bot))

@@ -3,20 +3,22 @@ General bot commands — /help, /botinfo, /serverinfo, /ping, /invite,
 /eight_ball (question), and /feedback.
 """
 
-import platform
-import random
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import discord
-import pytz
 from discord import app_commands
 from discord.ext import commands
-from discord.ext.commands import Context
+
+if TYPE_CHECKING:
+    from bot import DiscordBot
 
 
 class Giveaways(commands.Cog, name="giveaways"):
     """Cog for giveaway-related commands and interactions."""
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: DiscordBot) -> None:
         self.bot = bot
         self.config = getattr(self.bot, "config", {}) or {}
 

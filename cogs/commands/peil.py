@@ -14,7 +14,8 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 from cogs.commands._base import CommandCogBase, country_autocomplete
-from services.country_utils import country_id as cid_of, find_country
+from services.country_utils import country_id as cid_of
+from services.country_utils import find_country
 from utils.checks import has_privileged_role
 
 logger = logging.getLogger("discord_bot")
@@ -22,6 +23,7 @@ logger = logging.getLogger("discord_bot")
 
 class PeilCog(CommandCogBase, name="peil"):
     """Cog for the /peil command, allowing privileged users to trigger on-demand refreshes of various cached game data subsystems."""
+
     def __init__(self, bot) -> None:
         self.bot = bot
 
@@ -37,17 +39,19 @@ class PeilCog(CommandCogBase, name="peil"):
         onderdeel="Wat wil je peilen?",
         land="Land (alleen voor 'burgers'). Leeg = alle landen.",
     )
-    @app_commands.choices(onderdeel=[
-        app_commands.Choice(name="burgers",    value="burgers"),
-        app_commands.Choice(name="mus",        value="mus"),
-        app_commands.Choice(name="productie",  value="productie"),
-        app_commands.Choice(name="events",     value="events"),
-        app_commands.Choice(name="weerstand",  value="weerstand"),
-        app_commands.Choice(name="weekschade",  value="weekschade"),
-        app_commands.Choice(name="geluk",       value="geluk"),
-        app_commands.Choice(name="globalluck",   value="globalluck"),
-        app_commands.Choice(name="alles",        value="alles"),
-    ])
+    @app_commands.choices(
+        onderdeel=[
+            app_commands.Choice(name="burgers", value="burgers"),
+            app_commands.Choice(name="mus", value="mus"),
+            app_commands.Choice(name="productie", value="productie"),
+            app_commands.Choice(name="events", value="events"),
+            app_commands.Choice(name="weerstand", value="weerstand"),
+            app_commands.Choice(name="weekschade", value="weekschade"),
+            app_commands.Choice(name="geluk", value="geluk"),
+            app_commands.Choice(name="globalluck", value="globalluck"),
+            app_commands.Choice(name="alles", value="alles"),
+        ]
+    )
     @app_commands.autocomplete(land=country_autocomplete)
     @has_privileged_role()
     async def peil(
@@ -114,7 +118,9 @@ class PeilCog(CommandCogBase, name="peil"):
 
         n = len(countries)
         label = f"**{countries[0].get('name', land)}**" if n == 1 else f"**{n}** landen"
-        status_msg = await ctx.send(f"Burgersniveau-verversing gestart voor {label}…", ephemeral=True)
+        status_msg = await ctx.send(
+            f"Burgersniveau-verversing gestart voor {label}…", ephemeral=True
+        )
 
         t_start = time.monotonic()
         total_recorded = 0
@@ -123,10 +129,13 @@ class PeilCog(CommandCogBase, name="peil"):
             cid = cid_of(c)
             name = c.get("name", cid)
             if n > 1:
-                await status_msg.edit(content=f"Refreshing citizen levels… ({i}/{n}) **{name}**")
+                await status_msg.edit(
+                    content=f"Refreshing citizen levels… ({i}/{n}) **{name}**"
+                )
             try:
                 recorded = await citizen_cache.refresh_country(
-                    cid, name,
+                    cid,
+                    name,
                     progress_msg=status_msg if n == 1 else None,
                 )
                 total_recorded += recorded
@@ -175,8 +184,12 @@ class PeilCog(CommandCogBase, name="peil"):
             mu_tasks = self.bot.get_cog("mu_tasks")
             if mu_tasks:
                 await mu_tasks.refresh_mu_info()
-            mu_count = await citizen_cache.refresh_mu_memberships(nl_country_id, mus_json)
-            await status_msg.edit(content=f"✅ MU-lidmaatschappen verversing klaar — {mu_count} toewijzingen opgeslagen.")
+            mu_count = await citizen_cache.refresh_mu_memberships(
+                nl_country_id, mus_json
+            )
+            await status_msg.edit(
+                content=f"✅ MU-lidmaatschappen verversing klaar — {mu_count} toewijzingen opgeslagen."
+            )
             logger.info("peil mus: %d assignments refreshed", mu_count)
         except Exception as exc:
             logger.exception("peil mus: MU membership refresh failed")
@@ -198,9 +211,13 @@ class PeilCog(CommandCogBase, name="peil"):
                 summary = "\n".join(
                     f"• **{item}**: {old} → {new}" for item, old, new in changes
                 )
-                await status_msg.edit(content=f"✅ Productiepoll klaar — {len(changes)} wijziging(en):\n{summary}")
+                await status_msg.edit(
+                    content=f"✅ Productiepoll klaar — {len(changes)} wijziging(en):\n{summary}"
+                )
             else:
-                await status_msg.edit(content="✅ Productiepoll klaar — geen wijzigingen.")
+                await status_msg.edit(
+                    content="✅ Productiepoll klaar — geen wijzigingen."
+                )
         except Exception as exc:
             logger.exception("peil productie: error")
             await status_msg.edit(content=f"❌ Productiepoll mislukt: {exc}")
@@ -267,7 +284,6 @@ class PeilCog(CommandCogBase, name="peil"):
             logger.exception("peil weekschade: error")
             await status_msg.edit(content=f"❌ Weekschade verversing mislukt: {exc}")
 
-
     # ------------------------------------------------------------------ #
     # NL Luck subsystem                                                    #
     # ------------------------------------------------------------------ #
@@ -287,13 +303,17 @@ class PeilCog(CommandCogBase, name="peil"):
                     content=f"✅ NL geluksranking klaar — {total:,} spelers gescoord."
                 )
             except discord.HTTPException:
-                logger.warning("peil geluk: interaction token expired, result saved to DB")
+                logger.warning(
+                    "peil geluk: interaction token expired, result saved to DB"
+                )
         except Exception as exc:
             logger.exception("peil geluk: error")
             try:
                 await status_msg.edit(content=f"❌ NL geluksranking mislukt: {exc}")
             except discord.HTTPException:
-                logger.warning("peil geluk: interaction token expired while reporting error")
+                logger.warning(
+                    "peil geluk: interaction token expired while reporting error"
+                )
 
     # ------------------------------------------------------------------ #
     # Global luck subsystem                                                #
@@ -304,7 +324,9 @@ class PeilCog(CommandCogBase, name="peil"):
         if not cog:
             await ctx.send("❌ Global luck task cog niet geladen.", ephemeral=True)
             return
-        status_msg = await ctx.send("🔄 Globale geluksweep gestart… (dit kan lang duren)", ephemeral=True)
+        status_msg = await ctx.send(
+            "🔄 Globale geluksweep gestart… (dit kan lang duren)", ephemeral=True
+        )
         try:
             await cog.run_global_luck_refresh()
             total_str = await self._db.get_poll_state("global_luck_ranking_total")
@@ -314,13 +336,17 @@ class PeilCog(CommandCogBase, name="peil"):
                     content=f"✅ Globale gelukranking klaar — {total:,} spelers gescoord."
                 )
             except discord.HTTPException:
-                logger.warning("peil globalluck: interaction token expired, result saved to DB")
+                logger.warning(
+                    "peil globalluck: interaction token expired, result saved to DB"
+                )
         except Exception as exc:
             logger.exception("peil globalluck: error")
             try:
                 await status_msg.edit(content=f"❌ Globale geluksweep mislukt: {exc}")
             except discord.HTTPException:
-                logger.warning("peil globalluck: interaction token expired while reporting error")
+                logger.warning(
+                    "peil globalluck: interaction token expired while reporting error"
+                )
 
 
 async def setup(bot) -> None:

@@ -416,7 +416,7 @@ def optimal_skills(player_level: int) -> SkillAllocation:
     a flat multiplier that does not affect the relative ranking of allocations.
     """
     budget = 4 * player_level
-    _cost = [l * (l + 1) // 2 for l in range(MAX_SKILL_LEVEL + 1)]
+    _cost = [level * (level + 1) // 2 for level in range(MAX_SKILL_LEVEL + 1)]
 
     best_dmg = 0.0
     best_alloc = SkillAllocation()

@@ -11,7 +11,7 @@ Usage
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import discord
 from discord import app_commands
@@ -20,6 +20,9 @@ from discord.ext.commands import Context
 
 from cogs.commands._base import CommandCogBase, citizen_autocomplete
 from services.damage_calc import fmt_damage
+
+if TYPE_CHECKING:
+    from bot import DiscordBot
 
 logger = logging.getLogger("discord_bot")
 
@@ -30,7 +33,7 @@ _MAX_TOP = 50
 class WeeklydmgCog(CommandCogBase, name="weeklydmg"):
     """Cog for the /weeklydmg command."""
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: DiscordBot) -> None:
         self.bot = bot
 
     @commands.hybrid_command(
@@ -73,7 +76,9 @@ class WeeklydmgCog(CommandCogBase, name="weeklydmg"):
             uid, name, dmg, updated_at = row
 
             # Top 5 NL
-            top_rows, last_updated = await self._db.get_top_weekly_damages(nl_country_id, 5)
+            top_rows, last_updated = await self._db.get_top_weekly_damages(
+                nl_country_id, 5
+            )
             nl_rank = await self._db.get_player_nl_rank(nl_country_id, uid)
 
             medal = {1: "🥇", 2: "🥈", 3: "🥉"}

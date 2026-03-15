@@ -13,7 +13,6 @@ from discord.ext.commands import Context
 
 from cogs.role_selection.roles import RoleToggleView, load_roles_template, mu_roles_path
 from cogs.standard_messages.generate import GenerateEmbeds
-from utils.checks import has_privileged_role
 
 
 def mus_path(testing: bool = False) -> str:
@@ -54,14 +53,20 @@ def has_mu_privilige() -> commands.check:
             return True
 
         if not isinstance(ctx.author, discord.Member):
-            raise commands.CheckFailure("Dit commando kan alleen in een server gebruikt worden.")
+            raise commands.CheckFailure(
+                "Dit commando kan alleen in een server gebruikt worden."
+            )
 
-        role_ids = [bot.config.get("roles", {}).get(r) for r in ["officier", "government"]]
+        role_ids = [
+            bot.config.get("roles", {}).get(r) for r in ["officier", "government"]
+        ]
 
         if role_ids and any(role.id in role_ids for role in ctx.author.roles):
             return True
 
-        raise commands.CheckFailure("Je hebt geen permissie om dit commando te gebruiken.")
+        raise commands.CheckFailure(
+            "Je hebt geen permissie om dit commando te gebruiken."
+        )
 
     return commands.check(predicate)
 

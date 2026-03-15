@@ -4,6 +4,8 @@ to a configured Discord channel. Includes !reddit_poll (owner-only) to manually
 trigger a poll cycle.
 """
 
+from __future__ import annotations
+
 import asyncio
 import datetime
 import html
@@ -12,6 +14,7 @@ import logging
 import re
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -22,6 +25,9 @@ import requests
 import yarl
 from curl_cffi.requests import AsyncSession
 from discord.ext import commands, tasks
+
+if TYPE_CHECKING:
+    from bot import DiscordBot
 
 DEFAULT_HEADERS = {
     "User-Agent": "WareraNLBot/1.0 (by /u/Creepino +https://github.com/colgre/wareraNL-bot)"
@@ -41,7 +47,7 @@ class RedditTracker(commands.Cog, name="reddit"):
       `bot.config['channels']['reddit']` or falls back to `channels.production`.
     """
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: DiscordBot) -> None:
         self.bot = bot
         self.logger = bot.logger if hasattr(bot, "logger") else logger
         self.subreddit = "WarEraNL"
@@ -541,7 +547,7 @@ class RedditTracker(commands.Cog, name="reddit"):
         await ctx.send("Done.")
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: DiscordBot) -> None:
     await bot.add_cog(RedditTracker(bot))
 
 

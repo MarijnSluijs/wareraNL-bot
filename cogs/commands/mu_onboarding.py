@@ -18,8 +18,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from cogs.standard_messages.mu_bericht import has_mu_privilige
 from cogs.commands._base import dreigingsniveau_autocomplete
+from cogs.standard_messages.mu_bericht import has_mu_privilige
 
 logger = logging.getLogger("discord_bot")
 

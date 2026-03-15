@@ -3,8 +3,8 @@
 This module defines the Battles cog, which provides commands to set battle priorities with links in a Discord server.
 """
 
-from typing import Optional
 import logging
+from typing import Optional
 
 import discord
 from discord import app_commands
