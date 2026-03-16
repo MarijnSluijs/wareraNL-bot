@@ -1065,6 +1065,204 @@ class Users(CommandCogBase, name="users"):
         )
         await interaction.followup.send(embed=embed, file=result_file, ephemeral=True)
 
+    @app_commands.command(
+        name="mappings_not_nl",
+        description="Toon mappings van gebruikers met Nederlander-rol naar niet-NL citizens",
+    )
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def mappings_not_nl(self, interaction: discord.Interaction):
+        db = await self._get_db()
+        guild_id = str(interaction.guild_id)
+        nl_country_id = str(self.config.get("nl_country_id") or "").strip()
+        if not nl_country_id:
+            await interaction.response.send_message(
+                "Configuratie mist `nl_country_id`.", ephemeral=True
+            )
+            return
+
+        nl_citizen_ids = {uid for uid, _ in await db.get_nl_citizen_ids(nl_country_id)}
+        links = await db.get_identity_links_by_guild(guild_id=guild_id)
+        not_nl_links = [
+            link
+            for link in links
+            if link.get("nationality") == "nederlander"
+            and str(link.get("in_game_user_id")) not in nl_citizen_ids
+        ]
+        if not not_nl_links:
+            await interaction.response.send_message(
+                "Geen mappings gevonden van Nederlander-rol naar niet-NL citizens.",
+                ephemeral=True,
+            )
+            return
+        
+        embed = discord.Embed(
+            title="🚩 Mappings Nederlander → niet-NL citizen",
+            color=discord.Color.red(),
+        )
+        for link in not_nl_links[:10]:
+            embed.add_field(
+                name=f"<@{link['discord_user_id']}> → `{link['in_game_user_id']}`",
+                value=(
+                    f"Nationaliteit: {link['nationality']}\n"
+                    f"Type: {link['request_type']}\n"
+                    f"Updated: {link['updated_at']}"
+                ),
+                inline=False,
+            )
+        if len(not_nl_links) > 10:
+            embed.set_footer(text=f"Toont 10 van {len(not_nl_links)} resultaten")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+    @app_commands.command(
+        name="remove_mapping",
+        description="Verwijder een bestaande Discord↔in-game mapping",
+    )
+    @app_commands.describe(
+        discord_user_id="Discord user ID (bijv. 123456789012345678)",
+        reason="Reden voor verwijdering (optioneel)",
+    )
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def remove_mapping(
+        self,
+        interaction: discord.Interaction,
+        discord_user_id: str,
+        reason: str = "Geen reden opgegeven",
+    ) -> None:
+        guild_id = str(interaction.guild_id)
+
+        db = await self._get_db()
+        existing = await db.get_identity_link_by_discord(
+            discord_user_id=discord_user_id,
+            guild_id=guild_id,
+        )
+        if not existing or not existing.get("in_game_user_id"):
+            await interaction.response.send_message(
+                "Er is geen bestaande mapping om te verwijderen.", ephemeral=True
+            )
+            return
+
+        await db.delete_identity_link(
+            discord_user_id=discord_user_id
+        )
+
+        await interaction.response.send_message(
+            f"Mapping voor <@{discord_user_id}> is verwijderd. Reden: {reason}",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="filter-nederlanders",
+        description="Verwijder Nederlander-rol van leden zonder NL citizen mapping",
+    )
+    @app_commands.describe(
+        exceptions="Optioneel: comma-separated lijst van Discord user IDs die NIET gefilterd moeten worden",
+        dry_run="Alleen previewen wie er gefilterd zou worden, zonder rollen te verwijderen",
+    )
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def filter_nederlanders(
+        self,
+        interaction: discord.Interaction,
+        exceptions: str | None = None,
+        dry_run: bool = True,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        guild = interaction.guild
+        if guild is None:
+            await interaction.followup.send(
+                "Dit commando kan alleen in een server gebruikt worden.", ephemeral=True
+            )
+            return
+
+        nl_country_id = str(self.config.get("nl_country_id") or "").strip()
+        nl_role_id = (self.config.get("roles") or {}).get("nederlander")
+        if not nl_country_id or not nl_role_id:
+            await interaction.followup.send(
+                "Configuratie mist `nl_country_id` of `roles.nederlander`.",
+                ephemeral=True,
+            )
+            return
+
+        nl_role = guild.get_role(int(nl_role_id))
+        if nl_role is None:
+            await interaction.followup.send(
+                "De Nederlander-rol kon niet worden gevonden in deze server.",
+                ephemeral=True,
+            )
+            return
+
+        exception_ids = {e.strip() for e in (exceptions or "").split(",") if e.strip()}
+
+        db = await self._get_db()
+        nl_citizen_ids = {uid for uid, _ in await db.get_nl_citizen_ids(nl_country_id)}
+        members_to_filter: list[discord.Member] = []
+        for member in nl_role.members:
+            if member.bot:
+                continue
+            discord_id = str(member.id)
+            if discord_id in exception_ids:
+                continue
+            existing = await db.get_identity_link_by_discord(
+                discord_user_id=discord_id,
+                guild_id=str(guild.id),
+            )
+            print(existing)
+            if not existing or str(existing.get("in_game_user_id")) not in nl_citizen_ids:
+                members_to_filter.append(member)
+        if not members_to_filter:
+            await interaction.followup.send(
+                "Geen leden gevonden die gefilterd moeten worden.", ephemeral=True
+            )
+            return
+        
+        doubt_role = guild.get_role(
+            int(self.config.get("roles", {}).get("twijfelgeval", 0))
+        )
+        if not dry_run:
+            for member in members_to_filter:
+                try:
+                    await member.remove_roles(nl_role, reason="Filteren op NL citizen mapping")
+                    await member.add_roles(doubt_role, reason="Filteren op NL citizen mapping")
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to remove NL role from %s (%s): %s",
+                        member.display_name,
+                        member.id,
+                        exc,
+                    )
+
+        id_channel = guild.get_channel(
+            int(self.config.get("channels", {}).get("id_controle", 0))
+        )
+        welcome_channel = guild.get_channel(
+            int(self.config.get("channels", {}).get("welcome_buttons", 0))
+        )
+        if id_channel and isinstance(id_channel, discord.TextChannel):
+            member_mentions = ", ".join(m.mention for m in members_to_filter)
+            await id_channel.send(
+                member_mentions
+            )
+
+            embed = discord.Embed(
+                title="Nederlander verificatie",
+                description=(
+                    f"Onze bot heeft jullie Nederlander-rol verwijderd omdat "
+                    f"er geen geldige mapping naar een NL citizen in onze "
+                    f"database was. \n\n"
+                    f"Voor verificatie vragen we jullie een ticket te openen "
+                    f"via <#{welcome_channel.id}> en de instructies te volgen. "
+                )
+            )
+
+            await id_channel.send(embed=embed)
+
+        await interaction.followup.send(
+            f"{len(members_to_filter)} leden zouden gefilterd worden. "
+            f"{'Rollen zijn verwijderd.' if not dry_run else 'Dry-run: geen rollen verwijderd.'}",
+            ephemeral=True,
+        )
+
 
 async def setup(bot) -> None:
     await bot.add_cog(Users(bot))

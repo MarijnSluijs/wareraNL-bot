@@ -255,3 +255,43 @@ class IdentityLinksMixin:
                     }
                 )
         return results
+    
+    async def delete_identity_link(self, discord_user_id: str) -> None:
+        """Delete an identity mapping by Discord user ID."""
+        await self._conn.execute(
+            "DELETE FROM identity_links WHERE discord_user_id = ?", (discord_user_id,)
+        )
+        await self._conn.commit()
+
+    async def get_identity_links_by_guild(
+        self, guild_id: str, limit: Optional[int] = None
+    ) -> list[dict]:
+        """Return identity mappings for a guild, optionally limited."""
+        sql = (
+            "SELECT discord_user_id, guild_id, in_game_user_id, nationality, request_type, "
+            "embassy_country, approved_by_discord_id, approved_at, updated_at "
+            "FROM identity_links WHERE guild_id = ?"
+        )
+        params = (guild_id,)
+        if limit is not None:
+            sql += " LIMIT ?"
+            params += (limit,)
+
+        results: list[dict] = []
+        async with self._conn.execute(sql, params) as cur:
+            async for row in cur:
+                results.append(
+                    {
+                        "discord_user_id": row[0],
+                        "guild_id": row[1],
+                        "in_game_user_id": row[2],
+                        "nationality": row[3],
+                        "request_type": row[4],
+                        "embassy_country": row[5],
+                        "approved_by_discord_id": row[6],
+                        "approved_at": row[7],
+                        "updated_at": row[8],
+                    }
+                )
+        return results
+
