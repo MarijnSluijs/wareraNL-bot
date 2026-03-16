@@ -215,8 +215,6 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
             failed,
         )
 
-    
-
 
 async def setup(bot) -> None:
     """Add the CitizenTasks cog to the bot."""

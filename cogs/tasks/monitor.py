@@ -91,9 +91,7 @@ class MonitorTask(TaskCogBase, name="monitor_tasks"):
         try:
             raw_buckets, _ = await self._db.get_skill_mode_by_level_buckets(country_id)
         except Exception:
-            logger.error(
-                "monitor: failed to fetch skill buckets for %s", country_id
-            )
+            logger.error("monitor: failed to fetch skill buckets for %s", country_id)
             return
 
         # Keep only level 21+ buckets for monitoring.
@@ -107,9 +105,7 @@ class MonitorTask(TaskCogBase, name="monitor_tasks"):
         try:
             snap_json = await self._db.get_poll_state(snap_key)
         except Exception:
-            logger.error(
-                "monitor: failed to read snapshot for %s", country_id
-            )
+            logger.error("monitor: failed to read snapshot for %s", country_id)
             snap_json = None
 
         # First run or reset: save baseline and exit without reporting.
@@ -154,14 +150,10 @@ class MonitorTask(TaskCogBase, name="monitor_tasks"):
 
             if war_diff != 0:
                 sign = "+" if war_diff > 0 else ""
-                parts.append(
-                    f"⚔️ {prev_b['war']}→{curr_b['war']} ({sign}{war_diff})"
-                )
+                parts.append(f"⚔️ {prev_b['war']}→{curr_b['war']} ({sign}{war_diff})")
             if eco_diff != 0:
                 sign = "+" if eco_diff > 0 else ""
-                parts.append(
-                    f"🌾 {prev_b['eco']}→{curr_b['eco']} ({sign}{eco_diff})"
-                )
+                parts.append(f"🌾 {prev_b['eco']}→{curr_b['eco']} ({sign}{eco_diff})")
             # Only mention total delta if war/eco alone don't explain it
             # (e.g. unknown-mode citizens appeared or disappeared).
             if total_diff != 0 and war_diff == 0 and eco_diff == 0:
@@ -210,15 +202,15 @@ class MonitorTask(TaskCogBase, name="monitor_tasks"):
             description="\n".join(change_lines),
             colour=discord.Colour.gold(),
         )
-        embed.add_field(name="⚔️ Totaal paraat (lvl 21+)", value=overall_str, inline=False)
+        embed.add_field(
+            name="⚔️ Totaal paraat (lvl 21+)", value=overall_str, inline=False
+        )
         embed.set_footer(text=f"Alleen wijzigingen op niveau 21+  •  {now_str}")
 
         try:
             await channel.send(embed=embed)
         except Exception:
-            logger.exception(
-                "monitor: failed to send update to channel %d", channel_id
-            )
+            logger.exception("monitor: failed to send update to channel %d", channel_id)
 
 
 async def setup(bot) -> None:

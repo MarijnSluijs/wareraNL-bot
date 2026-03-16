@@ -1461,7 +1461,9 @@ class Welcome(commands.Cog, name="welcome"):
                     channel_name = f"{country.lower()}-embassy"
                     # Choose an embassy category with available capacity.
                     category = None
-                    embassy_categories = self._resolve_embassy_categories(interaction.guild)
+                    embassy_categories = self._resolve_embassy_categories(
+                        interaction.guild
+                    )
                     for configured_category in embassy_categories:
                         # Discord allows up to 50 channels in a category.
                         if len(configured_category.channels) < 50:
@@ -1474,7 +1476,9 @@ class Welcome(commands.Cog, name="welcome"):
                             "verification"
                         )
                         if verification_cat_id:
-                            candidate = interaction.guild.get_channel(verification_cat_id)
+                            candidate = interaction.guild.get_channel(
+                                verification_cat_id
+                            )
                             if isinstance(candidate, discord.CategoryChannel):
                                 category = candidate
 

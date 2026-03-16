@@ -90,9 +90,9 @@ class SpelerInactiviteitCog(CommandCogBase, name="speler_inactiviteit"):
             return
 
         # Load all NL citizens from the DB cache
-        citizens: list[tuple[str, Optional[str]]] = (
-            await db.get_citizens_for_luck_refresh(nl_country_id)
-        )
+        citizens: list[
+            tuple[str, Optional[str]]
+        ] = await db.get_citizens_for_luck_refresh(nl_country_id)
         if not citizens:
             await interaction.followup.send(
                 embed=discord.Embed(
@@ -104,9 +104,7 @@ class SpelerInactiviteitCog(CommandCogBase, name="speler_inactiviteit"):
 
         total_citizens = len(citizens)
         all_user_ids = [uid for uid, _ in citizens]
-        name_map: dict[str, str] = {
-            uid: (name or uid[:8]) for uid, name in citizens
-        }
+        name_map: dict[str, str] = {uid: (name or uid[:8]) for uid, name in citizens}
 
         # Batch-fetch last login time for all citizens
         inputs = [{"userId": uid} for uid in all_user_ids]
@@ -142,9 +140,7 @@ class SpelerInactiviteitCog(CommandCogBase, name="speler_inactiviteit"):
             if hours_ago >= minimum_uren:
                 inactive.append((hours_ago, uid, display_name))
 
-        color = int(
-            (self.config.get("colors") or {}).get("primary", "0x154273"), 16
-        )
+        color = int((self.config.get("colors") or {}).get("primary", "0x154273"), 16)
 
         if not inactive:
             embed = discord.Embed(
@@ -180,9 +176,7 @@ class SpelerInactiviteitCog(CommandCogBase, name="speler_inactiviteit"):
 
         truncation_note = ""
         if total_inactive > _MAX_DISPLAY:
-            truncation_note = (
-                f"\n_… en {total_inactive - _MAX_DISPLAY} meer (zet minimum_uren hoger om te filteren)_"
-            )
+            truncation_note = f"\n_… en {total_inactive - _MAX_DISPLAY} meer (zet minimum_uren hoger om te filteren)_"
 
         embed = discord.Embed(
             title="💤 Inactieve Nederlandse burgers",

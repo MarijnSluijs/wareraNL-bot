@@ -63,6 +63,7 @@ def _calc_luck_score(counts: dict[str, int], total: int) -> float:
         score += _LUCK_WEIGHTS[rarity] * deviation
     return score / _LUCK_WEIGHT_TOTAL * 100.0
 
+
 _ANSI_RARITY: dict[str, str] = {
     "mythic": "\033[31m",
     "legendary": "\033[33m",

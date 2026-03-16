@@ -76,7 +76,9 @@ class Users(CommandCogBase, name="users"):
                     ratio = 1.0
                 else:
                     ratio = difflib.SequenceMatcher(None, variant, citizen_norm).ratio()
-                    if variant.startswith(citizen_norm) or citizen_norm.startswith(variant):
+                    if variant.startswith(citizen_norm) or citizen_norm.startswith(
+                        variant
+                    ):
                         ratio = min(1.0, ratio + 0.08)
                 if ratio > citizen_best:
                     citizen_best = ratio
@@ -271,7 +273,9 @@ class Users(CommandCogBase, name="users"):
             else str((existing_for_discord or {}).get("request_type") or "manual_link")
         )
         final_embassy_country = (
-            str(embassy_country).strip() if embassy_country and embassy_country.strip() else None
+            str(embassy_country).strip()
+            if embassy_country and embassy_country.strip()
+            else None
         )
         approved_at = datetime.datetime.now(datetime.UTC).isoformat()
 
@@ -290,7 +294,9 @@ class Users(CommandCogBase, name="users"):
             title="✅ Mapping opgeslagen",
             color=discord.Color.green(),
         )
-        embed.add_field(name="Discord", value=f"{user.mention} (`{user.id}`)", inline=False)
+        embed.add_field(
+            name="Discord", value=f"{user.mention} (`{user.id}`)", inline=False
+        )
         embed.add_field(name="In-game ID", value=f"`{normalized}`", inline=True)
         embed.add_field(name="Nationaliteit", value=final_nationality, inline=True)
         embed.add_field(name="Type", value=final_request_type, inline=True)
@@ -304,11 +310,17 @@ class Users(CommandCogBase, name="users"):
         if existing_for_discord and existing_for_discord.get("in_game_user_id"):
             previous = str(existing_for_discord.get("in_game_user_id"))
             if previous != normalized:
-                embed.add_field(name="Vorige in-game ID", value=f"`{previous}`", inline=False)
+                embed.add_field(
+                    name="Vorige in-game ID", value=f"`{previous}`", inline=False
+                )
             else:
-                embed.add_field(name="Info", value="Bestaande mapping bijgewerkt.", inline=False)
+                embed.add_field(
+                    name="Info", value="Bestaande mapping bijgewerkt.", inline=False
+                )
         else:
-            embed.add_field(name="Info", value="Nieuwe mapping aangemaakt.", inline=False)
+            embed.add_field(
+                name="Info", value="Nieuwe mapping aangemaakt.", inline=False
+            )
 
         if conflicting_discord and force:
             embed.add_field(
@@ -321,7 +333,6 @@ class Users(CommandCogBase, name="users"):
             )
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
-
 
     @app_commands.command(
         name="discordid",
@@ -732,7 +743,9 @@ class Users(CommandCogBase, name="users"):
             ),
         )
         embed.add_field(name="Nederlander-leden", value=str(len(members)), inline=True)
-        embed.add_field(name="NL citizens (cache)", value=str(len(citizens)), inline=True)
+        embed.add_field(
+            name="NL citizens (cache)", value=str(len(citizens)), inline=True
+        )
         embed.add_field(name="Al gemapt", value=str(already_mapped), inline=True)
         embed.add_field(name="Mapped not NL", value=str(mapped_not_nl), inline=True)
         embed.add_field(name="High confidence", value=str(high_confidence), inline=True)
@@ -859,7 +872,9 @@ class Users(CommandCogBase, name="users"):
         nl_citizen_ids = {uid for uid, _name in nl_citizens}
 
         nl_role = guild.get_role(int(nl_role_id))
-        nl_member_ids = {str(m.id) for m in nl_role.members if not m.bot} if nl_role else set()
+        nl_member_ids = (
+            {str(m.id) for m in nl_role.members if not m.bot} if nl_role else set()
+        )
 
         approved_statuses = {"review", "approved", "apply", "linked", "manual"}
         approved_at = datetime.datetime.now(datetime.UTC).isoformat()
@@ -1011,7 +1026,7 @@ class Users(CommandCogBase, name="users"):
         for rr in result_rows:
             vals = []
             for key in ("discord_id", "in_game_id", "status", "action", "note"):
-                vals.append(f'"{str(rr.get(key, "")).replace("\"", "\"\"")}"')
+                vals.append(f'"{str(rr.get(key, "")).replace('"', '""')}"')
             out_csv.write(",".join(vals) + "\n")
 
         embed = discord.Embed(

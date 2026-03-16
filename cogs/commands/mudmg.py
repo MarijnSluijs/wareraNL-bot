@@ -303,7 +303,9 @@ class MudmgCog(CommandCogBase, name="mudmg"):
                 )
                 return res[0] if res else None
             except Exception as exc:
-                logger.warning("mudmg detail: batch_get failed for %s: %s", entry["id"], exc)
+                logger.warning(
+                    "mudmg detail: batch_get failed for %s: %s", entry["id"], exc
+                )
                 return None
 
         async def _fetch_total_ranking() -> object:
@@ -358,7 +360,9 @@ class MudmgCog(CommandCogBase, name="mudmg"):
             name_w = max(name_w, 4)
             W = 9
             T = 9
-            header = f"{'#':>3}  {'Naam':<{name_w}}  {'Wekelijks':>{W}}  {'Totaal':>{T}}"
+            header = (
+                f"{'#':>3}  {'Naam':<{name_w}}  {'Wekelijks':>{W}}  {'Totaal':>{T}}"
+            )
             sep = "\u2500" * len(header)
             tbl_lines = [header, sep]
             for i, (name, weekly, total) in enumerate(rows, 1):

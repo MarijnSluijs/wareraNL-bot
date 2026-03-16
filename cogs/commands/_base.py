@@ -47,6 +47,7 @@ async def country_autocomplete(
         if q in name.lower()
     ][:25]
 
+
 async def dreigingsniveau_autocomplete(
     interaction: discord.Interaction, current: str
 ) -> list[app_commands.Choice[str]]:

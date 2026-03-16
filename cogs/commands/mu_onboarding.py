@@ -27,7 +27,7 @@ TEMPLATES = {
     "groen": "Code Groen: Geen bekende oorlogsdreiging. Blijf in eco-stand en werk aan je bedrijven.",
     "geel": "Code Geel: Mogelijke oorlog op komst. Zorg dat je geen cooldown van de skills-reset activeert, en begin met het inslaan van gear, munitie, pillen, en voedsel.",
     "oranje": "Code Oranje: Oorlog verwacht op korte termijn. Zorg dat je voorraad op peil is.",
-    "rood": "Code Rood: In oorlog. Wacht met het omzetten van je skills tot instructies van de regering."
+    "rood": "Code Rood: In oorlog. Wacht met het omzetten van je skills tot instructies van de regering.",
 }
 
 
@@ -60,12 +60,12 @@ class MUOnboardingView(discord.ui.View):
             try:
                 await interaction.response.send_message(
                     "Er is een fout opgetreden bij het openen van het formulier. Probeer het later opnieuw.",
-                    ephemeral=True
+                    ephemeral=True,
                 )
             except discord.InteractionResponded:
                 await interaction.followup.send(
                     "Er is een fout opgetreden bij het openen van het formulier. Probeer het later opnieuw.",
-                    ephemeral=True
+                    ephemeral=True,
                 )
 
 
@@ -137,7 +137,7 @@ async def create_mu_request_channel(
     logger.info(
         "Creating verification channel for %s (MU request) in guild %s",
         user.name,
-        guild.name
+        guild.name,
     )
 
     ticket_id = int(datetime.datetime.utcnow().timestamp())
@@ -292,11 +292,11 @@ class MURequest(commands.Cog, name="murequest"):
         name="postmuapp",
         description="Post the MU application message with verification buttons (admin only)",
     )
-    @app_commands.describe(
-        plek="[Optioneel]: of we op zoek zijn naar nieuwe MU's"
-    )
+    @app_commands.describe(plek="[Optioneel]: of we op zoek zijn naar nieuwe MU's")
     @has_mu_privilige()
-    async def post_mu_application(self, interaction: discord.Interaction, plek: bool = False):
+    async def post_mu_application(
+        self, interaction: discord.Interaction, plek: bool = False
+    ):
         # Create the welcome embed
         try:
             if plek:
@@ -321,17 +321,19 @@ class MURequest(commands.Cog, name="murequest"):
         # Send welcome message with verification buttons
         channel_id = self.bot.config.get("channels", {}).get("mu_aanmelden")
         if not channel_id:
-            await interaction.response.send_message("MU aanmelden channel ID not configured in bot config.", ephemeral=True)
+            await interaction.response.send_message(
+                "MU aanmelden channel ID not configured in bot config.", ephemeral=True
+            )
             return
 
         channel = interaction.guild.get_channel(channel_id)
         if not channel:
             await interaction.response.send_message(
                 "MU aanmelden channel not found. Please check the channel ID in bot config.",
-                ephemeral=True
+                ephemeral=True,
             )
             return
-        
+
         # check for existing dreigingsniveau message
         dreigingsniveau_embed = None
         async for message in channel.history(limit=100):
@@ -351,7 +353,9 @@ class MURequest(commands.Cog, name="murequest"):
         if dreigingsniveau_embed:
             await channel.send(embed=embed)
 
-        await interaction.response.send_message(f"MU application message posted in {channel.mention}", ephemeral=True)
+        await interaction.response.send_message(
+            f"MU application message posted in {channel.mention}", ephemeral=True
+        )
 
     @app_commands.command(
         name="kleurcode",
@@ -360,24 +364,30 @@ class MURequest(commands.Cog, name="murequest"):
     @app_commands.describe(
         code="De kleurcode die je wilt posten (rood, oranje, geel, groen)",
         bericht="[Optioneel] Eigen versie van het bericht om de template te vervangen",
-        toelichting="[Optioneel] Extra toelichting om toe te voegen aan het bericht"
+        toelichting="[Optioneel] Extra toelichting om toe te voegen aan het bericht",
     )
     @app_commands.autocomplete(code=dreigingsniveau_autocomplete)
     @has_mu_privilige()
-    async def post_kleurcodes(self, ctx: commands.Context, code: str, bericht: str = None, toelichting: str = None):
+    async def post_kleurcodes(
+        self,
+        ctx: commands.Context,
+        code: str,
+        bericht: str = None,
+        toelichting: str = None,
+    ):
         # find and remove old kleurcode message
         channel_id = self.bot.config.get("channels", {}).get("orders")
         if not channel_id:
             await ctx.send("MU aanmelden channel ID not configured in bot config.")
             return
-        
+
         channel = ctx.guild.get_channel(channel_id)
         if not channel:
             await ctx.send(
                 "MU aanmelden channel not found. Please check the channel ID in bot config."
             )
             return
-        
+
         async for message in channel.history(limit=100):
             if message.author == self.bot.user and message.embeds:
                 embed = message.embeds[0]
@@ -386,12 +396,9 @@ class MURequest(commands.Cog, name="murequest"):
                     break
 
         # get circle emoji for the code
-        circle_emoji = {
-            "rood": "🔴",
-            "oranje": "🟠",
-            "geel": "🟡",
-            "groen": "🟢"
-        }.get(code.lower())
+        circle_emoji = {"rood": "🔴", "oranje": "🟠", "geel": "🟡", "groen": "🟢"}.get(
+            code.lower()
+        )
 
         # put the emoji in the channel name
         if channel:
@@ -405,7 +412,9 @@ class MURequest(commands.Cog, name="murequest"):
             try:
                 await channel.edit(name=new_name)
             except Exception as e:
-                logger.error(f"Error updating channel name with emoji: {e}", exc_info=True)
+                logger.error(
+                    f"Error updating channel name with emoji: {e}", exc_info=True
+                )
 
         if not bericht:
             description = TEMPLATES.get(code.lower())
@@ -418,14 +427,19 @@ class MURequest(commands.Cog, name="murequest"):
         embed = discord.Embed(
             title=f"Huidig dreigingsniveau: {circle_emoji} Code {code.capitalize()}",
             description=description,
-            color=discord.Color.red() if code.lower() == "rood" else
-                  discord.Color.orange() if code.lower() == "oranje" else
-                  discord.Color.yellow() if code.lower() == "geel" else
-                  discord.Color.green()
+            color=discord.Color.red()
+            if code.lower() == "rood"
+            else discord.Color.orange()
+            if code.lower() == "oranje"
+            else discord.Color.yellow()
+            if code.lower() == "geel"
+            else discord.Color.green(),
         )
-        
+
         await channel.send(embed=embed)
-        await ctx.response.send_message(f"Kleurcode {code.capitalize()} gepost in {channel.mention}", ephemeral=True)
+        await ctx.response.send_message(
+            f"Kleurcode {code.capitalize()} gepost in {channel.mention}", ephemeral=True
+        )
 
 
 async def setup(bot) -> None:

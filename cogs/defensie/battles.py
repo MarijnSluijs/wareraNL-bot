@@ -14,18 +14,23 @@ from utils.checks import has_privileged_role
 
 logger = logging.getLogger("discord_bot")
 
+
 class BattlePrioritiesStep1Modal(discord.ui.Modal, title="Battle Priorities (1/2)"):
     """First modal step collecting priorities 1 and 2."""
 
     prio1 = discord.ui.TextInput(
-        label="Priority 1: Name", required=False, placeholder="Gevecht om Uppland (NL - SE)"
+        label="Priority 1: Name",
+        required=False,
+        placeholder="Gevecht om Uppland (NL - SE)",
     )
     link1 = discord.ui.TextInput(
         label="Priority 1: Link", required=False, placeholder="https://..."
     )
 
     prio2 = discord.ui.TextInput(
-        label="Priority 2: Name", required=False, placeholder="Gevecht om Rhine (BE - DE)"
+        label="Priority 2: Name",
+        required=False,
+        placeholder="Gevecht om Rhine (BE - DE)",
     )
     link2 = discord.ui.TextInput(
         label="Priority 2: Link", required=False, placeholder="https://..."
@@ -84,7 +89,9 @@ class BattlePrioritiesStep1Modal(discord.ui.Modal, title="Battle Priorities (1/2
         await interaction.response.send_message(
             "Step 1 saved. Click Continue to fill Priority 3, or Skip to submit now.",
             ephemeral=True,
-            view=BattlePrioritiesStep2LauncherView(self.bot, self.battles_cog, guild_id, user_id),
+            view=BattlePrioritiesStep2LauncherView(
+                self.bot, self.battles_cog, guild_id, user_id
+            ),
         )
 
 
@@ -99,10 +106,13 @@ class BattlePrioritiesStep2LauncherView(discord.ui.View):
         self.user_id = user_id
 
     @discord.ui.button(label="Continue", style=discord.ButtonStyle.primary)
-    async def continue_button(self, interaction: discord.Interaction, _: discord.ui.Button):
+    async def continue_button(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message(
-                "This button is only for the user who started this flow.", ephemeral=True
+                "This button is only for the user who started this flow.",
+                ephemeral=True,
             )
             return
 
@@ -127,7 +137,8 @@ class BattlePrioritiesStep2LauncherView(discord.ui.View):
     async def skip_button(self, interaction: discord.Interaction, _: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message(
-                "This button is only for the user who started this flow.", ephemeral=True
+                "This button is only for the user who started this flow.",
+                ephemeral=True,
             )
             return
 
@@ -151,7 +162,9 @@ class BattlePrioritiesStep2Modal(discord.ui.Modal, title="Battle Priorities (2/2
     """Second modal step collecting priority 3 and finalizing output."""
 
     prio3 = discord.ui.TextInput(
-        label="Priority 3: Name", required=False, placeholder="Gevecht om Luxemburg (LU - FR)"
+        label="Priority 3: Name",
+        required=False,
+        placeholder="Gevecht om Luxemburg (LU - FR)",
     )
     link3 = discord.ui.TextInput(
         label="Priority 3: Link", required=False, placeholder="https://..."
@@ -184,7 +197,9 @@ class BattlePrioritiesStep2Modal(discord.ui.Modal, title="Battle Priorities (2/2
         }
 
         self.bot.logger.info(
-            "Battle priorities step 2 submitted: %s, %s", self.prio3.value, self.link3.value
+            "Battle priorities step 2 submitted: %s, %s",
+            self.prio3.value,
+            self.link3.value,
         )
         await self.battles_cog.submit_priorities(interaction, payload)
 
@@ -199,7 +214,9 @@ class Battles(commands.Cog, name="battles"):
     def build_pending_key(guild_id: Optional[int], user_id: int) -> str:
         return f"{guild_id or 'dm'}:{user_id}"
 
-    async def submit_priorities(self, interaction: discord.Interaction, payload: dict) -> None:
+    async def submit_priorities(
+        self, interaction: discord.Interaction, payload: dict
+    ) -> None:
         description = ""
         if payload.get("prio1") and payload.get("link1"):
             description += f"1️⃣: **[{payload['prio1']}]({payload['link1']})**\n\n"

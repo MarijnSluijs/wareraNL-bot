@@ -182,9 +182,13 @@ class MU(commands.Cog, name="mu"):
                 _tpl = json.load(_f)
             for _entry in _tpl.get("embeds", []):
                 if isinstance(_entry, dict) and _entry.get("id"):
-                    mu_type_map[str(_entry["id"])] = str(_entry.get("type") or "Standaard")
+                    mu_type_map[str(_entry["id"])] = str(
+                        _entry.get("type") or "Standaard"
+                    )
         except Exception as exc:
-            logger.warning("muplek: failed to read type map from %s: %s", self._mus_path(), exc)
+            logger.warning(
+                "muplek: failed to read type map from %s: %s", self._mus_path(), exc
+            )
 
         # Row: (mu_id, name, type, members, capacity, free)
         rows: list[tuple[str, str, str, int, int, int]] = []

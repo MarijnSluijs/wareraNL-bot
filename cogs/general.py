@@ -375,7 +375,7 @@ class General(commands.Cog, name="general"):
 
     #     :param context: The hybrid command context.
     #     """
-    #     # This will prevent your bot from stopping everything when doing a web request - 
+    #     # This will prevent your bot from stopping everything when doing a web request -
     #     # see: https://discordpy.readthedocs.io/en/stable/faq.html#how-do-i-make-a-web-request
     #     async with aiohttp.ClientSession() as session:
     #         async with session.get(
