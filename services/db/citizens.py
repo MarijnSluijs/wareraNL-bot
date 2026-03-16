@@ -666,6 +666,19 @@ class CitizensMixin:
                 best = (uid, name)
         return best
 
+    
+    # ── Eco donations ──────────────────────────────────────────────────
+
+    async def get_citizen_name_by_id(self, user_id: str) -> Optional[str]:
+        """Return the citizen name for a given user_id, or None if not found."""
+        sql = "SELECT citizen_name FROM citizen_levels WHERE user_id = ?"
+        async with self._conn.execute(sql, (user_id,)) as cur:
+            row = await cur.fetchone()
+            if row and row[0]:
+                return row[0]
+        return None
+    
+
     # ── Weekly damage ──────────────────────────────────────────────────
 
     async def get_nl_citizen_ids(self, country_id: str) -> list[tuple[str, str]]:
