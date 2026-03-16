@@ -77,8 +77,8 @@ def _extract_bounty(side: dict) -> tuple[float, float] | None:
 class BountyTasks(TaskCogBase, name="bounty_tasks"):
     def __init__(self, bot) -> None:
         self.bot = bot
-        # battle_id -> (rate_per_1000, total_pool) — last posted state
-        self._known: dict[str, tuple[float, float]] = {}
+        # battle_id -> (rate_per_1000, total_pool, message_id) — last posted state
+        self._known: dict[str, tuple[float, float, int | None]] = {}
         # country_id -> country_name cache
         self._country_names: dict[str, str] = {}
         # Set of country IDs that should never be targeted by bounty alerts
@@ -238,28 +238,33 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                 if side_country_id and side_country_id in self._protected_ids:
                     continue
 
+                known_key = f"{battle_id}:{side_key}"
+
                 b = _extract_bounty(side)
-                if not b:
+
+                # Pool depleted or bounty removed — delete any previously posted message.
+                if not b or (b[1] <= 0):
+                    prev = self._known.pop(known_key, None)
+                    if prev and prev[2]:
+                        try:
+                            await channel.get_partial_message(prev[2]).delete()
+                        except Exception:
+                            pass
                     continue
+
                 rate, total = b
 
-                if total <= 0:
-                    continue  # Pool depleted
-
-                if rate < 1.0:
+                if rate < 0.8:
                     continue  # Below minimum threshold
 
                 if total < 1000:
                     continue  # Pool too small
 
-                known_key = f"{battle_id}:{side_key}"
                 prev = self._known.get(known_key)
                 if prev is not None:
-                    prev_rate, _ = prev
+                    prev_rate, _prev_total, _prev_msg = prev
                     if rate - prev_rate < 0.1:
                         continue  # Rate not increased enough
-
-                self._known[known_key] = (rate, total)
 
                 funder_name = _cname(side)
                 lines: list[str] = []
@@ -281,7 +286,8 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                 embed.set_footer(text="WarEra — bounty alert")
 
                 try:
-                    await channel.send(embed=embed)
+                    msg = await channel.send(embed=embed)
+                    self._known[known_key] = (rate, total, msg.id)
                 except Exception as exc:
                     logger.warning(
                         "bounty_poll: failed to send embed for battle %s [%s]: %s",
@@ -289,6 +295,7 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                         side_key,
                         exc,
                     )
+                    self._known[known_key] = (rate, total, None)
 
 
 async def setup(bot) -> None:

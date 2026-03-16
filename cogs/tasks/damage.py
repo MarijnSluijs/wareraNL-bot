@@ -10,7 +10,6 @@ command output.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -90,7 +89,14 @@ def _entry_username(entry: dict) -> Optional[str]:
 
 def _entry_damage(entry: dict) -> float:
     """Extract the weekly damage value from a ranking entry."""
-    for key in ("value", "damage", "totalDamage", "weeklyDamage", "weeklyBattleDamage", "amount"):
+    for key in (
+        "value",
+        "damage",
+        "totalDamage",
+        "weeklyDamage",
+        "weeklyBattleDamage",
+        "amount",
+    ):
         v = entry.get(key)
         if isinstance(v, (int, float)):
             return float(v)
@@ -120,7 +126,9 @@ class DamageTasks(TaskCogBase, name="damage_tasks"):
     async def before_weekly_damage_refresh(self) -> None:
         await self._wait_for_services()
         # Give the citizen_refresh task time to populate citizen_levels.
-        logger.info("weekly_damage_refresh: waiting %ds before first run", _STARTUP_DELAY_S)
+        logger.info(
+            "weekly_damage_refresh: waiting %ds before first run", _STARTUP_DELAY_S
+        )
         await asyncio.sleep(_STARTUP_DELAY_S)
 
     async def run_damage_refresh_once(self) -> tuple[int, int]:
@@ -151,7 +159,9 @@ class DamageTasks(TaskCogBase, name="damage_tasks"):
             return 0, 0
 
         entries = _extract_ranking_entries(resp)
-        logger.info("weekly_damage_refresh: got %d global ranking entries", len(entries))
+        logger.info(
+            "weekly_damage_refresh: got %d global ranking entries", len(entries)
+        )
 
         # Build lookup: user_id -> (damage, username) AND lowercase name -> damage
         ranking_map: dict[str, tuple[float, Optional[str]]] = {}
@@ -167,7 +177,8 @@ class DamageTasks(TaskCogBase, name="damage_tasks"):
 
         logger.info(
             "weekly_damage_refresh: ranking_map has %d entries by ID, %d by name",
-            len(ranking_map), len(ranking_by_name),
+            len(ranking_map),
+            len(ranking_by_name),
         )
 
         # ── 2. Get all NL citizens from DB ────────────────────────────
@@ -211,7 +222,8 @@ class DamageTasks(TaskCogBase, name="damage_tasks"):
         await self._db.flush_weekly_damages()
         logger.info(
             "weekly_damage_refresh: done — %d with damage, %d at zero",
-            updated, zeroed,
+            updated,
+            zeroed,
         )
         return updated, zeroed
 

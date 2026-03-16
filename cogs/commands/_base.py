@@ -28,16 +28,13 @@ async def citizen_autocomplete(
         return []
     try:
         matches = await db.search_citizen_names(current, limit=25)
-        return [
-            app_commands.Choice(name=name, value=name)
-            for name, _uid in matches
-        ]
+        return [app_commands.Choice(name=name, value=name) for name, _uid in matches]
     except Exception:
         return []
 
 
 async def country_autocomplete(
-    interaction: discord.Interaction, current: str
+    _interaction: discord.Interaction, current: str
 ) -> list[app_commands.Choice[str]]:
     """Module-level autocomplete callback for country name parameters.
 
@@ -49,6 +46,7 @@ async def country_autocomplete(
         for name in ALL_COUNTRY_NAMES
         if q in name.lower()
     ][:25]
+
 
 async def dreigingsniveau_autocomplete(
     interaction: discord.Interaction, current: str

@@ -266,24 +266,6 @@ class LuckTasks(TaskCogBase, name="luck_tasks"):
             "daily_luck_refresh: complete — %d/%d citizens scored", recorded, total
         )
 
-        if self.bot.testing:
-            channels = self.config.get("channels", {})
-            ch_id = channels.get("testing-area") or channels.get("bot_mededelingen")
-            if ch_id:
-                for guild in self.bot.guilds:
-                    ch = guild.get_channel(ch_id)
-                    if ch:
-                        try:
-                            _elapsed = time.monotonic() - _t0_luck
-                            _m, _s = divmod(int(_elapsed), 60)
-                            _dur = f"{_m}m {_s}s" if _m else f"{_elapsed:.1f}s"
-                            await ch.send(
-                                f"✅ Gelukscores verversing klaar ({_dur}) — {recorded}/{total} NL burgers gescoord"
-                            )
-                        except Exception:
-                            pass
-                        break
-
 
 async def setup(bot) -> None:
     """Add the LuckTasks cog to the bot."""

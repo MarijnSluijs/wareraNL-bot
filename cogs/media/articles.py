@@ -1,6 +1,6 @@
 """
-This module defines the ArticleScanner cog, which periodically polls the WarEra API for 
-new Dutch-language articles and posts them to a Discord channel as embeds. 
+This module defines the ArticleScanner cog, which periodically polls the WarEra API for
+new Dutch-language articles and posts them to a Discord channel as embeds.
 """
 
 import asyncio

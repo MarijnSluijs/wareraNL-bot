@@ -19,7 +19,6 @@ from typing import Optional
 
 import discord
 from discord import app_commands
-from discord.ext import commands
 
 from cogs.commands._base import CommandCogBase, citizen_autocomplete
 
@@ -98,7 +97,9 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
             ids: list = data.get("userIds", []) if isinstance(data, dict) else []
             return ids[:5]
         except Exception as exc:
-            logger.warning("bedrijfswinst: user search failed for %r: %s", username, exc)
+            logger.warning(
+                "bedrijfswinst: user search failed for %r: %s", username, exc
+            )
             return []
 
     async def _get_user_profile(self, user_id: str) -> Optional[dict]:
@@ -113,9 +114,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
             logger.warning("bedrijfswinst: getUserLite failed for %s: %s", user_id, exc)
             return None
 
-    async def _resolve_user(
-        self, query: str
-    ) -> tuple[Optional[str], Optional[dict]]:
+    async def _resolve_user(self, query: str) -> tuple[Optional[str], Optional[dict]]:
         """Resolve *query* → (user_id, profile).
 
         Strategy: exact username match first, then closest candidate by ratio.
@@ -128,10 +127,13 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
         if not user_ids:
             db = self._db
             if db is not None:
-                nl_country_id = (self.config.get("nl_country_id") or
-                                 self.config.get("country_id"))
+                nl_country_id = self.config.get("nl_country_id") or self.config.get(
+                    "country_id"
+                )
                 try:
-                    match = await db.fuzzy_citizen_by_name(query, country_id=nl_country_id)
+                    match = await db.fuzzy_citizen_by_name(
+                        query, country_id=nl_country_id
+                    )
                     if match:
                         uid, _ = match
                         profile = await self._get_user_profile(uid)
@@ -193,7 +195,9 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
             await asyncio.sleep(0)
         return ids
 
-    async def _get_company_details(self, company_ids: list[str]) -> list[Optional[dict]]:
+    async def _get_company_details(
+        self, company_ids: list[str]
+    ) -> list[Optional[dict]]:
         """Fetch full company objects for *company_ids* using tRPC batching.
 
         Returns a list of the same length; entries are ``None`` for failed lookups.
@@ -229,7 +233,9 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
             )
             data = _unwrap(raw)
         except TimeoutError:
-            logger.warning("bedrijfswinst: getPrices timed out after 15s — returning empty prices")
+            logger.warning(
+                "bedrijfswinst: getPrices timed out after 15s — returning empty prices"
+            )
             return {}
         except Exception as exc:
             logger.warning("bedrijfswinst: getPrices failed: %s", exc)
@@ -240,7 +246,9 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
             for code, info in data.items():
                 if isinstance(info, dict):
                     # take the best sell (lowest ask) price
-                    price = info.get("sell") or info.get("price") or info.get("value") or 0
+                    price = (
+                        info.get("sell") or info.get("price") or info.get("value") or 0
+                    )
                 else:
                     price = info
                 try:
@@ -295,10 +303,14 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     prod_points[code] = 1.0
                 raw_needs = info.get("productionNeeds") or {}
                 if isinstance(raw_needs, dict) and raw_needs:
-                    prod_needs[code] = {mat: float(qty) for mat, qty in raw_needs.items()}
+                    prod_needs[code] = {
+                        mat: float(qty) for mat, qty in raw_needs.items()
+                    }
             return prod_points, prod_needs
         except Exception as exc:
-            logger.warning("bedrijfswinst: getGameConfig failed: %s — using defaults", exc)
+            logger.warning(
+                "bedrijfswinst: getGameConfig failed: %s — using defaults", exc
+            )
             return {}, {}
 
     async def _get_country_bonus_map(self) -> dict[str, dict[str, float]]:
@@ -323,7 +335,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                         countries = v
                         break
                 if not countries:
-                    nested = (raw.get("result") or {})
+                    nested = raw.get("result") or {}
                     if isinstance(nested, dict):
                         v = nested.get("data")
                         if isinstance(v, list):
@@ -415,7 +427,9 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 return workers if isinstance(workers, list) else []
             return []
         except Exception as exc:
-            logger.warning("bedrijfswinst: worker.getWorkers failed for %s: %s", company_id, exc)
+            logger.warning(
+                "bedrijfswinst: worker.getWorkers failed for %s: %s", company_id, exc
+            )
             return []
 
     @staticmethod
@@ -429,6 +443,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
         skills = data.get("skills")
         if skills is None:
             return 0.0
+
         def _pick(entry: dict) -> float:
             # prefer "level" but don't skip it when it is 0 (falsy)
             v = entry.get("level")
@@ -464,9 +479,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
         Returns {"region_pct", "country_pct", "ethics_pct", "total_mult"}.
         """
         region_id = (
-            company.get("region")
-            or company.get("regionId")
-            or company.get("region_id")
+            company.get("region") or company.get("regionId") or company.get("region_id")
         )
         region_pct = 0.0
         country_pct = 0.0
@@ -496,7 +509,9 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     elif isinstance(raw_country, str):
                         country_id = raw_country
             except Exception as exc:
-                logger.warning("bedrijfswinst: region lookup failed for %s: %s", region_id, exc)
+                logger.warning(
+                    "bedrijfswinst: region lookup failed for %s: %s", region_id, exc
+                )
 
         # ── Step 2: SR + ethics via recommended-region list (exact match) ───
         found_in_recommended = False
@@ -506,7 +521,9 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 raw = await asyncio.wait_for(
                     self._client.get(
                         "/company.getRecommendedRegionIdsByItemCode",
-                        params={"input": json.dumps({"itemCode": item_code, "count": 100})},
+                        params={
+                            "input": json.dumps({"itemCode": item_code, "count": 100})
+                        },
                     ),
                     timeout=8.0,
                 )
@@ -515,6 +532,11 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     if entry.get("regionId") == region_id:
                         country_pct = float(entry.get("strategicBonus") or 0)
                         ethics_pct = float(entry.get("ethicSpecializationBonus") or 0)
+                        # Use the API's authoritative effective deposit bonus.
+                        # This is 0 when the country has Fanatic Industrialist
+                        # (deposits cannot activate), even if region.getById still
+                        # shows a bonusPercent for a pre-ethic deposit.
+                        region_pct = float(entry.get("depositBonus") or 0)
                         found_in_recommended = True
                         break
                 if not found_in_recommended:
@@ -523,7 +545,11 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                         raw2 = await asyncio.wait_for(
                             self._client.get(
                                 "/company.getRecommendedRegionIdsByItemCode",
-                                params={"input": json.dumps({"itemCode": item_code, "regionId": region_id})},
+                                params={
+                                    "input": json.dumps(
+                                        {"itemCode": item_code, "regionId": region_id}
+                                    )
+                                },
                             ),
                             timeout=8.0,
                         )
@@ -531,12 +557,17 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                         for entry in region_list2:
                             if entry.get("regionId") == region_id:
                                 country_pct = float(entry.get("strategicBonus") or 0)
-                                ethics_pct = float(entry.get("ethicSpecializationBonus") or 0)
+                                ethics_pct = float(
+                                    entry.get("ethicSpecializationBonus") or 0
+                                )
+                                region_pct = float(entry.get("depositBonus") or 0)
                                 found_in_recommended = True
                                 break
                         # Merge extra entries into recommended_entries for SR-matching
                         seen = {e.get("regionId") for e in region_list}
-                        region_list.extend(e for e in region_list2 if e.get("regionId") not in seen)
+                        region_list.extend(
+                            e for e in region_list2 if e.get("regionId") not in seen
+                        )
                     except Exception:
                         pass
 
@@ -546,26 +577,47 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                             raw3 = await asyncio.wait_for(
                                 self._client.get(
                                     "/company.getRecommendedRegionIdsByItemCode",
-                                    params={"input": json.dumps({"itemCode": item_code, "countryId": country_id})},
+                                    params={
+                                        "input": json.dumps(
+                                            {
+                                                "itemCode": item_code,
+                                                "countryId": country_id,
+                                            }
+                                        )
+                                    },
                                 ),
                                 timeout=8.0,
                             )
                             region_list3 = _unwrap_list(raw3)
                             for entry in region_list3:
                                 if entry.get("regionId") == region_id:
-                                    country_pct = float(entry.get("strategicBonus") or 0)
-                                    ethics_pct = float(entry.get("ethicSpecializationBonus") or 0)
+                                    country_pct = float(
+                                        entry.get("strategicBonus") or 0
+                                    )
+                                    ethics_pct = float(
+                                        entry.get("ethicSpecializationBonus") or 0
+                                    )
+                                    region_pct = float(entry.get("depositBonus") or 0)
                                     found_in_recommended = True
                                     break
                             seen2 = {e.get("regionId") for e in region_list}
-                            region_list.extend(e for e in region_list3 if e.get("regionId") not in seen2)
+                            region_list.extend(
+                                e
+                                for e in region_list3
+                                if e.get("regionId") not in seen2
+                            )
                         except Exception:
                             pass
 
                 # Always save the full list so post-processing can match by SR value
                 recommended_entries = region_list
             except Exception as exc:
-                logger.warning("bedrijfswinst: recommended list failed for %s/%s: %s", item_code, region_id, exc)
+                logger.warning(
+                    "bedrijfswinst: recommended list failed for %s/%s: %s",
+                    item_code,
+                    region_id,
+                    exc,
+                )
 
         # ── Step 3: fallback — country.getCountryById for SR + ethics ───────
         if not found_in_recommended and country_id and isinstance(country_id, str):
@@ -579,13 +631,19 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 )
                 data = _unwrap(raw)
                 if isinstance(data, dict):
-                    sr_bonuses = (data.get("strategicResources") or {}).get("bonuses") or {}
+                    sr_bonuses = (data.get("strategicResources") or {}).get(
+                        "bonuses"
+                    ) or {}
                     country_pct = float(sr_bonuses.get("productionPercent") or 0)
                     rb = (data.get("rankings") or {}).get("countryProductionBonus")
-                    total_country = float(rb.get("value") or 0) if isinstance(rb, dict) else 0.0
+                    total_country = (
+                        float(rb.get("value") or 0) if isinstance(rb, dict) else 0.0
+                    )
                     ethics_pct = max(0.0, total_country - country_pct)
             except Exception as exc:
-                logger.warning("bedrijfswinst: country fallback failed for %s: %s", country_id, exc)
+                logger.warning(
+                    "bedrijfswinst: country fallback failed for %s: %s", country_id, exc
+                )
 
         total_pct = region_pct + country_pct + ethics_pct
         return {
@@ -597,9 +655,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
             "_recommended_entries": recommended_entries,
         }
 
-    async def _get_worker_profiles(
-        self, user_ids: list[str]
-    ) -> dict[str, dict]:
+    async def _get_worker_profiles(self, user_ids: list[str]) -> dict[str, dict]:
         """Return a {user_id: {username, energy, production}} mapping via batch getUserLite."""
         if not user_ids:
             return {}
@@ -681,15 +737,27 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
             )
             return
 
-        workers_lists, prod_bonuses_list, (item_prices, (prod_points, prod_needs), country_bonus_map, spec_top_map, item_country_ethics, country_spec_map) = await asyncio.gather(
-            asyncio.gather(*[
-                self._get_workers_for_company(c.get("_id", ""))
-                for c in companies
-            ]),
-            asyncio.gather(*[
-                self._get_production_bonus(c, c.get("itemCode") or "")
-                for c in companies
-            ]),
+        (
+            workers_lists,
+            prod_bonuses_list,
+            (
+                item_prices,
+                (prod_points, prod_needs),
+                country_bonus_map,
+                spec_top_map,
+                item_country_ethics,
+                country_spec_map,
+            ),
+        ) = await asyncio.gather(
+            asyncio.gather(
+                *[self._get_workers_for_company(c.get("_id", "")) for c in companies]
+            ),
+            asyncio.gather(
+                *[
+                    self._get_production_bonus(c, c.get("itemCode") or "")
+                    for c in companies
+                ]
+            ),
             asyncio.gather(
                 self._get_item_prices(),
                 self._get_production_points(),
@@ -735,15 +803,17 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 continue  # already resolved via exact region match
             c_id = bonus.get("country_id")
             item = c.get("itemCode") or ""
-            country_sr = country_bonus_map.get(c_id, {}).get("sr_pct", bonus.get("country_pct", 0.0))
+            country_sr = country_bonus_map.get(c_id, {}).get(
+                "sr_pct", bonus.get("country_pct", 0.0)
+            )
             # Try SR-value match in the recommended entries for this item
             ethics = sr_ethics_by_item.get(item, {}).get(country_sr, 0.0)
             if ethics > 0:
                 bonus["ethics_pct"] = ethics
                 bonus["country_pct"] = country_sr
-                bonus["total_mult"] = 1.0 + (
-                    bonus["region_pct"] + country_sr + ethics
-                ) / 100.0
+                bonus["total_mult"] = (
+                    1.0 + (bonus["region_pct"] + country_sr + ethics) / 100.0
+                )
             elif item and spec_top_map.get(item, {}).get("country_id") == c_id:
                 # DB fallback: specialization_top stores the permanent leader per item,
                 # so if this company's country is that leader, we have reliable ethics.
@@ -752,46 +822,57 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 db_ethics = float(top_row.get("ethic_bonus") or 0)
                 bonus["ethics_pct"] = db_ethics
                 bonus["country_pct"] = db_sr
-                bonus["total_mult"] = 1.0 + (
-                    bonus["region_pct"] + db_sr + db_ethics
-                ) / 100.0
+                bonus["total_mult"] = (
+                    1.0 + (bonus["region_pct"] + db_sr + db_ethics) / 100.0
+                )
             elif item and c_id and (item, c_id) in item_country_ethics:
                 # Broader DB fallback: country_item_ethic stores ethics for ALL countries
                 # observed in recommended lists (not just the leader), so non-leaders with
                 # ethics are covered too.
                 db_ethics = item_country_ethics[(item, c_id)]
-                country_sr = country_bonus_map.get(c_id, {}).get("sr_pct", bonus.get("country_pct", 0.0))
+                country_sr = country_bonus_map.get(c_id, {}).get(
+                    "sr_pct", bonus.get("country_pct", 0.0)
+                )
                 bonus["ethics_pct"] = db_ethics
                 bonus["country_pct"] = country_sr
-                bonus["total_mult"] = 1.0 + (
-                    bonus["region_pct"] + country_sr + db_ethics
-                ) / 100.0
-            elif item and c_id and country_spec_map.get(c_id) == item and item_ethics_map.get(item, 0.0) > 0:
+                bonus["total_mult"] = (
+                    1.0 + (bonus["region_pct"] + country_sr + db_ethics) / 100.0
+                )
+            elif (
+                item
+                and c_id
+                and country_spec_map.get(c_id) == item
+                and item_ethics_map.get(item, 0.0) > 0
+            ):
                 # Country is specialized in this item but never appeared in the top-5
                 # recommended list (too low SR rank).  All countries that pass the same
                 # ethics law for an item get the same bonus %, so we infer it from the
                 # value we observed for other countries (e.g. Nigeria → lead 30%).
                 spec_ethics = item_ethics_map[item]
-                country_sr = country_bonus_map.get(c_id, {}).get("sr_pct", bonus.get("country_pct", 0.0))
+                country_sr = country_bonus_map.get(c_id, {}).get(
+                    "sr_pct", bonus.get("country_pct", 0.0)
+                )
                 bonus["ethics_pct"] = spec_ethics
                 bonus["country_pct"] = country_sr
-                bonus["total_mult"] = 1.0 + (
-                    bonus["region_pct"] + country_sr + spec_ethics
-                ) / 100.0
+                bonus["total_mult"] = (
+                    1.0 + (bonus["region_pct"] + country_sr + spec_ethics) / 100.0
+                )
             elif c_id and c_id in country_bonus_map:
                 # SR known from getAllCountries but ethics unavailable for this item
                 cmap = country_bonus_map[c_id]
                 bonus["country_pct"] = cmap["sr_pct"]
-                bonus["total_mult"] = 1.0 + (
-                    bonus["region_pct"] + cmap["sr_pct"]
-                ) / 100.0
+                bonus["total_mult"] = (
+                    1.0 + (bonus["region_pct"] + cmap["sr_pct"]) / 100.0
+                )
 
-        all_worker_ids = list({
-            emp.get("user")
-            for workers in workers_by_id.values()
-            for emp in workers
-            if emp.get("user")
-        })
+        all_worker_ids = list(
+            {
+                emp.get("user")
+                for workers in workers_by_id.values()
+                for emp in workers
+                if emp.get("user")
+            }
+        )
         worker_profiles = await self._get_worker_profiles(all_worker_ids)
 
         # Build embeds
@@ -823,7 +904,15 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 pp_pts: float = prod_points.get(item_code) or 1.0
                 item_mat_needs: dict[str, float] = prod_needs.get(item_code, {})
                 # Production bonuses from region + country (ethics / strategic resources)
-                _pb = prod_bonus_by_id.get(company_id_co, {"region_pct": 0.0, "country_pct": 0.0, "ethics_pct": 0.0, "total_mult": 1.0})
+                _pb = prod_bonus_by_id.get(
+                    company_id_co,
+                    {
+                        "region_pct": 0.0,
+                        "country_pct": 0.0,
+                        "ethics_pct": 0.0,
+                        "total_mult": 1.0,
+                    },
+                )
                 region_pct: float = _pb["region_pct"]
                 country_pct: float = _pb["country_pct"]
                 ethics_pct: float = _pb.get("ethics_pct", 0.0)
@@ -833,16 +922,19 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 if not workers:
                     # Still compute breakeven for the overview embed
                     _bk_items_pre = 1.0 / pp_pts
-                    _bk_mat_pre   = sum(
+                    _bk_mat_pre = sum(
                         float(qty) * item_prices.get(mat, 0.0)
                         for mat, qty in item_mat_needs.items()
                     )
                     _bk_margin_pre = sell_price - _bk_mat_pre
-                    breakeven_overview.append((
-                        company_name, item_code,
-                        _bk_items_pre * (prod_bonus_mult + 0.00) * _bk_margin_pre,
-                        _bk_items_pre * (prod_bonus_mult + 0.10) * _bk_margin_pre,
-                    ))
+                    breakeven_overview.append(
+                        (
+                            company_name,
+                            item_code,
+                            _bk_items_pre * (prod_bonus_mult + 0.00) * _bk_margin_pre,
+                            _bk_items_pre * (prod_bonus_mult + 0.10) * _bk_margin_pre,
+                        )
+                    )
                     continue
 
                 embed = discord.Embed(
@@ -857,7 +949,11 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 if ethics_pct:
                     bonus_footer_parts.append(f"+{ethics_pct:.2f}% ethiek")
                 total_bonus_pct = region_pct + country_pct + ethics_pct
-                bonus_footer = f"  |  Productiebonus: +{total_bonus_pct:.2f}%" if total_bonus_pct else ""
+                bonus_footer = (
+                    f"  |  Productiebonus: +{total_bonus_pct:.2f}%"
+                    if total_bonus_pct
+                    else ""
+                )
                 pp_footer = f"  |  {pp_pts:.0f} PP/item"
                 if item_mat_needs:
                     _mat_parts = []
@@ -896,7 +992,9 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     # Employee skills
                     # The API may return the upgrade level (0-10) OR the computed value
                     # (PP total / energy pool) directly.  Values > 10 are the computed result.
-                    raw_prod = float(profile.get("production") or emp.get("production") or 0)
+                    raw_prod = float(
+                        profile.get("production") or emp.get("production") or 0
+                    )
                     emp_pp = raw_prod if raw_prod > 10 else 10.0 + raw_prod * 3.0
 
                     # energy: base pool 30 + 10/upgrade; max level 10 → pool 130
@@ -907,7 +1005,9 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     if raw_energy > 10:
                         emp_energy_pool = raw_energy  # already the pool
                     else:
-                        emp_energy_pool = 30.0 + raw_energy * 10.0  # convert level to pool
+                        emp_energy_pool = (
+                            30.0 + raw_energy * 10.0
+                        )  # convert level to pool
                     actions_per_day = emp_energy_pool * 0.24
 
                     # Total PP the employee delivers per day
@@ -943,7 +1043,16 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     total_profit_day_co += profit_per_day
 
                     indicator = "+" if profit_per_day >= 0 else "-"
-                    rows.append((indicator, emp_name, int(fidelity), wage_rate, profit_per_pp, profit_per_day))
+                    rows.append(
+                        (
+                            indicator,
+                            emp_name,
+                            int(fidelity),
+                            wage_rate,
+                            profit_per_pp,
+                            profit_per_day,
+                        )
+                    )
 
                 total_revenue_all += total_revenue_co
                 total_mat_cost_all += total_mat_cost_co
@@ -959,22 +1068,30 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 )
                 # margin per item (sell - materials); production bonus scales both equally
                 _bk_margin_per_item = sell_price - _bk_mat_per_item
-                breakeven_f0  = _bk_items_per_pp * (prod_bonus_mult + 0.00) * _bk_margin_per_item
-                breakeven_f10 = _bk_items_per_pp * (prod_bonus_mult + 0.10) * _bk_margin_per_item
+                breakeven_f0 = (
+                    _bk_items_per_pp * (prod_bonus_mult + 0.00) * _bk_margin_per_item
+                )
+                breakeven_f10 = (
+                    _bk_items_per_pp * (prod_bonus_mult + 0.10) * _bk_margin_per_item
+                )
 
-                breakeven_overview.append((
-                    company_name, item_code,
-                    breakeven_f0, breakeven_f10,
-                ))
+                breakeven_overview.append(
+                    (
+                        company_name,
+                        item_code,
+                        breakeven_f0,
+                        breakeven_f10,
+                    )
+                )
 
                 # Build a combined aligned table: employees + breakeven section
-                _NAME_MAX  = 14
-                _ANSI_GRN  = "\u001b[0;32m"
-                _ANSI_RED  = "\u001b[0;31m"
-                _ANSI_RST  = "\u001b[0m"
+                _NAME_MAX = 14
+                _ANSI_GRN = "\u001b[0;32m"
+                _ANSI_RED = "\u001b[0;31m"
+                _ANSI_RST = "\u001b[0m"
 
                 def _trunc(s: str) -> str:
-                    return s if len(s) <= _NAME_MAX else s[:_NAME_MAX - 1] + "…"
+                    return s if len(s) <= _NAME_MAX else s[: _NAME_MAX - 1] + "…"
 
                 def _ansi_val(s: str, val: float) -> str:
                     c = _ANSI_GRN if val >= 0 else _ANSI_RED
@@ -982,17 +1099,34 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
 
                 # Each row: (ind, name, fid, wage_str, pp_val, pp_str, day_val, day_str)
                 emp_rows_fmt = [
-                    (r[0], _trunc(r[1]), r[2], _fmt_t(r[3]), r[4], _fmt_t(r[4]), r[5], _fmt_t(r[5]))
+                    (
+                        r[0],
+                        _trunc(r[1]),
+                        r[2],
+                        _fmt_t(r[3]),
+                        r[4],
+                        _fmt_t(r[4]),
+                        r[5],
+                        _fmt_t(r[5]),
+                    )
                     for r in rows
                 ]
                 name_w = max((len(r[1]) for r in emp_rows_fmt), default=9)
                 wage_w = max((len(r[3]) for r in emp_rows_fmt), default=5)
-                pp_w   = max((len(r[5]) for r in emp_rows_fmt), default=1) if emp_rows_fmt else 1
-                day_w  = max((len(r[7]) for r in emp_rows_fmt), default=1) if emp_rows_fmt else 1
+                pp_w = (
+                    max((len(r[5]) for r in emp_rows_fmt), default=1)
+                    if emp_rows_fmt
+                    else 1
+                )
+                day_w = (
+                    max((len(r[7]) for r in emp_rows_fmt), default=1)
+                    if emp_rows_fmt
+                    else 1
+                )
                 # header — units shown here (CC implied), not in cells
-                _W_wage = max(wage_w, 7)   # "loon/PP" = 7
-                _W_pp   = max(pp_w,   8)   # "winst/PP" = 8
-                _W_day  = max(day_w,  9)   # "winst/dag" = 9
+                _W_wage = max(wage_w, 7)  # "loon/PP" = 7
+                _W_pp = max(pp_w, 8)  # "winst/PP" = 8
+                _W_day = max(day_w, 9)  # "winst/dag" = 9
                 hdr = (
                     f"  {'Naam':<{name_w}}  fid"
                     f" {'loon/PP':>{_W_wage}}"
@@ -1000,13 +1134,13 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     f" {'winst/dag':>{_W_day}}"
                 )
                 sep_w = len(hdr)
-                sep   = "─" * sep_w
+                sep = "─" * sep_w
 
                 def _trow(ind, name, fid, wage_s, pp_val, pp_s, day_val, day_s):
-                    pp_padded  = f"{pp_s:>{_W_pp}}"
+                    pp_padded = f"{pp_s:>{_W_pp}}"
                     day_padded = f"{day_s:>{_W_day}}"
                     if pp_val is not None:
-                        pp_padded  = _ansi_val(pp_padded, pp_val)
+                        pp_padded = _ansi_val(pp_padded, pp_val)
                     if day_val is not None:
                         day_padded = _ansi_val(day_padded, day_val)
                     return (
@@ -1016,7 +1150,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                         f" {day_padded}"
                     )
 
-                n_emp       = len(emp_rows_fmt)
+                n_emp = len(emp_rows_fmt)
                 table_lines = [hdr, sep]
                 if emp_rows_fmt:
                     table_lines += [_trow(*r) for r in emp_rows_fmt]
@@ -1024,11 +1158,18 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     table_lines.append(f"  {'Geen werknemers':<{sep_w - 2}}")
                 # Chunk into fields of ≤15 lines
                 chunk_size = 15
-                chunks = [table_lines[i:i + chunk_size] for i in range(0, len(table_lines), chunk_size)]
+                chunks = [
+                    table_lines[i : i + chunk_size]
+                    for i in range(0, len(table_lines), chunk_size)
+                ]
                 n_chunks = len(chunks)
                 base_name = f"Werknemers ({n_emp})"
                 for chunk_idx, chunk in enumerate(chunks):
-                    field_name = base_name if n_chunks == 1 else f"{base_name} (deel {chunk_idx + 1})"
+                    field_name = (
+                        base_name
+                        if n_chunks == 1
+                        else f"{base_name} (deel {chunk_idx + 1})"
+                    )
                     embed.add_field(
                         name=field_name,
                         value="```ansi\n" + "\n".join(chunk) + "\n```",
@@ -1047,27 +1188,31 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
             # Grand-total summary — only shown when there are companies with workers
             all_embeds: list[discord.Embed] = []
             if embeds:
-                companies_with_workers = sum(1 for c in companies if workers_by_id.get(c.get("_id", "")))
+                companies_with_workers = sum(
+                    1 for c in companies if workers_by_id.get(c.get("_id", ""))
+                )
                 _S_GRN = "\u001b[0;32m"
                 _S_RED = "\u001b[0;31m"
                 _S_RST = "\u001b[0m"
-                rev_s    = _fmt_cc(total_revenue_all + total_mat_cost_all)
-                mat_s    = _fmt_cc(total_mat_cost_all)
-                wage_s   = _fmt_cc(total_wage_all)
+                rev_s = _fmt_cc(total_revenue_all + total_mat_cost_all)
+                mat_s = _fmt_cc(total_mat_cost_all)
+                wage_s = _fmt_cc(total_wage_all)
                 profit_s = _fmt_cc(total_profit_day_all)
-                _lbl_w   = len("Grondstofkosten/dag:")  # longest label = 20
-                _val_w   = max(len(rev_s), len(mat_s), len(wage_s), len(profit_s))
-                _sep     = "─" * (_lbl_w + 1 + _val_w)
+                _lbl_w = len("Grondstofkosten/dag:")  # longest label = 20
+                _val_w = max(len(rev_s), len(mat_s), len(wage_s), len(profit_s))
+                _sep = "─" * (_lbl_w + 1 + _val_w)
                 _p_color = _S_GRN if total_profit_day_all >= 0 else _S_RED
                 _profit_pfx = "+" if total_profit_day_all >= 0 else "-"
                 _profit_row = f"{_profit_pfx} {'Netto winst/dag:':<{_lbl_w - 2}} {profit_s:>{_val_w}}"
-                summary_table = "\n".join([
-                    f"{'Totale omzet/dag:':<{_lbl_w}} {rev_s:>{_val_w}}",
-                    f"{'Grondstofkosten/dag:':<{_lbl_w}} {mat_s:>{_val_w}}",
-                    f"{'Loonkosten/dag:':<{_lbl_w}} {wage_s:>{_val_w}}",
-                    _sep,
-                    f"{_p_color}{_profit_row}{_S_RST}",
-                ])
+                summary_table = "\n".join(
+                    [
+                        f"{'Totale omzet/dag:':<{_lbl_w}} {rev_s:>{_val_w}}",
+                        f"{'Grondstofkosten/dag:':<{_lbl_w}} {mat_s:>{_val_w}}",
+                        f"{'Loonkosten/dag:':<{_lbl_w}} {wage_s:>{_val_w}}",
+                        _sep,
+                        f"{_p_color}{_profit_row}{_S_RST}",
+                    ]
+                )
                 summary = discord.Embed(
                     title=f"{discord.utils.escape_markdown(username)} — inkomsten werknemers bij bedrijven",
                     description=(
@@ -1090,19 +1235,24 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 )
                 if avatar_url:
                     no_emp_embed.set_thumbnail(url=avatar_url)
-                no_emp_embed.set_footer(text=f"0/{len(companies)} bedrijven hebben werknemers")
+                no_emp_embed.set_footer(
+                    text=f"0/{len(companies)} bedrijven hebben werknemers"
+                )
                 all_embeds = [no_emp_embed]
 
             # Breakeven overview: one embed listing every company
             if breakeven_overview:
                 _B_NAME_MAX = 20
+
                 def _btrunc(s: str) -> str:
-                    return s if len(s) <= _B_NAME_MAX else s[:_B_NAME_MAX - 1] + "\u2026"
+                    return (
+                        s if len(s) <= _B_NAME_MAX else s[: _B_NAME_MAX - 1] + "\u2026"
+                    )
 
                 bk_name_w = max(len(_btrunc(r[0])) for r in breakeven_overview)
                 bk_item_w = max(len(r[1]) for r in breakeven_overview)
-                bk_f0_w   = max(len(_fmt_t(r[2])) for r in breakeven_overview)
-                bk_f10_w  = max(len(_fmt_t(r[3])) for r in breakeven_overview)
+                bk_f0_w = max(len(_fmt_t(r[2])) for r in breakeven_overview)
+                bk_f10_w = max(len(_fmt_t(r[3])) for r in breakeven_overview)
                 bk_hdr = (
                     f"  {'Bedrijf':<{bk_name_w}}  {'item':<{bk_item_w}}"
                     f"  {'fid 0/10':>{max(bk_f0_w, 7)}}"

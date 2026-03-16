@@ -231,9 +231,7 @@ class Owner(commands.Cog, name="owner"):
         :param message: The message that should be repeated by the bot.
         """
         # Prevent @everyone and @here pings even if the owner accidentally includes them
-        sanitized = message.replace("@everyone", "@​everyone").replace(
-            "@here", "@​here"
-        )
+        sanitized = message.replace("@everyone", "@​everyone").replace("@here", "@​here")
         await context.send(
             sanitized,
             allowed_mentions=discord.AllowedMentions(everyone=False, roles=False),

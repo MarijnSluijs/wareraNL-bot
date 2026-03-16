@@ -7,6 +7,7 @@ This module defines the BonusCog, which provides commands related to production 
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -57,46 +58,158 @@ class BonusCog(CommandCogBase, name="bonus"):
             await ctx.send("Geen productieleiders opgeslagen.")
             return
 
+        prices: dict[str, float] = {}
+        pp_costs: dict[str, float] = {}   # item_code -> PP needed per unit
+        pp_needs: dict[str, dict[str, float]] = {}  # item_code -> {mat: qty}
+        if self._client:
+            try:
+                prices_resp = await self._client.get("/itemTrading.getPrices")
+                prices = self._unwrap_prices(prices_resp)
+            except Exception:
+                pass
+            try:
+                cfg_resp = await self._client.get("/gameConfig.getGameConfig", params={"input": "{}"})
+                cfg_data: dict = {}
+                if isinstance(cfg_resp, dict):
+                    _inner = (cfg_resp.get("result") or {}).get("data")
+                    cfg_data = _inner if isinstance(_inner, dict) else cfg_resp
+                items_cfg = cfg_data.get("items", {}) if isinstance(cfg_data, dict) else {}
+                for code, info in items_cfg.items():
+                    if isinstance(info, dict):
+                        try:
+                            pp = float(info.get("productionPoints") or 1)
+                            pp_costs[code] = pp if pp > 0 else 1.0
+                        except (TypeError, ValueError):
+                            pass
+                        raw_needs = info.get("productionNeeds") or {}
+                        if isinstance(raw_needs, dict) and raw_needs:
+                            pp_needs[code] = {
+                                mat: float(qty) for mat, qty in raw_needs.items()
+                            }
+            except Exception:
+                pass
+
         dep_by_item = {d.get("item"): d for d in deposit_tops}
         top_by_item = {t.get("item"): t for t in tops}
         all_items = sorted(set(top_by_item) | set(dep_by_item))
 
+        # Fetch highest buy order and lowest sell order for each item in parallel
+        buy_prices: dict[str, float] = {}
+        sell_prices: dict[str, float] = {}
+        if self._client and all_items:
+            async def _fetch_order(code: str) -> tuple[str, float, float]:
+                try:
+                    resp = await self._client.post(
+                        "/tradingOrder.getTopOrders",
+                        json={"itemCode": code, "limit": 1},
+                    )
+                    b, s = self._parse_order_prices(resp)
+                    return code, b, s
+                except Exception:
+                    return code, 0.0, 0.0
+            _order_results = await asyncio.gather(*[_fetch_order(c) for c in all_items])
+            for _code, _buy, _sell in _order_results:
+                if _buy > 0:
+                    buy_prices[_code] = _buy
+                if _sell > 0:
+                    sell_prices[_code] = _sell
+        # Fall back to getPrices for items missing from the order book
+        for code in all_items:
+            if code not in buy_prices and code in prices:
+                buy_prices[code] = prices[code]
+            if code not in sell_prices and code in prices:
+                sell_prices[code] = prices[code]
+
+        def _fmt_price(p: float) -> str:
+            if p <= 0:
+                return "?"
+            return f"{p:.4f}" if p < 1 else f"{p:.2f}"
+
+        def _per_pp(price: float, item: str) -> float:
+            """Convert price-per-item to price-per-total-PP invested.
+
+            Total PP = direct productionPoints + sum(input_qty × input_PP)
+            e.g. steel: 10 PP direct + 10 iron × 1 PP = 20 PP total.
+            """
+            direct = pp_costs.get(item, 0.0)
+            material_pp = sum(
+                qty * pp_costs.get(mat, 1.0)
+                for mat, qty in pp_needs.get(item, {}).items()
+            )
+            total = direct + material_pp
+            if price <= 0 or total <= 0:
+                return 0.0
+            return price / total
+
         long_rows = [
             (item, top_by_item[item]) for item in all_items if item in top_by_item
         ]
+        # Exclude expired deposit bonuses — they no longer apply
         short_rows = [
-            (item, dep_by_item[item]) for item in all_items if item in dep_by_item
+            (item, dep_by_item[item])
+            for item in all_items
+            if item in dep_by_item
+            and self._format_duration(dep_by_item[item].get("deposit_end_at") or "") != "verlopen"
         ]
 
-        best_l_idx = (
-            max(
-                range(len(long_rows)),
-                key=lambda i: float(long_rows[i][1].get("production_bonus") or 0),
-            )
-            if long_rows
-            else None
-        )
-        best_s_idx = (
-            max(
-                range(len(short_rows)),
-                key=lambda i: float(short_rows[i][1].get("bonus") or 0),
-            )
-            if short_rows
-            else None
-        )
+        best_l_idx: int | None = None
+        best_s_idx: int | None = None
+        best_l_maxpp_idx: int | None = None
+        best_s_maxpp_idx: int | None = None
+        l_max_vals: list[float] = []
+        s_max_vals: list[float] = []
 
         colour = self._embed_colour()
 
+        _WI = 10   # max item name display chars
+        _WC = 7    # max country/region display chars
+
         if long_rows:
-            wi = max(max(len(item) for item, _ in long_rows), 4)
-            wc = max(max(len(t.get("country_name") or "") for _, t in long_rows), 7)
-            wb = max(
-                max(len(self._pct(t.get("production_bonus"))) for _, t in long_rows), 5
+            l_bonus_pcts  = [float(t.get("production_bonus") or 0) for _, t in long_rows]
+            l_buy_pp      = [_per_pp(buy_prices.get(item, 0.0), item) for item, _ in long_rows]
+            l_sell_pp     = [_per_pp(sell_prices.get(item, 0.0), item) for item, _ in long_rows]
+            l_max_buy_pp  = [
+                _per_pp(buy_prices.get(item, 0.0) * (1 + b / 100), item)
+                if buy_prices.get(item, 0.0) > 0 else 0.0
+                for (item, _), b in zip(long_rows, l_bonus_pcts)
+            ]
+            l_max_sell_pp = [
+                _per_pp(sell_prices.get(item, 0.0) * (1 + b / 100), item)
+                if sell_prices.get(item, 0.0) > 0 else 0.0
+                for (item, _), b in zip(long_rows, l_bonus_pcts)
+            ]
+            # Sort by MK/PP (max buy-order per PP) descending
+            _l_zipped = sorted(
+                zip(long_rows, l_bonus_pcts, l_buy_pp, l_sell_pp, l_max_buy_pp, l_max_sell_pp),
+                key=lambda x: x[4], reverse=True,
             )
-            hdr_l = f"  {'Item':<{wi}}  {'Land':<{wc}}  {'Bonus':>{wb}}"
+            long_rows     = [x[0] for x in _l_zipped]
+            l_bonus_pcts  = [x[1] for x in _l_zipped]
+            l_buy_pp      = [x[2] for x in _l_zipped]
+            l_sell_pp     = [x[3] for x in _l_zipped]
+            l_max_buy_pp  = [x[4] for x in _l_zipped]
+            l_max_sell_pp = [x[5] for x in _l_zipped]
+            l_max_vals    = l_max_buy_pp
+            wb = max(max(len(self._pct(t.get("production_bonus"))) for _, t in long_rows), 5)
+            bpp_strs  = [_fmt_price(v) for v in l_buy_pp]
+            spp_strs  = [_fmt_price(v) for v in l_sell_pp]
+            mbpp_strs = [_fmt_price(v) for v in l_max_buy_pp]
+            mspp_strs = [_fmt_price(v) for v in l_max_sell_pp]
+            wkp  = max(max(len(s) for s in bpp_strs),  4)
+            wvp  = max(max(len(s) for s in spp_strs),  4)
+            wmk  = max(max(len(s) for s in mbpp_strs), len("MK/PP▲"))
+            wmv  = max(max(len(s) for s in mspp_strs), 5)
+            best_l_idx = max(range(len(long_rows)), key=lambda i: float(long_rows[i][1].get("production_bonus") or 0))
+            best_l_maxpp_idx = 0
+            hdr_l = (
+                f"  {'Item':<{_WI}}  {'Land':<{_WC}}  {'Bonus':>{wb}}"
+                f"  {'K/PP':>{wkp}}  {'V/PP':>{wvp}}  {'MK/PP▲':>{wmk}}  {'MV/PP':>{wmv}}"
+            )
             sep_l = "  " + "-" * (len(hdr_l) - 2)
             rows_l = [
-                f"{'>' if i == best_l_idx else ' '} {item:<{wi}}  {(t.get('country_name') or 'Onbekend'):<{wc}}  {self._pct(t.get('production_bonus')):>{wb}}"
+                f"  {item[:_WI]:<{_WI}}  {(t.get('country_name') or 'Onbekend')[:_WC]:<{_WC}}"
+                f"  {self._pct(t.get('production_bonus')):>{wb}}"
+                f"  {bpp_strs[i]:>{wkp}}  {spp_strs[i]:>{wvp}}  {mbpp_strs[i]:>{wmk}}  {mspp_strs[i]:>{wmv}}"
                 for i, (item, t) in enumerate(long_rows)
             ]
             table_l = "\n".join([hdr_l, sep_l] + rows_l)
@@ -104,24 +217,57 @@ class BonusCog(CommandCogBase, name="bonus"):
             table_l = "(geen)"
 
         if short_rows:
-            wi2 = max(max(len(item) for item, _ in short_rows), 4)
-            wr = max(
-                max(
-                    len(d.get("region_name") or d.get("region_id") or "")
-                    for _, d in short_rows
-                ),
-                6,
-            )
             wb2 = max(max(len(self._pct(d.get("bonus"))) for _, d in short_rows), 5)
             durs = [
                 self._format_duration(d.get("deposit_end_at") or "") or ""
                 for _, d in short_rows
             ]
             wdur = max(max(len(dur) for dur in durs), 7)
-            hdr_s = f"  {'Item':<{wi2}}  {'Regio':<{wr}}  {'Bonus':>{wb2}}  {'Verloopt':<{wdur}}"
+            s_bonus_pcts  = [float(d.get("bonus") or 0) for _, d in short_rows]
+            s_buy_pp      = [_per_pp(buy_prices.get(item, 0.0), item) for item, _ in short_rows]
+            s_sell_pp     = [_per_pp(sell_prices.get(item, 0.0), item) for item, _ in short_rows]
+            s_max_buy_pp  = [
+                _per_pp(buy_prices.get(item, 0.0) * (1 + b / 100), item)
+                if buy_prices.get(item, 0.0) > 0 else 0.0
+                for (item, _), b in zip(short_rows, s_bonus_pcts)
+            ]
+            s_max_sell_pp = [
+                _per_pp(sell_prices.get(item, 0.0) * (1 + b / 100), item)
+                if sell_prices.get(item, 0.0) > 0 else 0.0
+                for (item, _), b in zip(short_rows, s_bonus_pcts)
+            ]
+            # Sort by MK/PP (max buy-order per PP) descending
+            _s_zipped = sorted(
+                zip(short_rows, s_bonus_pcts, s_buy_pp, s_sell_pp, s_max_buy_pp, s_max_sell_pp, durs),
+                key=lambda x: x[4], reverse=True,
+            )
+            short_rows    = [x[0] for x in _s_zipped]
+            s_bonus_pcts  = [x[1] for x in _s_zipped]
+            s_buy_pp      = [x[2] for x in _s_zipped]
+            s_sell_pp     = [x[3] for x in _s_zipped]
+            s_max_buy_pp  = [x[4] for x in _s_zipped]
+            s_max_sell_pp = [x[5] for x in _s_zipped]
+            durs          = [x[6] for x in _s_zipped]
+            s_max_vals    = s_max_buy_pp
+            bpp_strs2  = [_fmt_price(v) for v in s_buy_pp]
+            spp_strs2  = [_fmt_price(v) for v in s_sell_pp]
+            mbpp_strs2 = [_fmt_price(v) for v in s_max_buy_pp]
+            mspp_strs2 = [_fmt_price(v) for v in s_max_sell_pp]
+            wkp2  = max(max(len(s) for s in bpp_strs2),  4)
+            wvp2  = max(max(len(s) for s in spp_strs2),  4)
+            wmk2  = max(max(len(s) for s in mbpp_strs2), len("MK/PP▲"))
+            wmv2  = max(max(len(s) for s in mspp_strs2), 5)
+            best_s_idx = max(range(len(short_rows)), key=lambda i: float(short_rows[i][1].get("bonus") or 0))
+            best_s_maxpp_idx = 0
+            hdr_s = (
+                f"  {'Item':<{_WI}}  {'Regio':<{_WC}}  {'Bonus':>{wb2}}  {'Verloopt':<{wdur}}"
+                f"  {'K/PP':>{wkp2}}  {'V/PP':>{wvp2}}  {'MK/PP▲':>{wmk2}}  {'MV/PP':>{wmv2}}"
+            )
             sep_s = "  " + "-" * (len(hdr_s) - 2)
             rows_s = [
-                f"{'>' if i == best_s_idx else ' '} {item:<{wi2}}  {(d.get('region_name') or d.get('region_id') or '?'):<{wr}}  {self._pct(d.get('bonus')):>{wb2}}  {dur:<{wdur}}"
+                f"  {item[:_WI]:<{_WI}}  {(d.get('region_name') or d.get('region_id') or '?')[:_WC]:<{_WC}}"
+                f"  {self._pct(d.get('bonus')):>{wb2}}  {dur:<{wdur}}"
+                f"  {bpp_strs2[i]:>{wkp2}}  {spp_strs2[i]:>{wvp2}}  {mbpp_strs2[i]:>{wmk2}}  {mspp_strs2[i]:>{wmv2}}"
                 for i, ((item, d), dur) in enumerate(zip(short_rows, durs))
             ]
             table_s = "\n".join([hdr_s, sep_s] + rows_s)
@@ -175,8 +321,43 @@ class BonusCog(CommandCogBase, name="bonus"):
                 ),
                 inline=False,
             )
+        # Best Max/PP across both tables
+        l_best_maxpp = l_max_vals[best_l_maxpp_idx] if best_l_maxpp_idx is not None and l_max_vals else -1.0
+        s_best_maxpp = s_max_vals[best_s_maxpp_idx] if best_s_maxpp_idx is not None and s_max_vals else -1.0
+        if l_best_maxpp > 0 or s_best_maxpp > 0:
+            if l_best_maxpp >= s_best_maxpp and best_l_maxpp_idx is not None:
+                bm_item, bm = long_rows[best_l_maxpp_idx]
+                bm_val = _fmt_price(l_best_maxpp)
+                bm_value = f"**{bm_item}** — {bm.get('country_name')} **{bm.get('production_bonus')}%**  |  Max/PP: **{bm_val}**"
+            elif best_s_maxpp_idx is not None:
+                bm_item, bm = short_rows[best_s_maxpp_idx]
+                rl2 = bm.get("region_name") or bm.get("region_id") or "?"
+                bm_dur = self._format_duration(bm.get("deposit_end_at") or "")
+                bm_val = _fmt_price(s_best_maxpp)
+                bm_value = (
+                    f"**{bm_item}** — {rl2} **{bm.get('bonus')}%**"
+                    + (f"  ⏳ {bm_dur}" if bm_dur else "")
+                    + f"  |  Max/PP: **{bm_val}**"
+                )
+            else:
+                bm_value = None
+            if bm_value:
+                best_embed.add_field(
+                    name="💰 Beste Max/PP",
+                    value=bm_value,
+                    inline=False,
+                )
         if best_embed.fields:
             await ctx.send(embed=best_embed)
+
+        await ctx.send(
+            "_"
+            "**K/PP** = hoogste kooporder / PP\n"
+            "**V/PP** = laagste verkooporder / PP\n"
+            "**MK/PP** = K/PP × max bonus\n"
+            "**MV/PP** = V/PP × max bonus"
+            "_"
+        )
 
     # ------------------------------------------------------------------ #
     # /topbonus                                                            #
@@ -516,6 +697,51 @@ class BonusCog(CommandCogBase, name="bonus"):
                             pass
             return out
         return {}
+
+    @staticmethod
+    def _parse_order_prices(resp) -> tuple[float, float]:
+        """Extract (highest_buy_price, lowest_sell_price) from getTopOrders response."""
+        if isinstance(resp, dict):
+            inner = (resp.get("result") or {}).get("data")
+            if isinstance(inner, dict):
+                resp = inner
+        if not isinstance(resp, dict):
+            return 0.0, 0.0
+
+        buy_price = 0.0
+        sell_price = 0.0
+
+        for buy_key in ("buyOrders", "buy_orders", "bids", "buy"):
+            orders = resp.get(buy_key)
+            if isinstance(orders, list) and orders:
+                raw = (
+                    orders[0].get("price")
+                    or orders[0].get("unitPrice")
+                    or orders[0].get("value")
+                )
+                if raw is not None:
+                    try:
+                        buy_price = float(raw)
+                    except (TypeError, ValueError):
+                        pass
+                break
+
+        for sell_key in ("sellOrders", "sell_orders", "asks", "sell"):
+            orders = resp.get(sell_key)
+            if isinstance(orders, list) and orders:
+                raw = (
+                    orders[0].get("price")
+                    or orders[0].get("unitPrice")
+                    or orders[0].get("value")
+                )
+                if raw is not None:
+                    try:
+                        sell_price = float(raw)
+                    except (TypeError, ValueError):
+                        pass
+                break
+
+        return buy_price, sell_price
 
 
 async def setup(bot) -> None:

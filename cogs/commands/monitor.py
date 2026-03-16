@@ -66,9 +66,7 @@ class MonitorCog(CommandCogBase, name="monitor"):
         # ── Load current subscriptions ─────────────────────────────────
         try:
             subs_json = await self._db.get_poll_state("monitor_subscriptions")
-            subscriptions: dict[str, dict] = (
-                json.loads(subs_json) if subs_json else {}
-            )
+            subscriptions: dict[str, dict] = json.loads(subs_json) if subs_json else {}
         except Exception:
             subscriptions = {}
 

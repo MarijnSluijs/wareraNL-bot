@@ -213,7 +213,9 @@ class GlobalLuckTasks(TaskCogBase, name="global_luck_tasks"):
         recorded = 0
         for i, (user_id, country_id, citizen_name) in enumerate(citizens):
             try:
-                counts, total_opens = await self._fetch_luck_data(user_id, item_rarities)
+                counts, total_opens = await self._fetch_luck_data(
+                    user_id, item_rarities
+                )
                 if total_opens < MIN_OPENS:
                     continue
                 luck_pct = _calc_luck_pct(counts, total_opens)

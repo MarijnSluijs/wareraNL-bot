@@ -4,19 +4,23 @@ This module defines the GelukCog, which provides the /geluk command to analyze a
 - /caserang speler:naam - toon ranking op bases van aantal geopende cases
 """
 
+from __future__ import annotations
+
+import difflib
 import json
 import logging
-import asyncio
-import difflib
 import math as _luck_math
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from services.api_client import APIClient
 from cogs.commands._base import citizen_autocomplete
+from services.api_client import APIClient
+
+if TYPE_CHECKING:
+    from bot import DiscordBot
 
 logger = logging.getLogger("discord_bot")
 
@@ -182,7 +186,7 @@ def _build_luck_table(
 class Geluk(commands.Cog, name="geluk"):
     """Player case-opening luck analyser."""
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: DiscordBot) -> None:
         self.bot = bot
         self.config: dict = getattr(bot, "config", {}) or {}
         self._client: Optional[APIClient] = None
@@ -541,14 +545,21 @@ class Geluk(commands.Cog, name="geluk"):
             _tc = sum(counts.values())
             if _tc >= 20:
                 try:
-                    from datetime import timezone as _tz, datetime as _dt
+                    from datetime import datetime as _dt
+                    from datetime import timezone as _tz
 
                     _luck = calc_luck_pct(counts, _tc)
                     _rarity_json = __import__("json").dumps(counts)
                     _now = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                     _db = await self._get_db()
                     await _db.upsert_luck_score(
-                        resolved_user_id, _nl_cid, username, _luck, _tc, _rarity_json, _now
+                        resolved_user_id,
+                        _nl_cid,
+                        username,
+                        _luck,
+                        _tc,
+                        _rarity_json,
+                        _now,
                     )
                     await _db.flush_luck_scores()
                     logger.info(
@@ -749,7 +760,9 @@ class Geluk(commands.Cog, name="geluk"):
         # Split into chunks of 25 so each field stays under Discord's 1024-char limit
         CHUNK = 25
         all_data_rows = top_rows + extra  # type: ignore[operator]
-        chunks: list[list] = [all_data_rows[i:i + CHUNK] for i in range(0, len(all_data_rows), CHUNK)]
+        chunks: list[list] = [
+            all_data_rows[i : i + CHUNK] for i in range(0, len(all_data_rows), CHUNK)
+        ]
 
         if target_row:
             resolved_name = target_row["username"]
@@ -781,6 +794,6 @@ class Geluk(commands.Cog, name="geluk"):
         await interaction.followup.send(embed=embed)
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: DiscordBot) -> None:
     """Add the Geluk cog to the bot."""
     await bot.add_cog(Geluk(bot))

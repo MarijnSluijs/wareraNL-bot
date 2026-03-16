@@ -3,9 +3,12 @@ General bot commands — /help, /botinfo, /serverinfo, /ping, /invite,
 /eight_ball (question), and /feedback.
 """
 
+from __future__ import annotations
+
 import platform
 import random
 import typing
+from typing import TYPE_CHECKING
 
 import discord
 import discord.utils
@@ -13,6 +16,9 @@ import pytz
 from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
+
+if TYPE_CHECKING:
+    from bot import DiscordBot
 
 # Configuration is provided by the bot at runtime via `bot.config`.
 
@@ -35,9 +41,12 @@ class FeedbackForm(discord.ui.Modal, title="Feedback"):
 
 
 class General(commands.Cog, name="general"):
-    """Cog for general-purpose commands like /help, /botinfo, /serverinfo, /ping, /invite, and /feedback."""
+    """
+    Cog for general-purpose commands like /help, /botinfo,
+    /serverinfo, /ping, /invite, and /feedback.
+    """
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: DiscordBot) -> None:
         self.bot = bot
         self.context_menu_user = app_commands.ContextMenu(
             name="Grab ID", callback=self.grab_id
@@ -61,7 +70,8 @@ class General(commands.Cog, name="general"):
         if message.author.bot:
             return
         content = message.content or ""
-        # self.bot.logger.debug(f"Received message: {content} from {message.author} in {getattr(message.channel, 'id', 'DM')}")
+        # self.bot.logger.debug(f"Received message: {content} from {message.author} "
+        # f"in {getattr(message.channel, 'id', 'DM')}")
         if "hoezeer" in content.lower():
             self.bot.logger.info(
                 f"Hoezeer detected in message {message.id} by {message.author} in {getattr(message.channel, 'id', 'DM')}"
@@ -82,7 +92,8 @@ class General(commands.Cog, name="general"):
         try:
             await message.edit(suppress=True)
             self.bot.logger.info(
-                f"Suppressed embeds for message {message.id} in {getattr(message.channel, 'id', 'DM')}"
+                f"Suppressed embeds for message {message.id} in "
+                f"{getattr(message.channel, 'id', 'DM')}"
             )
         except (discord.Forbidden, discord.HTTPException) as e:
             self.bot.logger.error(
@@ -94,7 +105,8 @@ class General(commands.Cog, name="general"):
         self, interaction: discord.Interaction, message: discord.Message
     ) -> None:
         """
-        Removes the spoilers from the message. This command requires the MESSAGE_CONTENT intent to work properly.
+        Removes the spoilers from the message.
+        This command requires the MESSAGE_CONTENT intent to work properly.
 
         :param interaction: The application command interaction.
         :param message: The message that is being interacted with.
@@ -140,7 +152,7 @@ class General(commands.Cog, name="general"):
         fields: list[tuple[str, str]] = []
 
         for cog_name in self.bot.cogs:
-            if cog_name == "owner" and not (await self.bot.is_owner(context.author)):
+            if cog_name == "owner" and not await self.bot.is_owner(context.author):
                 continue
 
             cog = self.bot.get_cog(cog_name.lower())
@@ -363,7 +375,8 @@ class General(commands.Cog, name="general"):
 
     #     :param context: The hybrid command context.
     #     """
-    #     # This will prevent your bot from stopping everything when doing a web request - see: https://discordpy.readthedocs.io/en/stable/faq.html#how-do-i-make-a-web-request
+    #     # This will prevent your bot from stopping everything when doing a web request -
+    #     # see: https://discordpy.readthedocs.io/en/stable/faq.html#how-do-i-make-a-web-request
     #     async with aiohttp.ClientSession() as session:
     #         async with session.get(
     #             "https://api.coindesk.com/v1/bpi/currentprice/BTC.json"
@@ -378,7 +391,8 @@ class General(commands.Cog, name="general"):
     #             else:
     #                 embed = discord.Embed(
     #                     title="Error!",
-    #                     description="There is something wrong with the API, please try again later",
+    #                     description="There is something wrong with the API, "
+    #                                   "please try again later",
     #                     color=self.color,
     #                 )
     #             await context.send(embed=embed)
@@ -409,7 +423,8 @@ class General(commands.Cog, name="general"):
         await app_owner.send(
             embed=discord.Embed(
                 title="Nieuwe Feedback",
-                description=f"{interaction.user} (<@{interaction.user.id}>) heeft nieuwe feedback ingediend:\n```\n{feedback_form.answer}\n```",
+                description=f"{interaction.user} (<@{interaction.user.id}>) heeft nieuwe "
+                f"feedback ingediend:\n```\n{feedback_form.answer}\n```",
                 color=self.color,
             )
         )
@@ -463,7 +478,8 @@ class General(commands.Cog, name="general"):
                         log_embed = discord.Embed(
                             # title="Gebruiker heeft de server verlaten",
                             description=f"**{member.mention if member else 'Unknown'} "
-                            f"({member.name if member else 'Unknown'}) heeft de server verlaten**\n",
+                            f"({member.name if member else 'Unknown'}) heeft de "
+                            f"server verlaten**\n",
                             color=discord.Color.red(),
                             timestamp=discord.datetime.now(
                                 pytz.timezone("Europe/Amsterdam")

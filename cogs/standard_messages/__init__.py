@@ -1,1 +1,0 @@
-from .mu_bericht import has_mu_privilige

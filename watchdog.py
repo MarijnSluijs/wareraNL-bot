@@ -6,7 +6,6 @@ Checks if bot is responsive and restarts if needed
 
 import os
 import subprocess
-import sys
 import time
 from datetime import datetime
 
