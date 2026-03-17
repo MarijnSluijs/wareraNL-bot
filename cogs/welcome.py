@@ -622,6 +622,32 @@ class Welcome(commands.Cog, name="welcome"):
             raise ValueError("In-game ID is too long (max 64 characters).")
         return normalized
 
+    @staticmethod
+    def _embassy_channel_candidates(country: str) -> set[str]:
+        """Return possible embassy channel names for a country."""
+        slug = re.sub(r"[^a-z0-9-]+", "-", country.lower().strip())
+        slug = re.sub(r"-+", "-", slug).strip("-")
+        return {f"{slug}-embassy", f"{slug}-ambassade"}
+
+    def _find_existing_embassy_channel(
+        self, guild: discord.Guild, country: str
+    ) -> discord.TextChannel | None:
+        """Find an existing embassy channel across configured embassy categories."""
+        candidate_names = self._embassy_channel_candidates(country)
+
+        # First search configured embassy categories in priority order.
+        for category in self._resolve_embassy_categories(guild):
+            for text_channel in category.text_channels:
+                if text_channel.name in candidate_names:
+                    return text_channel
+
+        # Backward-compatible fallback: search globally visible text channels.
+        for text_channel in guild.text_channels:
+            if text_channel.name in candidate_names:
+                return text_channel
+
+        return None
+
     # def cog_load(self) -> None:
     #     """Start the scheduled tasks when the cog is loaded."""
     #     self.daily_bezoeker_ping.start()
@@ -1444,21 +1470,20 @@ class Welcome(commands.Cog, name="welcome"):
                 self.bot.logger.debug(
                     f"Checking for existing embassy channel for country: {country}"
                 )
-                embassy_channel = None
-                for channel in interaction.guild.channels:
-                    if (
-                        channel.name == f"{country.lower()}-embassy"
-                        or channel.name == f"{country.lower()}-ambassade"
-                    ):
-                        embassy_channel = channel
-                        break
+                embassy_channel = self._find_existing_embassy_channel(
+                    interaction.guild, country
+                )
 
                 if not embassy_channel:
                     # Create the embassy channel
                     self.bot.logger.debug(
                         f"Creating embassy channel for country: {country}"
                     )
-                    channel_name = f"{country.lower()}-embassy"
+                    channel_name = next(
+                        name
+                        for name in self._embassy_channel_candidates(country)
+                        if name.endswith("-embassy")
+                    )
                     # Choose an embassy category with available capacity.
                     category = None
                     embassy_categories = self._resolve_embassy_categories(

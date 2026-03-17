@@ -1219,11 +1219,22 @@ class Users(CommandCogBase, name="users"):
         doubt_role = guild.get_role(
             int(self.config.get("roles", {}).get("twijfelgeval", 0))
         )
+        foreigner_role = guild.get_role(
+            int(self.config.get("roles", {}).get("foreigner", 0))
+        )
+        if not dry_run and not doubt_role and not foreigner_role:
+            await interaction.followup.send(
+                "Geen twijfelgeval- of foreigner-rol gevonden in de configuratie. "
+                "Rollen kunnen niet worden verwijderd.",
+                ephemeral=True,
+            )
+            return
+
         if not dry_run:
             for member in members_to_filter:
                 try:
-                    await member.remove_roles(nl_role, reason="Filteren op NL citizen mapping")
-                    await member.add_roles(doubt_role, reason="Filteren op NL citizen mapping")
+                    # strip all roles
+                    await member.edit(roles=[doubt_role, foreigner_role], reason="Filteren op NL citizen mapping")
                 except Exception as exc:
                     logger.warning(
                         "Failed to remove NL role from %s (%s): %s",
@@ -1239,7 +1250,9 @@ class Users(CommandCogBase, name="users"):
             int(self.config.get("channels", {}).get("welcome_buttons", 0))
         )
         if id_channel and isinstance(id_channel, discord.TextChannel):
-            member_mentions = ", ".join(m.mention for m in members_to_filter)
+            member_mentions = f"{doubt_role.mention}" if doubt_role else ""
+            member_mentions += ", ".join(m.mention for m in members_to_filter)
+
             await id_channel.send(
                 member_mentions
             )
@@ -1251,7 +1264,9 @@ class Users(CommandCogBase, name="users"):
                     f"er geen geldige mapping naar een NL citizen in onze "
                     f"database was. \n\n"
                     f"Voor verificatie vragen we jullie een ticket te openen "
-                    f"via <#{welcome_channel.id}> en de instructies te volgen. "
+                    f"via <#{welcome_channel.id}> en de instructies te volgen. \n\n"
+                    f"Mogelijk ben je geflagged omdat je langere tijd geen WarEra gespeeld hebt. "
+                    f"Als je het spel niet meer speelt willen we je vragen om de server te verlaten."
                 )
             )
 
