@@ -80,6 +80,7 @@ class MUs(GenerateEmbeds, name="mus"):
         "Eco": discord.Color.from_rgb(46, 204, 113),
         "Standaard": discord.Color.from_rgb(52, 152, 219),
     }
+    _MAX_BUTTONS_PER_MESSAGE = 25
 
     def __init__(self, bot) -> None:
         super().__init__(bot)
@@ -137,6 +138,22 @@ class MUs(GenerateEmbeds, name="mus"):
     def _save_json(self, path: str) -> None:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self.json_data, f, indent=4, ensure_ascii=False)
+
+    def _chunk_buttons(self, buttons: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+        """Split button definitions into Discord-safe message chunks and normalize row indexes per chunk."""
+        if not buttons:
+            return []
+
+        chunks: list[list[dict[str, Any]]] = []
+        for start in range(0, len(buttons), self._MAX_BUTTONS_PER_MESSAGE):
+            page = buttons[start : start + self._MAX_BUTTONS_PER_MESSAGE]
+            page_buttons: list[dict[str, Any]] = []
+            for idx, btn in enumerate(page):
+                item = dict(btn)
+                item["row"] = idx // 5
+                page_buttons.append(item)
+            chunks.append(page_buttons)
+        return chunks
 
     async def _mu_channel(self, fallback: discord.TextChannel) -> discord.TextChannel:
         """Return the configured military_unit channel, or fallback if not found."""
@@ -321,7 +338,7 @@ class MUs(GenerateEmbeds, name="mus"):
                     all_buttons.append(item)
 
             mu_buttons: list[dict[str, Any]] = []
-            for idx, entry in enumerate(entries_sorted):
+            for entry in entries_sorted:
                 mu_id = entry["id"]
                 mu_name = str(entry.get("name") or f"MU {mu_id[:8]}")
                 role_id = int(entry.get("role_id") or 0)
@@ -365,36 +382,45 @@ class MUs(GenerateEmbeds, name="mus"):
                     "label": mu_name,
                     "role_id": role.id,
                     "style": "primary",
-                    "row": min(idx // 5, 4),
                 }
                 if secondary_role_id:
                     button["secondary_role_id"] = secondary_role_id
                 mu_buttons.append(button)
 
             pinned_buttons = [b for b in all_buttons if b.get("label") in pinned_labels]
-            pinned_row = min((len(mu_buttons) + 4) // 5, 4)
-            for b in pinned_buttons:
-                b["row"] = pinned_row
+            buttons = mu_buttons + [dict(b) for b in pinned_buttons]
+            button_chunks = self._chunk_buttons(buttons)
 
-            buttons = mu_buttons + pinned_buttons
-
-            roles_data["buttons"] = buttons
+            roles_data["buttons"] = []
+            roles_data["embeds"] = [{"buttons": chunk} for chunk in button_chunks]
             with open(roles_path, "w", encoding="utf-8") as f:
                 json.dump(roles_data, f, indent=2, ensure_ascii=False)
 
             color = int(
                 self.bot.config.get("colors", {}).get("primary", "0x154273"), 16
             )
-            roles_embed = discord.Embed(
-                title=roles_data.get("title", "MU Lidmaatschap"),
-                description=roles_data.get("description", ""),
-                color=color,
-            )
-            btn_msg = await channel.send(
-                embed=roles_embed,
-                view=RoleToggleView(buttons, exclusive=True),
-            )
-            roles_data["button_message_id"] = btn_msg.id
+            message_ids: list[int] = []
+            total_pages = len(button_chunks)
+            for page_idx, chunk in enumerate(button_chunks, start=1):
+                title = roles_data.get("title", "MU Lidmaatschap")
+                description = roles_data.get("description", "")
+                if page_idx > 1:
+                    title = f"{title} ({page_idx}/{total_pages})"
+                    description = "Vervolg van de MU-knoppen."
+
+                roles_embed = discord.Embed(
+                    title=title,
+                    description=description,
+                    color=color,
+                )
+                btn_msg = await channel.send(
+                    embed=roles_embed,
+                    view=RoleToggleView(chunk, exclusive=True),
+                )
+                message_ids.append(btn_msg.id)
+
+            roles_data["button_message_id"] = message_ids[0] if message_ids else None
+            roles_data["button_message_ids"] = message_ids
             with open(roles_path, "w", encoding="utf-8") as f:
                 json.dump(roles_data, f, indent=2, ensure_ascii=False)
         except Exception as exc:

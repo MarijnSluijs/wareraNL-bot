@@ -48,27 +48,71 @@ async def post_or_edit_buttons(
     """Edit the existing button message if its ID is tracked in *data*, otherwise send a new one.
     Always saves the (new) button_message_id back to *path*.
     """
-    buttons = data.get("buttons", [])
-    embed = discord.Embed(
-        title=data.get("title", "MU Lidmaatschap"),
-        description=data.get("description", ""),
-        color=color,
-    )
-    view = RoleToggleView(buttons, exclusive=True) if buttons else discord.ui.View()
+    pages = data.get("embeds") or []
+    if pages:
+        existing_ids = data.get("button_message_ids") or []
+        if not existing_ids and data.get("button_message_id"):
+            existing_ids = [data.get("button_message_id")]
 
-    msg_id = data.get("button_message_id")
-    msg = None
-    if msg_id:
-        try:
-            msg = await channel.fetch_message(msg_id)
-            await msg.edit(embed=embed, view=view)
-        except (discord.NotFound, discord.HTTPException):
-            msg = None  # Gone — fall through to send
+        sent_ids: list[int] = []
+        total_pages = len(pages)
 
-    if msg is None:
-        msg = await channel.send(embed=embed, view=view)
+        for idx, page in enumerate(pages, start=1):
+            buttons = page.get("buttons", [])
+            title = data.get("title", "MU Lidmaatschap")
+            description = data.get("description", "")
+            if idx > 1:
+                title = f"{title} ({idx}/{total_pages})"
+                description = "Vervolg van de MU-knoppen."
 
-    data["button_message_id"] = msg.id
+            embed = discord.Embed(
+                title=title,
+                description=description,
+                color=color,
+            )
+            view = (
+                RoleToggleView(buttons, exclusive=True) if buttons else discord.ui.View()
+            )
+
+            msg = None
+            if idx - 1 < len(existing_ids):
+                try:
+                    msg = await channel.fetch_message(existing_ids[idx - 1])
+                    await msg.edit(embed=embed, view=view)
+                except (discord.NotFound, discord.HTTPException):
+                    msg = None
+
+            if msg is None:
+                msg = await channel.send(embed=embed, view=view)
+
+            sent_ids.append(msg.id)
+
+        data["button_message_id"] = sent_ids[0] if sent_ids else None
+        data["button_message_ids"] = sent_ids
+    else:
+        buttons = data.get("buttons", [])
+        embed = discord.Embed(
+            title=data.get("title", "MU Lidmaatschap"),
+            description=data.get("description", ""),
+            color=color,
+        )
+        view = RoleToggleView(buttons, exclusive=True) if buttons else discord.ui.View()
+
+        msg_id = data.get("button_message_id")
+        msg = None
+        if msg_id:
+            try:
+                msg = await channel.fetch_message(msg_id)
+                await msg.edit(embed=embed, view=view)
+            except (discord.NotFound, discord.HTTPException):
+                msg = None  # Gone - fall through to send
+
+        if msg is None:
+            msg = await channel.send(embed=embed, view=view)
+
+        data["button_message_id"] = msg.id
+        data["button_message_ids"] = [msg.id]
+
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
