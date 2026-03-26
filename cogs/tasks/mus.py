@@ -52,7 +52,14 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
         except Exception:
             logger.exception("mu_refresh: refresh_mu_info failed")
 
-        # Also refresh DB MU memberships so /paraatheid alles_mus has data
+        # Populate known_mus table so /paraatheid mu: autocomplete shows all game MUs
+        try:
+            count = await self.refresh_all_mu_names()
+            logger.info("mu_refresh: %d MUs upserted into known_mus", count)
+        except Exception:
+            logger.exception("mu_refresh: refresh_all_mu_names failed")
+
+        # Also refresh DB MU memberships so /paraatheid nl_mus has data
         citizen_cache = getattr(self.bot, "_ext_citizen_cache", None)
         nl_country_id = self.config.get("nl_country_id")
         if citizen_cache and nl_country_id:
@@ -62,6 +69,71 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
                 logger.info("mu_refresh: %d MU assignments refreshed", count)
             except Exception:
                 logger.exception("mu_refresh: refresh_mu_memberships failed")
+
+    async def refresh_all_mu_names(self) -> int:
+        """Paginate mu.getManyPaginated and upsert every MU into known_mus.
+
+        Returns the total number of MUs upserted.
+        """
+        if not self._db or not self._client:
+            return 0
+
+        now = datetime.now(timezone.utc).isoformat()
+        total = 0
+        cursor: str | None = None
+
+        while True:
+            params: dict[str, Any] = {"limit": 100}
+            if cursor:
+                params["cursor"] = cursor
+
+            try:
+                resp = await self._client.get(
+                    "/mu.getManyPaginated",
+                    params={"input": json.dumps(params)},
+                )
+            except Exception:
+                logger.exception("refresh_all_mu_names: API call failed")
+                break
+
+            # Unwrap nested result/data envelope
+            data_obj: Any = resp
+            if isinstance(resp, dict):
+                for key in ("result", "data"):
+                    v = resp.get(key)
+                    if isinstance(v, dict):
+                        data_obj = v.get("data", v)
+                        break
+
+            items: list[Any] = []
+            next_cursor: str | None = None
+            if isinstance(data_obj, list):
+                items = data_obj
+            elif isinstance(data_obj, dict):
+                for key in ("items", "mus", "data"):
+                    v = data_obj.get(key)
+                    if isinstance(v, list):
+                        items = v
+                        break
+                next_cursor = data_obj.get("nextCursor") or data_obj.get("cursor")
+
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                mu_id = str(item.get("_id") or item.get("id") or "").strip()
+                mu_name = str(item.get("name") or item.get("title") or "").strip()
+                if mu_id and mu_name:
+                    await self._db.upsert_known_mu(mu_id, mu_name, now)
+                    total += 1
+
+            if items:
+                await self._db.flush_known_mus()
+
+            if not next_cursor or not items:
+                break
+            cursor = next_cursor
+
+        return total
 
     @mu_refresh.before_loop
     async def before_mu_refresh(self) -> None:

@@ -184,6 +184,7 @@ class PeilCog(CommandCogBase, name="peil"):
             mu_tasks = self.bot.get_cog("mu_tasks")
             if mu_tasks:
                 await mu_tasks.refresh_mu_info()
+                await mu_tasks.refresh_all_mu_names()
             mu_count = await citizen_cache.refresh_mu_memberships(
                 nl_country_id, mus_json
             )

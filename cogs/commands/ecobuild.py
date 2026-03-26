@@ -362,6 +362,38 @@ def _optimize_production_v2(
     return best
 
 
+def _optimize_eco_skills(
+    free_budget: int,
+    engine_daily_total: int,
+    ent_prod_mult: float = 1.0,
+) -> tuple[int, int, int, float] | None:
+    """Find the best (ent_lvl, energy_lvl, prod_lvl, daily_pp) with fixed engine contribution.
+
+    Companies and workers SP are already locked in; this optimizer only allocates
+    the remaining *free_budget* across entrepreneurship, energy, and production.
+    """
+    best: tuple[int, int, int, float] | None = None
+    best_daily: float = -1.0
+    for ent_l in range(11):
+        if _CUMUL_COST[ent_l] > free_budget:
+            break
+        for en_l in range(11):
+            if _CUMUL_COST[ent_l] + _CUMUL_COST[en_l] > free_budget:
+                break
+            for p_l in range(11):
+                if _CUMUL_COST[ent_l] + _CUMUL_COST[en_l] + _CUMUL_COST[p_l] > free_budget:
+                    break
+                daily = _daily_prod(
+                    _SKILL_VALUES["entrepreneurship"][ent_l],
+                    _SKILL_VALUES["energy"][en_l],
+                    _SKILL_VALUES["production"][p_l],
+                    engine_daily_total,
+                    ent_prod_mult,
+                )
+                if daily > best_daily:
+                    best = (ent_l, en_l, p_l, daily)
+                    best_daily = daily
+    return best
 
 
 
@@ -702,65 +734,32 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
         # We use the highest bonus across all owned companies (player picks the best one to work).
         best_ent_prod_mult = 1.0 + max(ae_bonuses.values(), default=0.0) / 100.0
 
-        # ── Fetch steel + concrete prices for cost-efficiency ranking ────────
-        steel_price = 1.0
-        concrete_price = 1.0
-        if self._client:
-            try:
-                prices_resp = await self._client.get("/itemTrading.getPrices")
-                _pd: dict = {}
-                if isinstance(prices_resp, dict):
-                    _inner = (prices_resp.get("result") or {}).get("data")
-                    if isinstance(_inner, dict):
-                        _pd = _inner
-                    elif isinstance(_inner, list):
-                        prices_resp = _inner  # fall through to list handler below
-                    else:
-                        _pd = {k: v for k, v in prices_resp.items() if isinstance(v, (int, float, str))}
-                        if not _pd:
-                            # values might be under a nested list
-                            for _v in prices_resp.values():
-                                if isinstance(_v, list):
-                                    prices_resp = _v
-                                    break
-                _raw_list = prices_resp if isinstance(prices_resp, list) else []
-                if not _pd and _raw_list:
-                    for _e in _raw_list:
-                        if isinstance(_e, dict):
-                            _k = _e.get("itemCode") or _e.get("item") or _e.get("code")
-                            _v = _e.get("price") or _e.get("value")
-                            if _k and _v is not None:
-                                try:
-                                    _pd[str(_k)] = float(_v)
-                                except (TypeError, ValueError):
-                                    pass
-                steel_price    = float(_pd.get("steel")    or _pd.get("Steel")    or 1.0) or 1.0
-                concrete_price = float(_pd.get("concrete") or _pd.get("Concrete") or 1.0) or 1.0
-            except Exception:
-                pass  # fall back to 1.0:1.0 ratio
+        # ── SP budget: total minus SP locked in companies + workers ──────────
+        # The "employees/workers" skill is stored as "management" in the API.
+        _mgmt_entry = (profile.get("skills") or {}).get("management")
+        if isinstance(_mgmt_entry, dict):
+            workers_lvl = max(0, min(_mgmt_entry.get("level", 0) or 0, 10))
+        elif isinstance(_mgmt_entry, (int, float)):
+            workers_lvl = max(0, min(int(_mgmt_entry), 10))
+        else:
+            workers_lvl = 0
+
+        total_sp = _eco_sp_budget(profile)
+        fixed_sp = _CUMUL_COST[comp_lvl] + _CUMUL_COST[workers_lvl]
+        free_sp = max(0, total_sp - fixed_sp)
+
+        # SP currently invested in the three self-work skills
+        cur_eco_sp = _CUMUL_COST[ent_lvl] + _CUMUL_COST[energy_lvl] + _CUMUL_COST[prod_lvl]
+        # SP in war skills (or elsewhere) that can be redeployed into eco skills
+        war_sp = free_sp - cur_eco_sp
 
         # ── Current daily production ──────────────────────────────────────
-        current_ent_works_f = _daily_works_float(ent_val)
-        current_energy_works_f = _daily_works_float(energy_val)
-        current_manual = (
-            current_ent_works_f * prod_val * best_ent_prod_mult
-            + current_energy_works_f * prod_val
-        )
-        current_total = current_manual + engine_daily_total
+        cur_ent_pp = _daily_works_float(ent_val) * prod_val * best_ent_prod_mult
+        cur_en_pp = _daily_works_float(energy_val) * prod_val
+        current_total = cur_ent_pp + cur_en_pp + engine_daily_total
 
-        # ── Eco SP budget ─────────────────────────────────────────────────
-        eco_budget = _eco_sp_budget(profile)
-
-        # ── Run optimizer ─────────────────────────────────────────────────
-        # Pass an extended list that includes virtual "average" companies so the
-        # optimizer can also recommend buying more companies than currently owned.
-        _MAX_COMPANIES = max(_SKILL_VALUES["companies"])  # = 12 at level 10
-        company_ae_sorted = sorted([daily for _, _, _, daily, _ in engine_info], reverse=True)
-        n_owned = len(companies)
-        avg_ae = round(sum(company_ae_sorted) / n_owned) if n_owned else 0
-        # Allow at most one additional company in the optimizer
-        company_ae_extended = company_ae_sorted + ([avg_ae] if n_owned < _MAX_COMPANIES else [])
-        best_build = _optimize_production_v2(eco_budget, company_ae_extended, best_ent_prod_mult)
+        # ── Run optimizer (ent/energy/prod only — companies + workers fixed) ─
+        best_build = _optimize_eco_skills(free_sp, engine_daily_total, best_ent_prod_mult)
 
         # ── Build embed ───────────────────────────────────────────────────
         color = self._embed_colour()
@@ -773,269 +772,49 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
             embed.set_thumbnail(url=avatar_url)
 
         # ── Huidige eco skills ───────────────────────────────────────────
-        cur_ent_pp = _daily_works_float(ent_val) * prod_val * best_ent_prod_mult
-        cur_en_pp = _daily_works_float(energy_val) * prod_val
-        cur_sp_used = (
-            _CUMUL_COST[ent_lvl] + _CUMUL_COST[energy_lvl]
-            + _CUMUL_COST[prod_lvl] + _CUMUL_COST[comp_lvl]
-        )
-        _n_owned_companies = len(companies)
-        cur_bedr_label = (
-            f"Bedrijven ({n_active}/{_n_owned_companies})"
-            if n_active < _n_owned_companies
-            else f"Bedrijven ({_n_owned_companies} (max {comp_val}))"
-            if comp_val > _n_owned_companies
-            else f"Bedrijven ({n_active})"
-        )
         cur_rows: list[tuple[str, str, str]] = [
             (f"Entrepreneurship ({ent_val})", str(ent_lvl), f"{cur_ent_pp:.0f}"),
             (f"Energy ({energy_val})",        str(energy_lvl), f"{cur_en_pp:.0f}"),
             (f"Production ({prod_val})",      str(prod_lvl), "\u2014"),
-            (cur_bedr_label,                 str(comp_lvl), f"{engine_daily_total:.0f}"),
+            (f"Bedrijven ({n_active})",       str(comp_lvl), f"{engine_daily_total:.0f}"),
+            ("Medewerkers",                   str(workers_lvl), "\u2014"),
         ]
-        employee_note = (
-            "_Let op: SP besteed aan medewerkers wordt niet meegeteld. "
-            "Medewerkers worden niet meegenomen in de berekening._"
-        )
+        cur_table = _skill_table(cur_rows, current_total)
+        if war_sp > 0:
+            cur_table += f"\n⚠️ {war_sp} SP in oorlogsskills — herbesteedbaar aan eco"
         embed.add_field(
             name="\U0001f4ca Huidige eco skills",
-            value=_skill_table(cur_rows, current_total, f"{cur_sp_used}/{eco_budget} SP")
-            + "\n" + employee_note,
+            value=cur_table,
             inline=False,
         )
 
-        # ── AE upgrade & company purchase advice ──────────────────────────
-        if companies:
-            ae_advice_steps = _build_ae_advice(
-                engine_info, n_owned, comp_lvl,
-                steel_price=steel_price,
-                concrete_price=concrete_price,
-                free_sp=max(0, eco_budget - cur_sp_used),
-            )
-
-            # Per-company AE status line
-            NAME_W, AE_W = 16, 3
-            ae_header = f"{'Bedrijf':<{NAME_W}}  {'AE':>{AE_W}}  PP/dag  Upgrade"
-            ae_sep    = "\u2500" * (NAME_W + 2 + AE_W + 2 + 6 + 2 + 20)
-            ae_lines  = [ae_header, ae_sep]
-            for name, item, eng_lvl, ae_daily, _ in sorted(engine_info_by_daily, key=lambda x: x[0]):
-                eff_lvl  = max(1, eng_lvl)
-                next_lvl = eff_lvl + 1
-                if next_lvl in _AE_UPGRADE_STEEL:
-                    upgrade_str = f"lvl {next_lvl}: {_AE_UPGRADE_STEEL[next_lvl]} 🔩"
-                else:
-                    upgrade_str = "max"
-                n = name[:NAME_W] if len(name) > NAME_W else name
-                ae_lines.append(
-                    f"{n:<{NAME_W}}  {eff_lvl:>{AE_W}}  {ae_daily:>6}  {upgrade_str}"
-                )
-
-            ae_lines.append(ae_sep)
-            ae_table = "```\n" + "\n".join(ae_lines) + "\n```"
-
-            # Ordered action list — collapse consecutive same-upgrade AE steps into one line
-            # e.g. "10× AE lvl 5 → 6  (320 staal elk)" instead of 10 separate lines.
-            action_lines: list[str] = []
-            sp_limited_note: str | None = None
-            step_num = 1
-
-            # Group the raw steps first — ae_group tuple:
-            # ("ae_group", from_l, to_l, steel, names, total_pp_gain)
-            grouped_steps: list[tuple] = []
-            for step in ae_advice_steps:
-                if (
-                    step[0] == "ae"
-                    and grouped_steps
-                    and grouped_steps[-1][0] == "ae_group"
-                    and grouped_steps[-1][1] == step[2]   # same from_lvl
-                    and grouped_steps[-1][2] == step[3]   # same to_lvl
-                ):
-                    grouped_steps[-1] = (
-                        "ae_group",
-                        grouped_steps[-1][1],
-                        grouped_steps[-1][2],
-                        grouped_steps[-1][3],
-                        grouped_steps[-1][4] + [step[1]],
-                        grouped_steps[-1][5] + step[5],   # accumulate pp_gain
-                    )
-                elif step[0] == "ae":
-                    _, cname, from_l, to_l, steel, pp_gain = step
-                    grouped_steps.append(("ae_group", from_l, to_l, steel, [cname], pp_gain))
-                else:
-                    grouped_steps.append(step)
-
-            # Post-hoc: if the optimizer recommends +1 company but neither a
-            # 'company' nor 'company_with_skill' step made it into the list
-            # (happens when the player has no free SP and would need to reshuffle),
-            # show a note so the player is aware.
-            no_company_step = not any(
-                s[0] in ("company", "company_with_skill", "company_needs_skill") for s in grouped_steps
-            )
-            if (
-                best_build is not None
-                and best_build[4] > n_owned
-                and no_company_step
-            ):
-                _max_at_cur_skill = _SKILL_VALUES["companies"][comp_lvl]
-                _co_num_inj = n_owned + 1
-                _concrete_inj = _next_company_cost(n_owned)
-                _avg_b_inj = (
-                    sum(e[4] for e in engine_info) / len(engine_info)
-                    if engine_info else 0.0
-                )
-                _tgt_ae_inj = max(1, min(
-                    min((max(1, e[2]) for e in engine_info), default=4),
-                    _ENGINE_MAX_LEVEL,
-                ))
-                _t_steel_inj = sum(
-                    _AE_UPGRADE_STEEL.get(lvl, 0) for lvl in range(2, _tgt_ae_inj + 1)
-                )
-                _pp_gain_inj = max(1, round(_tgt_ae_inj * 24 * (1 + _avg_b_inj / 100)))
-                _next_comp_lvl = min(comp_lvl + 1, 10)
-                _inc_sp = _CUMUL_COST[_next_comp_lvl] - _CUMUL_COST[comp_lvl]
-                # Append as a note (not a ranked step) — player needs to reshuffle SP
-                grouped_steps.append((
-                    "company_needs_skill", _co_num_inj, _next_comp_lvl, _inc_sp,
-                    _concrete_inj, _tgt_ae_inj, _t_steel_inj, _pp_gain_inj,
-                ))
-
-            for step in grouped_steps:
-                if step[0] == "ae_group":
-                    _, from_l, to_l, steel, names, total_pp = step
-                    count = len(names)
-                    pp_str = f"+{total_pp} PP/dag"
-                    if count == 1:
-                        n = names[0][:16] if len(names[0]) > 16 else names[0]
-                        action_lines.append(
-                            f"{step_num}. ↑ **{n}** AE lvl {from_l} → {to_l}  ({steel} 🔩)  [{pp_str}]"
-                        )
-                    else:
-                        action_lines.append(
-                            f"{step_num}. ↑ **{count} bedrijven** AE lvl {from_l} → {to_l}"
-                            f"  ({count} × {steel} 🔩)  [{pp_str}]"
-                        )
-                    step_num += 1
-                elif step[0] == "company":
-                    _, co_num, concrete, target_ae, steel, pp_gain = step
-                    pp_str = f"+{pp_gain} PP/dag"
-                    cost_parts = [f"{concrete} 🧱"]
-                    if steel > 0:
-                        cost_parts.append(f"{steel} 🔩")
-                    cost_str = " + ".join(cost_parts)
-                    ae_note = f" + AE → lvl {target_ae}" if target_ae > 1 else ""
-                    action_lines.append(
-                        f"{step_num}. 🏭 Koop bedrijf **#{co_num}**{ae_note}  ({cost_str})  [{pp_str}]"
-                    )
-                    step_num += 1
-                elif step[0] == "company_with_skill":
-                    _, co_num, new_comp_lvl, sp_cost, concrete, target_ae, steel, pp_gain = step
-                    pp_str = f"+{pp_gain} PP/dag"
-                    cost_parts = [f"{concrete} 🧱"]
-                    if steel > 0:
-                        cost_parts.append(f"{steel} 🔩")
-                    cost_str = " + ".join(cost_parts)
-                    ae_note = f" + AE → lvl {target_ae}" if target_ae > 1 else ""
-                    action_lines.append(
-                        f"{step_num}. 🏭 Companies lvl {comp_lvl} → {new_comp_lvl} ({sp_cost} SP) + "
-                        f"Koop bedrijf **#{co_num}**{ae_note}  ({cost_str})  [{pp_str}]"
-                    )
-                    step_num += 1
-                elif step[0] == "company_needs_skill":
-                    _, co_num, need_comp_lvl, inc_sp, concrete, target_ae, t_steel, pp_gain = step
-                    cost_parts = [f"{concrete} 🧱"]
-                    if t_steel > 0:
-                        cost_parts.append(f"{t_steel} 🔩")
-                    cost_str = " + ".join(cost_parts)
-                    ae_note = f" + AE → lvl {target_ae}" if target_ae > 1 else ""
-                    pp_str = f"+{pp_gain} PP/dag"
-                    action_lines.append(
-                        f"{step_num}. 🏭 Koop bedrijf **#{co_num}**{ae_note}  ({cost_str})  [{pp_str}]"
-                        f"  _⚠️ vereist Companies {comp_lvl}→{need_comp_lvl} ({inc_sp} SP)_"
-                    )
-                    step_num += 1
-                elif step[0] == "sp_limited":
-                    sp_limited_note = (
-                        "\n_Je bedrijven skill staat geen extra bedrijf toe. "
-                        "Verhoog Companies skill voor meer bedrijven._"
-                    )
-                    break
-                elif step[0] == "maxed":
-                    action_lines.append(f"{step_num}. ✅ Alle bedrijven op maximale AE (lvl 7)!")
-                    break
-
-            advice_value = ae_table
-            if len(advice_value) > 1024:
-                # Table alone overflows — drop the closing separator
-                ae_lines.pop()
-                advice_value = "```\n" + "\n".join(ae_lines) + "\n```"
-
-            embed.add_field(
-                name="\U0001f3ed AE status per bedrijf",
-                value=advice_value[:1024],
-                inline=False,
-            )
-
-            if action_lines or sp_limited_note:
-                _FIELD_LIMIT = 1024
-                action_block = ""
-                for line in action_lines:
-                    candidate = action_block + line + "\n"
-                    if len(candidate) > _FIELD_LIMIT:
-                        action_block += "_…meer stappen beschikbaar, lijst afgekapt_"
-                        sp_limited_note = None
-                        break
-                    action_block = candidate
-                if sp_limited_note:
-                    note_candidate = action_block.rstrip("\n") + sp_limited_note
-                    action_block = note_candidate if len(note_candidate) <= _FIELD_LIMIT else action_block.rstrip("\n")
-                embed.add_field(
-                    name="\U0001f4cb Aanbevolen volgorde",
-                    value=action_block.rstrip("\n"),
-                    inline=False,
-                )
-
         # ── Optimal build ──────────────────────────────────────────────
         if best_build is not None:
-            b_ent, b_en, b_prod, b_comp_lvl, b_n_companies, b_daily = best_build
+            b_ent, b_en, b_prod, b_daily = best_build
             b_ent_v = _SKILL_VALUES["entrepreneurship"][b_ent]
-            b_en_v = _SKILL_VALUES["energy"][b_en]
+            b_en_v  = _SKILL_VALUES["energy"][b_en]
             b_prod_v = _SKILL_VALUES["production"][b_prod]
             b_ent_pp = _daily_works_float(b_ent_v) * b_prod_v * best_ent_prod_mult
-            b_en_pp = _daily_works_float(b_en_v) * b_prod_v
-            # Use the extended list so virtual (new) companies contribute to b_ae.
-            b_ae = sum(company_ae_extended[:b_n_companies])
-            sp_used = (
-                _CUMUL_COST[b_ent] + _CUMUL_COST[b_en]
-                + _CUMUL_COST[b_prod] + _CUMUL_COST[b_comp_lvl]
-            )
+            b_en_pp  = _daily_works_float(b_en_v) * b_prod_v
             improvement = b_daily - current_total
             improvement_str = (
-                f"+{improvement:.0f} PP/day vs huidig" if improvement > 0 else "al optimaal!"
+                f"+{improvement:.0f} PP/dag vs huidig" if improvement > 0 else "al optimaal!"
             )
-            n_new = b_n_companies - n_owned
-            if n_new > 0:
-                b_bedr_label = f"Bedrijven ({n_owned}+{n_new} nieuw)"
-            elif b_n_companies < n_owned:
-                b_bedr_label = f"Bedrijven ({b_n_companies}/{n_owned})"
-            else:
-                b_bedr_label = f"Bedrijven ({b_n_companies})"
             opt_rows: list[tuple[str, str, str]] = [
                 (f"Entrepreneurship ({b_ent_v})", str(b_ent), f"{b_ent_pp:.0f}"),
-                (f"Energy ({b_en_v})",            str(b_en), f"{b_en_pp:.0f}"),
+                (f"Energy ({b_en_v})",            str(b_en),  f"{b_en_pp:.0f}"),
                 (f"Production ({b_prod_v})",      str(b_prod), "\u2014"),
-                (b_bedr_label,                   str(b_comp_lvl), f"{b_ae:.0f}"),
+                (f"Bedrijven ({n_active})",       str(comp_lvl), f"{engine_daily_total:.0f}"),
+                ("Medewerkers",                   str(workers_lvl), "\u2014"),
             ]
             embed.add_field(
-                name=f"\u2699\ufe0f Optimal build  [{improvement_str}]",
-                value=_skill_table(opt_rows, b_daily, f"{sp_used}/{eco_budget} SP")[:1024],
+                name=f"\u2699\ufe0f Optimale verdeling  [{improvement_str}]",
+                value=_skill_table(opt_rows, b_daily)[:1024],
                 inline=False,
             )
 
         embed.set_footer(
-            text=(
-                "SP = skill points  |  PP/dag = productie punten per dag  |"
-                "  🔩 = staal  🧱 = beton"
-            )
+            text="SP = skill points  |  PP/dag = productie punten per dag",
         )
 
         await interaction.followup.send(embed=embed)

@@ -77,6 +77,25 @@ class CitizensMixin:
         )
         await self._conn.commit()
 
+    async def clear_citizen_mus_for_known_mu_ids(
+        self, country_id: str, mu_ids: list[str]
+    ) -> None:
+        """Clear MU info only for citizens in *country_id* whose current mu_id is in *mu_ids*.
+
+        This is a targeted alternative to clear_citizen_mus_for_country: it leaves
+        citizens in foreign MUs untouched so their MU assignment (set by the citizen
+        refresh from their profile) is preserved across poller runs.
+        """
+        if not mu_ids:
+            return
+        placeholders = ",".join("?" * len(mu_ids))
+        await self._conn.execute(
+            f"UPDATE citizen_levels SET mu_id = NULL, mu_name = NULL "
+            f"WHERE country_id = ? AND mu_id IN ({placeholders})",
+            (country_id, *mu_ids),
+        )
+        await self._conn.commit()
+
     async def flush_citizen_levels(self) -> None:
         """Commit any pending changes to the citizen_levels table."""
         await self._conn.commit()
