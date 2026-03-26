@@ -24,6 +24,24 @@ def mus_json_path(testing: bool = False) -> str:
     return "templates/mus.testing.json" if testing else "templates/mus.json"
 
 
+_MAX_BUTTONS_PER_MESSAGE = 25
+
+
+def _chunk_buttons_for_view(buttons: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Split buttons into Discord-safe pages and recompute rows per page."""
+    chunks: list[list[dict[str, Any]]] = []
+    for start in range(0, len(buttons), _MAX_BUTTONS_PER_MESSAGE):
+        page = buttons[start : start + _MAX_BUTTONS_PER_MESSAGE]
+        normalized_page: list[dict[str, Any]] = []
+        for idx, btn in enumerate(page):
+            item = dict(btn)
+            item["row"] = idx // 5
+            normalized_page.append(item)
+        if normalized_page:
+            chunks.append(normalized_page)
+    return chunks
+
+
 def _normalize_mu_type(value: str | None) -> str:
     raw = (value or "").strip().lower()
     if raw in {"elite", "elite mu"}:
@@ -98,12 +116,11 @@ class MuRoles(commands.Cog, name="mu_roles"):
 
         if self.template.get("embeds"):
             for embed_data in self.template["embeds"]:
-                if embed_data.get("buttons"):
-                    self.bot.add_view(
-                        RoleToggleView(embed_data["buttons"], exclusive=True)
-                    )
+                for page in _chunk_buttons_for_view(embed_data.get("buttons", [])):
+                    self.bot.add_view(RoleToggleView(page, exclusive=True))
         if self.template.get("buttons"):
-            self.bot.add_view(RoleToggleView(self.template["buttons"], exclusive=True))
+            for page in _chunk_buttons_for_view(self.template["buttons"]):
+                self.bot.add_view(RoleToggleView(page, exclusive=True))
 
     @app_commands.command(name="muroles", description="Post de MU-rolknoppen.")
     @has_privileged_role()
