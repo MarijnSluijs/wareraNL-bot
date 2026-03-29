@@ -321,9 +321,13 @@ class Geluk(commands.Cog, name="geluk"):
         self,
         user_id: str,
         item_rarities: dict[str, str],
+        max_cases: Optional[int] = None,
     ) -> Optional[dict[str, int]]:
         """
-        Page through all openCase transactions for a user.
+        Page through openCase transactions for a user.
+
+        If *max_cases* is given, stops after that many valid (non-elite)
+        openings have been collected (i.e. the X most recent cases).
 
         Returns a dict of {rarity: count}, or None if the endpoint is
         inaccessible (auth error).
@@ -333,6 +337,7 @@ class Geluk(commands.Cog, name="geluk"):
         cursor: Optional[str] = None
         page = 0
         total_fetched = 0
+        limit_reached = False
 
         while True:
             payload: dict = {
@@ -391,11 +396,14 @@ class Geluk(commands.Cog, name="geluk"):
                 ) or ""
                 rarity = item_rarities.get(item_code, "common")
                 counts[rarity] = counts.get(rarity, 0) + 1
+                if max_cases is not None and sum(counts.values()) >= max_cases:
+                    limit_reached = True
+                    break
 
             total_fetched += len(items)
             page += 1
 
-            if not cursor or not items:
+            if not cursor or not items or limit_reached:
                 break
 
             # await asyncio.sleep(0.3)
@@ -419,6 +427,7 @@ class Geluk(commands.Cog, name="geluk"):
     @app_commands.describe(
         speler="De gebruikersnaam van de speler om te controleren",
         gebruiker_id="Optioneel: WarEra user ID van de speler",
+        aantal_cases="Optioneel: analyseer alleen de X meest recente case openings",
     )
     @app_commands.autocomplete(speler=citizen_autocomplete)
     async def geluk(
@@ -426,6 +435,7 @@ class Geluk(commands.Cog, name="geluk"):
         interaction: discord.Interaction,
         speler: Optional[str] = None,
         gebruiker_id: Optional[str] = None,
+        aantal_cases: Optional[int] = None,
     ) -> None:
         await interaction.response.defer(thinking=True)
 
@@ -465,7 +475,7 @@ class Geluk(commands.Cog, name="geluk"):
 
         # 4. Try to fetch actual transaction history
         counts = await self._fetch_all_case_transactions(
-            resolved_user_id, item_rarities
+            resolved_user_id, item_rarities, max_cases=aantal_cases
         )
         can_show_actual = counts is not None
 
@@ -526,7 +536,11 @@ class Geluk(commands.Cog, name="geluk"):
             if total_counted == 0:
                 embed.description = "Deze speler heeft nog geen cases geopend (of er waren geen geregistreerde drops)."
             else:
-                analysed_note = f"_{total_counted:,} case openings gevonden_"
+                analysed_note = (
+                    f"_{total_counted:,} meest recente case openings_"
+                    if aantal_cases is not None
+                    else f"_{total_counted:,} case openings gevonden_"
+                )
                 table = _build_luck_table(total_counted, counts)
                 embed.add_field(
                     name="Geluksanalyse",
@@ -541,7 +555,7 @@ class Geluk(commands.Cog, name="geluk"):
         # the ranking even if daily_luck_refresh hasn't run yet.
         _nl_cid = self.config.get("nl_country_id", "")
         _player_country = (profile.get("country") or "") if profile else ""
-        if can_show_actual and counts and _nl_cid and _player_country == _nl_cid:
+        if can_show_actual and counts and _nl_cid and _player_country == _nl_cid and aantal_cases is None:
             _tc = sum(counts.values())
             if _tc >= 20:
                 try:
@@ -614,7 +628,7 @@ class Geluk(commands.Cog, name="geluk"):
                         sign = "+" if pct >= 0 else ""
                         ind = _luck_indicator_overall(pct)
                         marker = " ◄" if highlight else ""
-                        return f"#{rn:<4} {nm:<12} {sign}{pct:>6.1f}%  {ind}  {op:>4}{marker}"
+                        return f"#{rn:<4} {nm:<12} {sign}{pct:>6.1f}%  {ind}  {op:>6,}{marker}"
 
                     top5 = list(range(min(5, rank_total)))
                     bot5 = list(range(max(0, rank_total - 5), rank_total))
@@ -631,8 +645,8 @@ class Geluk(commands.Cog, name="geluk"):
                     ordered = sorted(set(top5 + bot5 + ctx_range))
 
                     rank_lines: list[str] = [
-                        f"{'rang':<5} {'naam':<12} {'score':>8}   {'geluk':<6} cases",
-                        "─" * 40,
+                        f"{'rang':<5} {'naam':<12} {'score':>8}   {'geluk':<6} {'cases':>6}",
+                        "─" * 43,
                     ]
                     prev = -1
                     for idx in ordered:
@@ -648,6 +662,7 @@ class Geluk(commands.Cog, name="geluk"):
                     updated_at = (ranking[0].get("updated_at") or "")[:16].replace(
                         "T", " "
                     )
+                    _all_cases_note = "  _(ranking: alle cases)_" if aantal_cases is not None else ""
                     if rank_target_idx is not None:
                         rp = rank_target_idx + 1
                         rpct = ranking[rank_target_idx]["luck_score"]
@@ -656,9 +671,10 @@ class Geluk(commands.Cog, name="geluk"):
                             f"🏆 Gelukranking NL — "
                             f"rang **#{rp}/{rank_total}** — "
                             f"**{rsign}{rpct:.1f}%** {_luck_indicator_overall(rpct)}"
+                            f"{_all_cases_note}"
                         )
                     else:
-                        rank_title = f"🏆 Gelukranking NL — _{rank_total} spelers, niet in ranking (min. 20 cases)_"
+                        rank_title = f"🏆 Gelukranking NL — _{rank_total} spelers, niet in ranking (min. 20 cases)_{_all_cases_note}"
 
                     embed.add_field(name=rank_title, value=rank_block, inline=False)
                     if updated_at:
