@@ -204,10 +204,12 @@ class GlobalLuck(commands.Cog, name="globalluck"):
     async def _fetch_live_luck(
         self,
         user_id: str,
+        max_cases: Optional[int] = None,
     ) -> tuple[dict[str, int], int] | None:
         """Fetch and return (rarity_counts, total_opens) live from the API.
 
-        Mirrors the logic in global_luck.py._fetch_luck_data.
+        If *max_cases* is given, stops after that many valid (non-elite)
+        openings have been collected (the X most recent cases).
         Returns None if the client is unavailable.
         """
         client = await self._get_client()
@@ -216,6 +218,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         item_rarities = await self._get_item_rarities()
         counts: dict[str, int] = {r: 0 for r in RARITY_ORDER}
         cursor = None
+        limit_reached = False
         while True:
             payload: dict = {
                 "userId": user_id,
@@ -256,7 +259,10 @@ class GlobalLuck(commands.Cog, name="globalluck"):
                 ) or ""
                 rarity = item_rarities.get(item_code, "common")
                 counts[rarity] = counts.get(rarity, 0) + 1
-            if not cursor or not items_list:
+                if max_cases is not None and sum(counts.values()) >= max_cases:
+                    limit_reached = True
+                    break
+            if not cursor or not items_list or limit_reached:
                 break
         return counts, sum(counts.values())
 
@@ -270,12 +276,14 @@ class GlobalLuck(commands.Cog, name="globalluck"):
     )
     @app_commands.describe(
         speler="Optioneel: zoek op spelernaam voor persoonlijke analyse + wereldwijde rang",
+        aantal_cases="Optioneel: analyseer alleen de X meest recente case openings (alleen bij speler-modus)",
     )
     @app_commands.autocomplete(speler=citizen_autocomplete)
     async def globalluck(
         self,
         interaction: discord.Interaction,
         speler: Optional[str] = None,
+        aantal_cases: Optional[int] = None,
     ) -> None:
         await interaction.response.defer(thinking=True)
 
@@ -304,7 +312,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
             return country_names.get(cid, cid[:8] + "…" if len(cid) > 8 else cid)
 
         if speler:
-            await self._show_player(interaction, db, speler, total_ranked, _cname)
+            await self._show_player(interaction, db, speler, total_ranked, _cname, max_cases=aantal_cases)
         else:
             await self._show_leaderboard(interaction, db, total_ranked, _cname)
 
@@ -392,6 +400,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         speler: str,
         total_ranked: int,
         _cname,
+        max_cases: Optional[int] = None,
     ) -> None:
         # Search by name (DB LIKE search, then fuzzy-match)
         candidates = await db.search_global_luck_by_name(speler)
@@ -442,12 +451,16 @@ class GlobalLuck(commands.Cog, name="globalluck"):
 
         # Fetch live case data (same query as /geluk) so the analysis is always
         # up-to-date, regardless of when the last global sweep ran.
-        live = await self._fetch_live_luck(user_id)
+        live = await self._fetch_live_luck(user_id, max_cases=max_cases)
 
         if live is not None:
             counts, opens = live
             luck_score = _calc_luck_score(counts, opens)
-            analysis_note = "🔴 Live"
+            analysis_note = (
+                f"🔴 Live ({opens:,} meest recente)"
+                if max_cases is not None
+                else "🔴 Live"
+            )
         else:
             # Fall back to cached data
             counts_raw = target.get("rarity_json")
@@ -470,7 +483,10 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         )
         embed.add_field(
             name="Wereldwijde rang",
-            value=f"**{rank_str}** / {total_ranked:,}",
+            value=(
+                f"**{rank_str}** / {total_ranked:,}"
+                + ("\n_gebaseerd op alle cases_" if max_cases is not None else "")
+            ),
             inline=True,
         )
         embed.add_field(
@@ -480,7 +496,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         )
         embed.add_field(
             name="Cases geopend",
-            value=f"{opens:,}",
+            value=f"{opens:,}" + (f" _(meest recente {max_cases:,})_" if max_cases is not None and live is not None else ""),
             inline=True,
         )
 

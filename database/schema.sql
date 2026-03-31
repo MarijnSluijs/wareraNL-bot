@@ -70,6 +70,15 @@ CREATE TABLE IF NOT EXISTS deposit_top (
     updated_at          TEXT
 );
 
+-- ── MU Registry ──────────────────────────────────────────────────────────────
+
+-- known_mus: registry of all MUs in the game, populated by mu.getManyPaginated
+CREATE TABLE IF NOT EXISTS known_mus (
+    mu_id      TEXT PRIMARY KEY,
+    mu_name    TEXT NOT NULL,
+    updated_at TEXT
+);
+
 -- ── Citizens ──────────────────────────────────────────────────────────────────
 
 -- citizen_levels: hourly snapshot of level, skill mode, and MU per citizen

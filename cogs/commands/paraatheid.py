@@ -3,7 +3,7 @@ This module defines the ParaatheadCog, which provides the /paraatheid command to
 - /paraatheid land:NL      — overzicht per niveaugroep: %oorlogsmodus + cooldown voor eco-spelers.
 - /paraatheid speler:naam  — of speler al in oorlogsmodus is, of wanneer die kan resetten.
 - /paraatheid mu:naam      — %oorlog + reset-cooldown voor eco-spelers in de MU.
-- /paraatheid alle_mus:Ja  — overzicht van alle NL MUs gegroepeerd op type.
+- /paraatheid nl_mus:Ja    — overzicht van alle NL MUs gegroepeerd op type.
 """
 
 from __future__ import annotations
@@ -41,14 +41,16 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
     async def _paraatheid_mu_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        """Autocomplete MU names from the citizen_levels cache."""
+        """Autocomplete MU names from the known_mus registry (all game MUs)."""
         if not self._db:
             return []
         try:
-            nl_country_id = self.config.get("nl_country_id")
-            names = await self._db.get_distinct_mu_names(nl_country_id)
+            names = await self._db.get_known_mu_names(current)
         except Exception:
-            return []
+            try:
+                names = await self._db.get_distinct_mu_names()
+            except Exception:
+                return []
         return [
             app_commands.Choice(name=n, value=n)
             for n in names
@@ -66,43 +68,43 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
     @app_commands.describe(
         land="Land — overzicht per niveaugroep: %oorlogsmodus + cooldown voor eco-spelers.",
         speler="Zoek een speler op naam of ID.",
-        mu="MU-naam — % oorlogsmodus + cooldown voor eco-spelers in de MU.",
-        alle_mus="Toon paraatheid voor alle NL MUs in één tabel (geen verdere invoer nodig).",
+        mu="MU-naam — % oorlogsmodus + cooldown voor eco-spelers in de MU (alle MUs).",
+        nl_mus="Toon paraatheid voor alle NL MUs in één tabel (geen verdere invoer nodig).",
     )
     @app_commands.autocomplete(
         land=country_autocomplete,
         mu=_paraatheid_mu_autocomplete,
         speler=citizen_autocomplete,
     )
-    @app_commands.choices(alle_mus=[app_commands.Choice(name="Ja", value="ja")])
+    @app_commands.choices(nl_mus=[app_commands.Choice(name="Ja", value="ja")])
     async def paraatheid(  # noqa: C901
         self,
         ctx: Context,
         land: str | None = None,
         speler: str | None = None,
         mu: str | None = None,
-        alle_mus: str | None = None,
+        nl_mus: str | None = None,
     ):
         """/paraatheid — oorlogsparaatheid in vier modi:
 
         /paraatheid land:NL      — tabel per niveaugroep: %oorlog + cooldown voor eco-spelers
         /paraatheid speler:naam  — of speler al in oorlogsmodus is, of wanneer die kan resetten
-        /paraatheid mu:naam      — %oorlog + reset-cooldown voor eco-spelers in de MU
-        /paraatheid alle_mus:Ja  — overzicht van alle NL MUs gegroepeerd op type
+        /paraatheid mu:naam      — %oorlog + reset-cooldown voor eco-spelers in de MU (alle MUs)
+        /paraatheid nl_mus:Ja    — overzicht van alle NL MUs gegroepeerd op type
         """
         if not self._db:
             await ctx.send("Database niet geïnitialiseerd.")
             return
 
-        if speler is None and land is None and mu is None and alle_mus is None:
+        if speler is None and land is None and mu is None and nl_mus is None:
             speler = ctx.author.display_name
 
         provided = sum(x is not None for x in (land, speler, mu)) + int(
-            alle_mus is not None
+            nl_mus is not None
         )
         if provided > 1:
             await ctx.send(
-                "Geef precies één optie op: **land**, **speler**, **mu** of **alle_mus**."
+                "Geef precies één optie op: **land**, **speler**, **mu** of **nl_mus**."
             )
             return
 
@@ -164,67 +166,69 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
 
         # ══ Mode 2: MU ═══════════════════════════════════════════════════
         if mu is not None:
-            nl_country_id = self.config.get("nl_country_id")
             try:
                 mu_name, players = await self._db.get_mu_readiness_players(
-                    mu, nl_country_id
+                    mu, country_id=None
                 )
             except Exception as exc:
                 await ctx.send(f"Databasefout: {exc}")
                 return
+
+            # Fallback: live API fetch for MUs not in citizen_levels (e.g. foreign MUs)
+            if mu_name is None or not players:
+                citizen_cache = getattr(self.bot, "_ext_citizen_cache", None)
+                if citizen_cache:
+                    try:
+                        mu_name, players = await citizen_cache.fetch_mu_players_live(mu)
+                    except Exception as exc:
+                        logger.exception("paraatheid mu: live fetch failed")
+                        await ctx.send(f"Databasefout: {exc}")
+                        return
+
             if mu_name is None or not players:
                 await ctx.send(f"Geen MU gevonden die overeenkomt met `{mu}`.")
                 return
 
             total_mu = len(players)
             war_count = sum(1 for p in players if p["skill_mode"] == "war")
-            eco_players = [p for p in players if p["skill_mode"] != "war"]
-            can_reset_count = sum(1 for p in eco_players if p["can_reset"])
-            waiting_players = [
-                p
-                for p in eco_players
-                if not p["can_reset"] and p["days_ago"] is not None
-            ]
-            if waiting_players:
-                avg_rem = max(
-                    0.0,
-                    7
-                    - sum(p["days_ago"] for p in waiting_players)
-                    / len(waiting_players),
-                )
-                cd_avg_str = f"gem. {avg_rem:.1f}d cooldown resterend"
-            else:
-                cd_avg_str = None
-            war_pct = war_count / total_mu * 100 if total_mu else 0.0
-
-            desc_lines = [f"⚔️ Paraat: **{war_count}** / {total_mu} ({war_pct:.0f}%)"]
-            if can_reset_count:
-                desc_lines.append(f"✅ Kan resetten: **{can_reset_count}**")
-            if cd_avg_str:
-                desc_lines.append(f"⏱️ {cd_avg_str}")
-
-            summary_embed = discord.Embed(
-                title=f"Paraatheid — {mu_name}",
-                description="\n".join(desc_lines),
-                colour=colour,
+            can_reset_count = sum(
+                1 for p in players if p["skill_mode"] != "war" and p["can_reset"]
             )
-            await ctx.send(embed=summary_embed)
+            war_pct = war_count / total_mu * 100 if total_mu else 0.0
 
             embed_limit_MU = 3900
             name_w = 16
             lvl_w = 2
+            num_w = len(str(total_mu))
+
+            summary_line = (
+                f"⚔️ **{war_count}** paraat ({war_pct:.0f}%)  •  "
+                f"✅ **{can_reset_count}** kunnen resetten"
+            )
+
+            is_first_chunk = True
 
             async def _flush_mu(lines: list[str]) -> None:
+                nonlocal is_first_chunk
                 block = "```\n" + "\n".join(lines) + "\n```"
-                embed = discord.Embed(description=block, colour=colour)
+                if is_first_chunk:
+                    embed = discord.Embed(
+                        title=f"Paraatheid — {mu_name}",
+                        description=summary_line + "\n" + block,
+                        colour=colour,
+                    )
+                    is_first_chunk = False
+                else:
+                    embed = discord.Embed(description=block, colour=colour)
                 await ctx.send(embed=embed)
 
-            header = f"  {'naam':<{name_w}}  {'lv':>{lvl_w}}  cooldown"
-            sep = "─" * len(header)
+            header = f"{'#':>{num_w}}  {'naam':<{name_w}}  {'lv':>{lvl_w}}  cooldown"
+            sep = "─" * (num_w + 2 + name_w + 2 + lvl_w + 2 + 16)
             pending: list[str] = [header, sep]
-            for p in players:
+            for i, p in enumerate(players, start=1):
                 mode = p["skill_mode"]
                 mode_icon = "🌾" if mode == "eco" else ("⚔️" if mode == "war" else "❓")
+                num = str(i).rjust(num_w)
                 name = str(p["citizen_name"] or "?")[:name_w].ljust(name_w)
                 lvl = str(p["level"] or "?").rjust(lvl_w)
                 if mode == "war":
@@ -232,10 +236,10 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                 elif p["can_reset"]:
                     cd = "kan nu resetten"
                 elif p["days_ago"] is not None:
-                    cd = f"⏳ {max(0.0, 7 - p['days_ago']):.1f}d"
+                    cd = f"nog {max(0.0, 7 - p['days_ago']):.1f}d"
                 else:
                     cd = "kan nu resetten"
-                line = f"{mode_icon} {name}  {lvl}  {cd}"
+                line = f"{mode_icon} {num}  {name}  {lvl}  {cd}"
                 candidate = "\n".join(pending + [line])
                 if len(candidate) > embed_limit_MU and len(pending) > 2:
                     await _flush_mu(pending)
@@ -246,8 +250,8 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                 await _flush_mu(pending)
             return
 
-        # ══ Mode 3: alle MUs ══════════════════════════════════════════════
-        if alle_mus:
+        # ══ Mode 3: NL MUs ════════════════════════════════════════════════
+        if nl_mus:
             nl_country_id = self.config.get("nl_country_id")
             testing = getattr(self.bot, "testing", False)
             mus_json = "templates/mus.testing.json" if testing else "templates/mus.json"

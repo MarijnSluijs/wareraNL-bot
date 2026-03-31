@@ -12,6 +12,7 @@ Mixin                Tables
 :mod:`.events`       ``seen_articles``, ``seen_events``, ``war_events``
 :mod:`.luck`         ``citizen_luck``
 :mod:`.resistance`   ``resistance_state``
+:mod:`.mus_registry` ``known_mus``
 ===================  ========================================
 
 Usage::
@@ -28,6 +29,7 @@ from .events import EventsMixin
 from .giveaways_db import GiveawaysMixin
 from .identities import IdentityLinksMixin
 from .luck import LuckMixin
+from .mus_registry import MusRegistryMixin
 from .production import ProductionMixin
 from .resistance import ResistanceMixin
 from .state import StateMixin
@@ -42,6 +44,7 @@ class Database(
     GiveawaysMixin,
     LuckMixin,
     ResistanceMixin,
+    MusRegistryMixin,
     DatabaseBase,
 ):
     """Async SQLite database for the WarEra Discord bot.

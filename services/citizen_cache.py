@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from services.api_client import APIClient
@@ -97,14 +97,69 @@ class CitizenCache:
             )
         return recorded
 
+    async def fetch_mu_players_live(
+        self, mu_query: str
+    ) -> tuple[str | None, list[dict]]:
+        """Fetch MU members live from the API for any MU present in known_mus.
+
+        Used as a fallback when the MU has no entries in citizen_levels (e.g.
+        foreign MUs). Returns (mu_name, players) in the same format as
+        get_mu_readiness_players.
+        """
+        mu_id, mu_name = await self._db.get_known_mu_by_name(mu_query)
+        if not mu_id:
+            return None, []
+
+        member_ids, live_name = await self._fetch_mu_members_and_name(mu_id)
+        effective_name = live_name or mu_name
+        if not member_ids:
+            return effective_name, []
+
+        inputs = [{"userId": uid} for uid in member_ids]
+        results = await self._client.batch_get(
+            "/user.getUserLite", inputs, batch_size=100
+        )
+
+        now = datetime.now(timezone.utc)
+        players: list[dict] = []
+        for obj in results:
+            if not isinstance(obj, dict):
+                continue
+            level = self._extract_level(obj)
+            mode = self._extract_skill_mode(obj) or "eco"
+            reset_at = self._extract_last_skills_reset_at(obj)
+            name = self._extract_name(obj)
+            days_ago: float | None = None
+            can_reset = True
+            if reset_at and mode != "war":
+                try:
+                    ts = datetime.fromisoformat(reset_at.replace("Z", "+00:00"))
+                    days_ago = (now - ts).total_seconds() / 86400
+                    can_reset = days_ago >= 7
+                except Exception:
+                    pass
+            players.append(
+                {
+                    "citizen_name": name or "?",
+                    "level": level,
+                    "skill_mode": mode,
+                    "days_ago": days_ago,
+                    "can_reset": can_reset,
+                }
+            )
+
+        players.sort(key=lambda p: -(p["level"] or 0))
+        return effective_name, players
+
     async def refresh_mu_memberships(self, country_id: str, mus_json_path: str) -> int:
         """Fetch MU member lists from the API and write mu_id/mu_name to citizen_levels.
 
         Reads MU IDs from *mus_json_path* (the templates/mus.json file), paginates
         /mu.getById for each MU to get the member user IDs, then bulk-updates the DB.
 
-        Only citizens already present in citizen_levels for *country_id* are updated —
-        foreign players in an NL MU are silently skipped.
+        Only citizens already present in citizen_levels are updated (via user_id match).
+        Uses a targeted clear so citizens assigned to MUs *outside* mus.json keep
+        their MU assignment (set from their profile during refresh_country).
 
         Returns the number of citizen rows updated.
         """
@@ -135,7 +190,7 @@ class CitizenCache:
             if not mu_id:
                 continue
 
-            mu_name = str(embed.get("title") or f"MU {mu_id[:8]}")
+            mu_name = str(embed.get("name") or embed.get("title") or f"MU {mu_id[:8]}")
             mu_entries.append((mu_id, mu_name))
 
         if not mu_entries:
@@ -144,8 +199,12 @@ class CitizenCache:
             )
             return 0
 
-        # Reset all MU assignments for this country first
-        await self._db.clear_citizen_mus_for_country(country_id)
+        # Clear only citizens currently assigned to one of the known MU IDs.
+        # This preserves assignments for citizens in foreign MUs (set from their
+        # profile by refresh_country) while allowing stale NL MU entries to be
+        # cleaned up correctly.
+        known_mu_ids = [mu_id for mu_id, _ in mu_entries]
+        await self._db.clear_citizen_mus_for_known_mu_ids(country_id, known_mu_ids)
 
         updated = 0
         for mu_id, mu_name in mu_entries:
