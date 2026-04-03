@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
+import aiosqlite
+import discord
 from discord.ext import tasks
 
 from cogs.tasks._base import TaskCogBase
@@ -15,6 +19,7 @@ logger = logging.getLogger("discord_bot")
 
 # Full all-countries sweep at most once every N hours.
 _ALL_COUNTRIES_INTERVAL_H = 6
+_MU_ROLE_SYNC_INTERVAL_H = 24
 
 
 class CitizenTasks(TaskCogBase, name="citizen_tasks"):
@@ -44,6 +49,7 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
 
         # ── All-countries sweep (guarded by 6-hour cooldown) ──────────
         now_utc = datetime.now(timezone.utc)
+        run_full_sweep = True
         try:
             last_run_str = await self._db.get_poll_state("citizen_refresh_last_run")
             if last_run_str:
@@ -56,11 +62,26 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
                         elapsed_h,
                         _ALL_COUNTRIES_INTERVAL_H,
                     )
-                    return
+                    run_full_sweep = False
         except Exception:
             logger.exception("citizen_refresh: failed to read last-run state")
 
-        await self._do_all_countries_refresh(now_utc)
+        if run_full_sweep:
+            await self._do_all_countries_refresh(now_utc)
+
+        try:
+            await self._maybe_sync_mu_roles_daily(now_utc)
+        except (
+            aiosqlite.Error,
+            OSError,
+            ValueError,
+            TypeError,
+            json.JSONDecodeError,
+            discord.HTTPException,
+            discord.Forbidden,
+            discord.NotFound,
+        ):
+            logger.exception("citizen_refresh: daily MU role sync failed")
 
     @citizen_refresh.before_loop
     async def before_citizen_refresh(self):
@@ -127,6 +148,152 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
             except Exception:
                 logger.exception("citizen_refresh: nickname sync error for %s", name)
         logger.info("citizen_refresh: full sweep complete (%d countries)", total)
+
+    def _mus_template_path(self) -> Path:
+        testing = bool(getattr(self.bot, "testing", False))
+        return Path("templates/mus.testing.json" if testing else "templates/mus.json")
+
+    @staticmethod
+    def _mu_role_map_from_template(data: dict) -> dict[str, int]:
+        mapping: dict[str, int] = {}
+        for entry in data.get("embeds", []):
+            if not isinstance(entry, dict):
+                continue
+            mu_id = str(entry.get("id") or "").strip()
+            if not mu_id:
+                continue
+            try:
+                role_id = int(entry.get("role_id") or 0)
+            except (TypeError, ValueError):
+                role_id = 0
+            if role_id > 0:
+                mapping[mu_id] = role_id
+        return mapping
+
+    async def _maybe_sync_mu_roles_daily(self, now_utc: datetime) -> None:
+        """Run MU role sync at most once per day, after citizen refresh."""
+        if not self._db:
+            return
+
+        try:
+            last_run_str = await self._db.get_poll_state("mu_role_sync_last_run")
+            if last_run_str:
+                elapsed_h = (
+                    now_utc - datetime.fromisoformat(last_run_str)
+                ).total_seconds() / 3600
+                if elapsed_h < _MU_ROLE_SYNC_INTERVAL_H:
+                    logger.info(
+                        "mu_role_sync: skipping daily run — last run %.1fh ago (< %dh)",
+                        elapsed_h,
+                        _MU_ROLE_SYNC_INTERVAL_H,
+                    )
+                    return
+        except (aiosqlite.Error, ValueError, TypeError):
+            logger.exception("mu_role_sync: failed to read last-run state")
+
+        stats = await self._sync_mu_roles_for_all_guilds()
+
+        try:
+            await self._db.set_poll_state("mu_role_sync_last_run", now_utc.isoformat())
+        except aiosqlite.Error:
+            logger.exception("mu_role_sync: failed to save last-run state")
+
+        logger.info(
+            "mu_role_sync: done (guilds=%d citizens_with_mu=%d mapped=%d assigned=%d had=%d role_missing=%d member_missing=%d errors=%d)",
+            stats["guilds"],
+            stats["citizens_with_mu"],
+            stats["mapped_discord_users"],
+            stats["assigned"],
+            stats["already_had_role"],
+            stats["roles_missing_in_guild"],
+            stats["member_not_found"],
+            stats["errors"],
+        )
+
+    async def _sync_mu_roles_for_all_guilds(self) -> dict[str, int]:
+        """Assign MU roles for mapped Discord users across all guilds."""
+        stats = {
+            "guilds": 0,
+            "citizens_with_mu": 0,
+            "mapped_discord_users": 0,
+            "assigned": 0,
+            "already_had_role": 0,
+            "roles_missing_in_guild": 0,
+            "member_not_found": 0,
+            "errors": 0,
+        }
+
+        mus_path = self._mus_template_path()
+        template_raw = json.loads(mus_path.read_text(encoding="utf-8"))
+        mu_to_role_id = self._mu_role_map_from_template(template_raw)
+        if not mu_to_role_id:
+            return stats
+
+        citizen_mus = await self._db.get_citizen_mus()
+        citizens_with_known_mu = [
+            (in_game_id, mu_id)
+            for in_game_id, mu_id in citizen_mus
+            if mu_id and mu_id in mu_to_role_id
+        ]
+        stats["citizens_with_mu"] = len(citizens_with_known_mu)
+        if not citizens_with_known_mu:
+            return stats
+
+        in_game_ids = list({in_game_id for in_game_id, _ in citizens_with_known_mu})
+
+        for guild in self.bot.guilds:
+            guild_id = str(guild.id)
+            stats["guilds"] += 1
+
+            in_game_to_discord = await self._db.get_discord_ids_by_ingame_user_ids(
+                guild_id=guild_id,
+                in_game_user_ids=in_game_ids,
+            )
+            stats["mapped_discord_users"] += len(in_game_to_discord)
+            if not in_game_to_discord:
+                continue
+
+            seen_assignments: set[tuple[int, int]] = set()
+            for in_game_id, mu_id in citizens_with_known_mu:
+                discord_id = in_game_to_discord.get(in_game_id)
+                if not discord_id:
+                    continue
+
+                role_id = mu_to_role_id.get(str(mu_id))
+                if not role_id:
+                    continue
+                role = guild.get_role(role_id)
+                if role is None:
+                    stats["roles_missing_in_guild"] += 1
+                    continue
+
+                if not discord_id.isdigit():
+                    stats["member_not_found"] += 1
+                    continue
+                member = guild.get_member(int(discord_id))
+                if member is None or member.bot:
+                    stats["member_not_found"] += 1
+                    continue
+
+                if role in member.roles:
+                    stats["already_had_role"] += 1
+                    continue
+
+                assignment_key = (member.id, role.id)
+                if assignment_key in seen_assignments:
+                    continue
+                seen_assignments.add(assignment_key)
+
+                try:
+                    await member.add_roles(
+                        role,
+                        reason="Daily MU role sync from citizen MU membership",
+                    )
+                    stats["assigned"] += 1
+                except discord.HTTPException:
+                    stats["errors"] += 1
+
+        return stats
 
     async def _sync_discord_nicknames_for_country(
         self,

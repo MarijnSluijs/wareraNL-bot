@@ -126,6 +126,35 @@ class IdentityLinksMixin:
                 )
         return results
 
+    async def get_discord_ids_by_ingame_user_ids(
+        self, guild_id: str, in_game_user_ids: list[str]
+    ) -> dict[str, str]:
+        """Return {in_game_user_id: discord_user_id} for IDs in one guild.
+
+        If multiple Discord IDs exist for one in-game ID, the most recently
+        updated mapping wins.
+        """
+        if not in_game_user_ids:
+            return {}
+
+        placeholders = ",".join("?" for _ in in_game_user_ids)
+        sql = (
+            "SELECT in_game_user_id, discord_user_id "
+            "FROM identity_links "
+            "WHERE guild_id = ? AND in_game_user_id IN ("
+            f"{placeholders}"
+            ") ORDER BY updated_at DESC"
+        )
+        params: tuple[str, ...] = (guild_id, *in_game_user_ids)
+
+        results: dict[str, str] = {}
+        async with self._conn.execute(sql, params) as cur:
+            async for row in cur:
+                in_game_id = str(row[0])
+                if in_game_id not in results:
+                    results[in_game_id] = str(row[1])
+        return results
+
     async def count_identity_links(
         self, guild_id: Optional[str] = None, nationality: Optional[str] = None
     ) -> int:

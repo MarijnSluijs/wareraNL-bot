@@ -15,6 +15,7 @@ import csv
 import datetime
 import difflib
 import io
+import json
 import logging
 import re
 import unicodedata
@@ -109,6 +110,121 @@ class Users(CommandCogBase, name="users"):
             self._fallback_db = Database(db_path)
             await self._fallback_db.setup()
         return self._fallback_db
+
+    def _mus_template_path(self) -> Path:
+        testing = bool(getattr(self.bot, "testing", False))
+        return Path("templates/mus.testing.json" if testing else "templates/mus.json")
+
+    @staticmethod
+    def _mu_role_map_from_template(data: dict) -> dict[str, int]:
+        mapping: dict[str, int] = {}
+        for entry in data.get("embeds", []):
+            if not isinstance(entry, dict):
+                continue
+            mu_id = str(entry.get("id") or "").strip()
+            if not mu_id:
+                continue
+            try:
+                role_id = int(entry.get("role_id") or 0)
+            except (TypeError, ValueError):
+                role_id = 0
+            if role_id > 0:
+                mapping[mu_id] = role_id
+        return mapping
+
+    async def _sync_mu_roles_for_guild(
+        self, guild: discord.Guild, dry_run: bool = True
+    ) -> dict[str, int]:
+        """Assign MU roles to mapped Discord users based on citizen MU membership."""
+        stats = {
+            "citizens_with_mu": 0,
+            "mapped_discord_users": 0,
+            "members_found": 0,
+            "roles_missing_in_guild": 0,
+            "already_had_role": 0,
+            "to_assign": 0,
+            "assigned": 0,
+            "member_not_found": 0,
+            "errors": 0,
+        }
+
+        db = await self._get_db()
+        guild_id = str(guild.id)
+
+        mus_path = self._mus_template_path()
+        template_raw = json.loads(mus_path.read_text(encoding="utf-8"))
+        mu_to_role_id = self._mu_role_map_from_template(template_raw)
+        if not mu_to_role_id:
+            return stats
+
+        citizen_mus = await db.get_citizen_mus()
+        citizens_with_known_mu = [
+            (in_game_id, mu_id)
+            for in_game_id, mu_id in citizen_mus
+            if mu_id and mu_id in mu_to_role_id
+        ]
+        stats["citizens_with_mu"] = len(citizens_with_known_mu)
+        if not citizens_with_known_mu:
+            return stats
+
+        in_game_ids = list({in_game_id for in_game_id, _ in citizens_with_known_mu})
+        in_game_to_discord = await db.get_discord_ids_by_ingame_user_ids(
+            guild_id=guild_id,
+            in_game_user_ids=in_game_ids,
+        )
+        stats["mapped_discord_users"] = len(in_game_to_discord)
+        if not in_game_to_discord:
+            return stats
+
+        work_items: list[tuple[discord.Member, discord.Role]] = []
+        seen_assignments: set[tuple[int, int]] = set()
+        for in_game_id, mu_id in citizens_with_known_mu:
+            discord_id = in_game_to_discord.get(in_game_id)
+            if not discord_id:
+                continue
+
+            role_id = mu_to_role_id.get(str(mu_id))
+            if not role_id:
+                continue
+            role = guild.get_role(role_id)
+            if role is None:
+                stats["roles_missing_in_guild"] += 1
+                continue
+
+            member = guild.get_member(int(discord_id))
+            if member is None:
+                stats["member_not_found"] += 1
+                continue
+            stats["members_found"] += 1
+
+            if role in member.roles:
+                stats["already_had_role"] += 1
+                continue
+            assignment_key = (member.id, role.id)
+            if assignment_key in seen_assignments:
+                continue
+            seen_assignments.add(assignment_key)
+            stats["to_assign"] += 1
+            work_items.append((member, role))
+
+        if dry_run:
+            return stats
+
+        for member, role in work_items:
+            try:
+                await member.add_roles(role, reason="MU role sync from citizen MU membership")
+                stats["assigned"] += 1
+            except discord.HTTPException as exc:
+                stats["errors"] += 1
+                logger.warning(
+                    "sync_mu_roles: failed to add role %s to %s (%s): %s",
+                    role.id,
+                    member.display_name,
+                    member.id,
+                    exc,
+                )
+
+        return stats
 
     async def cog_app_command_error(
         self,
@@ -1112,6 +1228,107 @@ class Users(CommandCogBase, name="users"):
         if len(not_nl_links) > 10:
             embed.set_footer(text=f"Toont 10 van {len(not_nl_links)} resultaten")
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="syncmuroles",
+        description="Synchroniseer MU-rollen op basis van citizen MU memberships",
+    )
+    @app_commands.describe(
+        dry_run="Alleen tonen wat er zou gebeuren, zonder rollen toe te voegen"
+    )
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def sync_mu_roles(
+        self,
+        interaction: discord.Interaction,
+        dry_run: bool = True,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        guild = interaction.guild
+        if guild is None:
+            await interaction.followup.send(
+                "Dit commando kan alleen in een server gebruikt worden.", ephemeral=True
+            )
+            return
+
+        try:
+            stats = await self._sync_mu_roles_for_guild(guild=guild, dry_run=dry_run)
+        except FileNotFoundError:
+            await interaction.followup.send(
+                f"MU template bestand niet gevonden: `{self._mus_template_path()}`",
+                ephemeral=True,
+            )
+            return
+        except json.JSONDecodeError:
+            await interaction.followup.send(
+                "MU template bevat ongeldige JSON.",
+                ephemeral=True,
+            )
+            return
+        except (OSError, ValueError, discord.DiscordException) as exc:
+            logger.exception("sync_mu_roles: unexpected failure")
+            await interaction.followup.send(
+                f"Synchronisatie mislukt: {exc}",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(
+            title="🪖 MU role sync",
+            color=discord.Color.orange() if dry_run else discord.Color.green(),
+            description=(
+                "Resultaat van MU role synchronisatie op basis van citizen MU memberships."
+            ),
+        )
+        embed.add_field(
+            name="Citizens met MU",
+            value=str(stats["citizens_with_mu"]),
+            inline=True,
+        )
+        embed.add_field(
+            name="Mapped Discord users",
+            value=str(stats["mapped_discord_users"]),
+            inline=True,
+        )
+        embed.add_field(
+            name="Members gevonden",
+            value=str(stats["members_found"]),
+            inline=True,
+        )
+        embed.add_field(
+            name="Role ontbrak",
+            value=str(stats["roles_missing_in_guild"]),
+            inline=True,
+        )
+        embed.add_field(
+            name="Had role al",
+            value=str(stats["already_had_role"]),
+            inline=True,
+        )
+        embed.add_field(
+            name="Toe te wijzen",
+            value=str(stats["to_assign"]),
+            inline=True,
+        )
+        embed.add_field(
+            name="Toegewezen",
+            value=str(stats["assigned"]),
+            inline=True,
+        )
+        embed.add_field(
+            name="Member niet gevonden",
+            value=str(stats["member_not_found"]),
+            inline=True,
+        )
+        embed.add_field(name="Fouten", value=str(stats["errors"]), inline=True)
+        embed.set_footer(
+            text=(
+                "dry_run=true: geen rollen aangepast"
+                if dry_run
+                else "dry_run=false: rollen zijn waar nodig toegevoegd"
+            )
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
     @app_commands.command(
