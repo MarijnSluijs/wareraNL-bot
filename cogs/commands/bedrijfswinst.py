@@ -222,7 +222,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
         return out
 
     async def _get_item_prices(self) -> dict[str, float]:
-        """Return a mapping of item_code → best sell price from the market."""
+        """Return a mapping of item_code → average market price from getPrices (fallback)."""
         try:
             raw = await asyncio.wait_for(
                 self._client.get(
@@ -245,9 +245,13 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
         if isinstance(data, dict):
             for code, info in data.items():
                 if isinstance(info, dict):
-                    # take the best sell (lowest ask) price
                     price = (
-                        info.get("sell") or info.get("price") or info.get("value") or 0
+                        info.get("averagePrice")
+                        or info.get("average")
+                        or info.get("sell")
+                        or info.get("price")
+                        or info.get("value")
+                        or 0
                     )
                 else:
                     price = info
@@ -260,7 +264,9 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 if isinstance(entry, dict):
                     code = entry.get("code") or entry.get("itemCode") or ""
                     price = (
-                        entry.get("sell")
+                        entry.get("averagePrice")
+                        or entry.get("average")
+                        or entry.get("sell")
                         or entry.get("price")
                         or entry.get("value")
                         or 0
@@ -270,6 +276,59 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                             prices[code] = float(price)
                         except (TypeError, ValueError):
                             pass
+        return prices
+
+    async def _get_highest_bid_prices(
+        self, item_codes: list[str], fallback: dict[str, float]
+    ) -> dict[str, float]:
+        """Return item_code → highest buy-order price via tradingOrder.getTopOrders.
+
+        Fetches all item codes in parallel.  Falls back to *fallback* (average prices)
+        for items where no buy orders exist.
+        """
+        if not item_codes or not self._client:
+            return fallback
+
+        def _parse_top_orders(resp: object) -> float:
+            """Extract highest buy-order price from a getTopOrders response."""
+            if isinstance(resp, dict):
+                inner = (resp.get("result") or {}).get("data")
+                if isinstance(inner, dict):
+                    resp = inner
+            if not isinstance(resp, dict):
+                return 0.0
+            for buy_key in ("buyOrders", "buy_orders", "bids", "buy"):
+                orders = resp.get(buy_key)
+                if isinstance(orders, list) and orders:
+                    raw = (
+                        orders[0].get("price")
+                        or orders[0].get("unitPrice")
+                        or orders[0].get("value")
+                    )
+                    try:
+                        return float(raw)
+                    except (TypeError, ValueError):
+                        pass
+            return 0.0
+
+        async def _fetch_one(code: str) -> tuple[str, float]:
+            try:
+                resp = await asyncio.wait_for(
+                    self._client.post(
+                        "/tradingOrder.getTopOrders",
+                        json={"itemCode": code, "limit": 1},
+                    ),
+                    timeout=10.0,
+                )
+                return code, _parse_top_orders(resp)
+            except Exception:
+                return code, 0.0
+
+        results = await asyncio.gather(*[_fetch_one(c) for c in item_codes])
+        prices: dict[str, float] = dict(fallback)  # start with averages as base
+        for code, bid in results:
+            if bid > 0:
+                prices[code] = bid  # override with highest bid when available
         return prices
 
     async def _get_production_points(
@@ -536,7 +595,9 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                         # This is 0 when the country has Fanatic Industrialist
                         # (deposits cannot activate), even if region.getById still
                         # shows a bonusPercent for a pre-ethic deposit.
-                        region_pct = float(entry.get("depositBonus") or 0)
+                        # ethicDepositBonus is the agrarian-ethics component that
+                        # amplifies active deposits — add it to region_pct.
+                        region_pct = float(entry.get("depositBonus") or 0) + float(entry.get("ethicDepositBonus") or 0)
                         found_in_recommended = True
                         break
                 if not found_in_recommended:
@@ -560,7 +621,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                                 ethics_pct = float(
                                     entry.get("ethicSpecializationBonus") or 0
                                 )
-                                region_pct = float(entry.get("depositBonus") or 0)
+                                region_pct = float(entry.get("depositBonus") or 0) + float(entry.get("ethicDepositBonus") or 0)
                                 found_in_recommended = True
                                 break
                         # Merge extra entries into recommended_entries for SR-matching
@@ -597,7 +658,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                                     ethics_pct = float(
                                         entry.get("ethicSpecializationBonus") or 0
                                     )
-                                    region_pct = float(entry.get("depositBonus") or 0)
+                                    region_pct = float(entry.get("depositBonus") or 0) + float(entry.get("ethicDepositBonus") or 0)
                                     found_in_recommended = True
                                     break
                             seen2 = {e.get("regionId") for e in region_list}
@@ -737,11 +798,13 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
             )
             return
 
+        item_codes_needed = list({c.get("itemCode") or "" for c in companies} - {""})
+
         (
             workers_lists,
             prod_bonuses_list,
             (
-                item_prices,
+                _avg_prices,
                 (prod_points, prod_needs),
                 country_bonus_map,
                 spec_top_map,
@@ -767,6 +830,8 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 self._get_country_spec_map(),
             ),
         )
+        # Overwrite average prices with highest buy-order prices where available
+        item_prices = await self._get_highest_bid_prices(item_codes_needed, _avg_prices)
         workers_by_id: dict[str, list[dict]] = {
             c.get("_id", ""): w for c, w in zip(companies, workers_lists)
         }
@@ -858,12 +923,27 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     1.0 + (bonus["region_pct"] + country_sr + spec_ethics) / 100.0
                 )
             elif c_id and c_id in country_bonus_map:
-                # SR known from getAllCountries but ethics unavailable for this item
+                # SR + ethics from getAllCountries (ethics = countryProductionBonus.value - SR)
                 cmap = country_bonus_map[c_id]
                 bonus["country_pct"] = cmap["sr_pct"]
+                bonus["ethics_pct"] = cmap["ethics_pct"]
                 bonus["total_mult"] = (
-                    1.0 + (bonus["region_pct"] + cmap["sr_pct"]) / 100.0
+                    1.0 + (bonus["region_pct"] + cmap["sr_pct"] + cmap["ethics_pct"]) / 100.0
                 )
+
+            # Final supplement: item_country_ethics only stores ethicSpecializationBonus,
+            # so general ethics laws (e.g. agrarian ethics) won't appear there and the
+            # branches above may leave ethics_pct at 0.  countryProductionBonus.value - SR
+            # in country_bonus_map captures ALL ethics types — use it as a safety net.
+            if bonus.get("ethics_pct", 0.0) == 0.0 and c_id and c_id in country_bonus_map:
+                map_ethics = country_bonus_map[c_id].get("ethics_pct", 0.0)
+                if map_ethics > 0:
+                    c_sr = country_bonus_map[c_id]["sr_pct"]
+                    bonus["ethics_pct"] = map_ethics
+                    bonus["country_pct"] = c_sr
+                    bonus["total_mult"] = (
+                        1.0 + (bonus["region_pct"] + c_sr + map_ethics) / 100.0
+                    )
 
         all_worker_ids = list(
             {

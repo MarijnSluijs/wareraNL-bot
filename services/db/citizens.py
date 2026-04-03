@@ -814,3 +814,44 @@ class CitizensMixin:
             async for row in cur:
                 result[str(row[0])] = (str(row[1]), float(row[2]))
         return result
+
+    async def get_top_countries_by_population(self, limit: int) -> list[dict]:
+        """Return the top countries ranked by active citizens (logged in within 72 h)."""
+        rows: list[dict] = []
+        async with self._conn.execute(
+            "SELECT country_id, COUNT(*) AS pop "
+            "FROM citizen_levels "
+            "WHERE last_login_at >= datetime('now', '-72 hours') "
+            "GROUP BY country_id ORDER BY pop DESC LIMIT ?",
+            (limit,),
+        ) as cur:
+            async for row in cur:
+                rows.append({"country_id": row[0], "population": row[1]})
+        return rows
+
+    async def get_tracked_country_ids(self) -> list[str]:
+        """Return all distinct country_ids that have citizens in citizen_levels."""
+        ids: list[str] = []
+        async with self._conn.execute(
+            "SELECT DISTINCT country_id FROM citizen_levels"
+        ) as cur:
+            async for row in cur:
+                ids.append(row[0])
+        return ids
+
+    async def get_country_ids_for_users(
+        self, user_ids: list[str]
+    ) -> dict[str, str]:
+        """Return {user_id: country_id} for every user_id found in citizen_levels."""
+        if not user_ids:
+            return {}
+        placeholders = ",".join("?" * len(user_ids))
+        result: dict[str, str] = {}
+        async with self._conn.execute(
+            f"SELECT user_id, country_id FROM citizen_levels"
+            f" WHERE user_id IN ({placeholders})",
+            user_ids,
+        ) as cur:
+            async for row in cur:
+                result[row[0]] = row[1]
+        return result

@@ -217,6 +217,32 @@ CREATE INDEX IF NOT EXISTS idx_global_luck_country ON global_citizen_luck(countr
 
 -- ── Legacy (krypton template) ─────────────────────────────────────────────────
 
+-- ── Battle rankings accumulator ──────────────────────────────────────────────
+
+-- battle_hits: per-player damage per battle side, written by the daily poller
+CREATE TABLE IF NOT EXISTS battle_hits (
+    battle_id         TEXT NOT NULL,
+    user_id           TEXT NOT NULL,
+    side              TEXT NOT NULL,      -- 'attacker' | 'defender'
+    damage            REAL NOT NULL DEFAULT 0,
+    rank              INTEGER,
+    battle_created_at TEXT NOT NULL,      -- ISO-8601 UTC from battle.createdAt
+    recorded_at       TEXT NOT NULL,
+    PRIMARY KEY (battle_id, user_id, side)
+);
+CREATE INDEX IF NOT EXISTS idx_battle_hits_user    ON battle_hits(user_id);
+CREATE INDEX IF NOT EXISTS idx_battle_hits_created ON battle_hits(battle_created_at);
+CREATE INDEX IF NOT EXISTS idx_battle_hits_battle  ON battle_hits(battle_id);
+
+-- processed_battles: deduplication tracker for the daily battle poller
+CREATE TABLE IF NOT EXISTS processed_battles (
+    battle_id         TEXT PRIMARY KEY,
+    battle_created_at TEXT,
+    attacker_damage   REAL,
+    defender_damage   REAL,
+    processed_at      TEXT NOT NULL
+);
+
 -- warns: moderation warn log used by database/__init__.py DatabaseManager
 CREATE TABLE IF NOT EXISTS warns (
     id           INTEGER,
@@ -227,3 +253,48 @@ CREATE TABLE IF NOT EXISTS warns (
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id, user_id, server_id)
 );
+
+-- battle_drops: loot items dropped during battles (from battleRanking.getRanking)
+CREATE TABLE IF NOT EXISTS battle_drops (
+    id               TEXT PRIMARY KEY,   -- lootItem._id
+    battle_id        TEXT NOT NULL,
+    user_id          TEXT NOT NULL,
+    side             TEXT NOT NULL,       -- 'attacker' | 'defender'
+    rank             INTEGER,
+    damage_dealt     REAL,
+    item_code        TEXT,
+    item_skills_json TEXT,
+    dropped_at       TEXT,
+    recorded_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_battle_drops_user    ON battle_drops(user_id);
+CREATE INDEX IF NOT EXISTS idx_battle_drops_battle  ON battle_drops(battle_id);
+
+-- battle_mu_hits: per-MU damage per battle side, fetched via type="mu" rankings
+CREATE TABLE IF NOT EXISTS battle_mu_hits (
+    battle_id         TEXT NOT NULL,
+    mu_id             TEXT NOT NULL,
+    side              TEXT NOT NULL,       -- 'attacker' | 'defender'
+    mu_name           TEXT,
+    damage            REAL NOT NULL DEFAULT 0,
+    battle_created_at TEXT,
+    recorded_at       TEXT,
+    PRIMARY KEY (battle_id, mu_id, side)
+);
+CREATE INDEX IF NOT EXISTS idx_battle_mu_hits_mu      ON battle_mu_hits(mu_id);
+CREATE INDEX IF NOT EXISTS idx_battle_mu_hits_created ON battle_mu_hits(battle_created_at);
+
+-- battle_country_hits: per-country damage per battle side, fetched via type="country" rankings
+--   Reflects player nationality (same as the game's own country leaderboard), NOT
+--   which country was the attacker/defender side.
+CREATE TABLE IF NOT EXISTS battle_country_hits (
+    battle_id         TEXT NOT NULL,
+    country_id        TEXT NOT NULL,
+    side              TEXT NOT NULL,       -- 'attacker' | 'defender'
+    damage            REAL NOT NULL DEFAULT 0,
+    battle_created_at TEXT,
+    recorded_at       TEXT,
+    PRIMARY KEY (battle_id, country_id, side)
+);
+CREATE INDEX IF NOT EXISTS idx_battle_country_hits_country  ON battle_country_hits(country_id);
+CREATE INDEX IF NOT EXISTS idx_battle_country_hits_created  ON battle_country_hits(battle_created_at);

@@ -207,9 +207,12 @@ class CitizenCache:
         await self._db.clear_citizen_mus_for_known_mu_ids(country_id, known_mu_ids)
 
         updated = 0
+        now_iso = datetime.now(timezone.utc).isoformat()
         for mu_id, mu_name in mu_entries:
             member_ids, live_name = await self._fetch_mu_members_and_name(mu_id)
             effective_name = live_name or mu_name
+            # Tag this MU as belonging to country_id in the known_mus registry
+            await self._db.upsert_known_mu(mu_id, effective_name, now_iso, country_id)
             for uid in member_ids:
                 await self._db.update_citizen_mu(uid, mu_id, effective_name)
                 updated += 1
@@ -221,6 +224,69 @@ class CitizenCache:
             )
 
         return updated
+
+    async def sweep_all_mu_memberships(
+        self,
+        progress_callback=None,
+    ) -> tuple[int, int]:
+        """Sweep every MU in known_mus: fetch its members, infer home country, update DB.
+
+        For each MU:
+        1. Call /mu.getById to get the current member list.
+        2. Query citizen_levels to find the country_id for as many members as possible.
+        3. Tag known_mus.country_id with the majority country found.
+        4. Write mu_id / mu_name back to citizen_levels for every matched member.
+
+        *progress_callback*, when supplied, is called as
+        ``await progress_callback(done, total, mu_name)`` after each MU.
+
+        Returns ``(mus_tagged, citizens_updated)``.
+        """
+        from collections import Counter
+
+        mu_rows = await self._db.get_all_known_mu_ids()
+        total = len(mu_rows)
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        mus_tagged = 0
+        citizens_updated = 0
+
+        for idx, (mu_id, mu_name, existing_country_id) in enumerate(mu_rows):
+            member_ids, live_name = await self._fetch_mu_members_and_name(mu_id)
+            effective_name = live_name or mu_name
+
+            inferred_country_id: str | None = existing_country_id
+
+            if member_ids:
+                country_map = await self._db.get_country_ids_for_users(member_ids)
+                if country_map:
+                    counter: Counter[str] = Counter(country_map.values())
+                    inferred_country_id = counter.most_common(1)[0][0]
+
+                # Update citizen_levels.mu_id for every known member
+                for uid in member_ids:
+                    await self._db.update_citizen_mu(uid, mu_id, effective_name)
+                    citizens_updated += 1
+                await self._db.flush_citizen_levels()
+
+            await self._db.upsert_known_mu(mu_id, effective_name, now_iso, inferred_country_id)
+            if inferred_country_id:
+                mus_tagged += 1
+
+            logger.debug(
+                "sweep_all_mu_memberships: [%d/%d] %s → country=%s members=%d",
+                idx + 1,
+                total,
+                effective_name,
+                inferred_country_id,
+                len(member_ids),
+            )
+
+            if progress_callback:
+                await progress_callback(idx + 1, total, effective_name)
+
+        await self._db.flush_known_mus()
+        return mus_tagged, citizens_updated
 
     # ------------------------------------------------------------------ #
     # Private helpers                                                      #
@@ -524,6 +590,7 @@ class CitizenCache:
         dates = obj.get("dates")
         if isinstance(dates, dict):
             for key in (
+                "lastConnectionAt",
                 "lastLoginAt",
                 "lastSeenAt",
                 "lastOnlineAt",
@@ -535,6 +602,7 @@ class CitizenCache:
                     return val
         # Fall back to root-level keys
         for key in (
+            "lastConnectionAt",
             "lastLoginAt",
             "lastSeenAt",
             "lastOnlineAt",

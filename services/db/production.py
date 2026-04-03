@@ -255,3 +255,24 @@ class ProductionMixin:
             ),
         )
         await self._conn.commit()
+
+    async def get_top_countries_by_production_bonus(self, limit: int) -> list[dict]:
+        """Return the top countries ranked by production_bonus from the latest snapshot."""
+        rows: list[dict] = []
+        async with self._conn.execute(
+            "SELECT country_id, name, production_bonus, updated_at "
+            "FROM country_snapshots "
+            "WHERE production_bonus IS NOT NULL "
+            "ORDER BY production_bonus DESC LIMIT ?",
+            (limit,),
+        ) as cur:
+            async for row in cur:
+                rows.append(
+                    {
+                        "country_id": row[0],
+                        "name": row[1],
+                        "production_bonus": row[2] or 0.0,
+                        "updated_at": row[3],
+                    }
+                )
+        return rows
