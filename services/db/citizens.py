@@ -592,15 +592,6 @@ class CitizensMixin:
                     names.append(row[0])
         return names
 
-    async def get_citizen_mus(self) -> list[tuple[str, Optional[str]]]:
-        """Return [(user_id, mu_id)] for all citizens."""
-        sql = "SELECT user_id, mu_id FROM citizen_levels ORDER BY user_id"
-        rows: list[tuple[str, Optional[str]]] = []
-        async with self._conn.execute(sql) as cur:
-            async for row in cur:
-                rows.append((str(row[0]), str(row[1]) if row[1] is not None else None))
-        return rows
-
     async def get_all_mu_readiness(
         self, country_id: Optional[str] = None
     ) -> dict[str, dict]:
@@ -864,3 +855,28 @@ class CitizensMixin:
             async for row in cur:
                 result[row[0]] = row[1]
         return result
+
+    async def get_citizens_in_country(
+        self, country_id: str
+    ) -> list[tuple[str, str, Optional[str]]]:
+        """Return [(user_id, country_id, citizen_name)] for all citizens in *country_id*."""
+        rows: list[tuple[str, str, Optional[str]]] = []
+        async with self._conn.execute(
+            "SELECT user_id, country_id, citizen_name FROM citizen_levels WHERE country_id = ?",
+            (country_id,),
+        ) as cur:
+            async for row in cur:
+                rows.append((row[0], row[1], row[2]))
+        return rows
+
+    async def get_all_citizens_for_tips_scan(
+        self,
+    ) -> list[tuple[str, str, Optional[str]]]:
+        """Return [(user_id, country_id, citizen_name)] for ALL citizens in citizen_levels."""
+        rows: list[tuple[str, str, Optional[str]]] = []
+        async with self._conn.execute(
+            "SELECT user_id, country_id, citizen_name FROM citizen_levels"
+        ) as cur:
+            async for row in cur:
+                rows.append((row[0], row[1], row[2]))
+        return rows

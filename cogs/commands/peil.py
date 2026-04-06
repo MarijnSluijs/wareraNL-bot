@@ -50,6 +50,7 @@ class PeilCog(CommandCogBase, name="peil"):
             app_commands.Choice(name="geluk", value="geluk"),
             app_commands.Choice(name="globalluck", value="globalluck"),
             app_commands.Choice(name="slagveld", value="slagveld"),
+            app_commands.Choice(name="artikelen", value="artikelen"),
             app_commands.Choice(name="backfill", value="backfill"),
             app_commands.Choice(name="alles", value="alles"),
         ]
@@ -96,6 +97,8 @@ class PeilCog(CommandCogBase, name="peil"):
             await self._peil_globalluck(ctx)
         if onderdeel in ("slagveld", "alles"):
             await self._peil_slagveld(ctx)
+        if onderdeel == "artikelen":
+            await self._peil_artikelen(ctx, land)
         if onderdeel == "backfill":
             await self._peil_backfill(ctx)
 
@@ -293,14 +296,17 @@ class PeilCog(CommandCogBase, name="peil"):
     # ------------------------------------------------------------------ #
 
     async def _peil_weerstand(self, ctx: Context) -> None:
-        resistance_cog = self.bot.get_cog("resistance_tasks")
+        resistance_cog = self.bot.get_cog("resistance")
         if not resistance_cog:
-            await ctx.send("❌ Resistance task cog niet geladen.", ephemeral=True)
+            await ctx.send("❌ Resistance cog niet geladen.", ephemeral=True)
             return
         status_msg = await ctx.send("🔄 Verzetspeiling gestart…", ephemeral=True)
         try:
-            await resistance_cog.run_resistance_poll()
-            await status_msg.edit(content="✅ Verzetspeiling voltooid.")
+            embed = await resistance_cog.build_resistance_embed()
+            if embed is None:
+                await status_msg.edit(content="ℹ️ Geen bezette buitenlandse regio's gevonden.")
+            else:
+                await status_msg.edit(content="✅ Verzetspeiling voltooid.")
         except Exception as exc:
             logger.exception("peil weerstand: error")
             await status_msg.edit(content=f"❌ Verzetspeiling mislukt: {exc}")
@@ -373,6 +379,83 @@ class PeilCog(CommandCogBase, name="peil"):
         except Exception as exc:
             logger.exception("peil slagveld: error")
             await status_msg.edit(content=f"❌ Slagveld sweep mislukt: {exc}")
+
+    # ------------------------------------------------------------------ #
+    # Artikel tips subsystem                                               #
+    # ------------------------------------------------------------------ #
+
+    async def _peil_artikelen(self, ctx: Context, land: str | None) -> None:
+        citizen_cache = getattr(self.bot, "_ext_citizen_cache", None)
+        if not citizen_cache:
+            await ctx.send("❌ Citizen cache niet beschikbaar.", ephemeral=True)
+            return
+
+        # Resolve optional country filter
+        country_id_filter: str | None = None
+        label = "alle landen"
+        if land:
+            country_list = await self._fetch_country_list(ctx)
+            if country_list is None:
+                return
+            target = find_country(land, country_list)
+            if target is None:
+                await ctx.send(f"Land `{land}` niet gevonden.", ephemeral=True)
+                return
+            country_id_filter = cid_of(target)
+            label = f"**{target.get('name', land)}**"
+
+        status_msg = await ctx.send(
+            f"🔄 Artikel tip scan gestart voor {label}… (dit kan lang duren)",
+            ephemeral=True,
+        )
+
+        last_edit_idx = 0
+
+        async def _progress(done: int, total: int, citizen_name: str) -> None:
+            nonlocal last_edit_idx
+            if done - last_edit_idx >= 50 or done == total:
+                last_edit_idx = done
+                pct = int(done / total * 100) if total else 0
+                try:
+                    await status_msg.edit(
+                        content=(
+                            f"🔄 Artikel tip scan… {done}/{total} ({pct}%)"
+                            f"\nLaatste: **{citizen_name}**"
+                        )
+                    )
+                except Exception:
+                    pass
+
+        try:
+            t_start = time.monotonic()
+            citizens_scanned, tips_stored = await citizen_cache.sweep_article_tips(
+                country_id=country_id_filter,
+                progress_callback=_progress,
+            )
+            elapsed = time.monotonic() - t_start
+            elapsed_str = (
+                f"{int(elapsed // 60)}m {int(elapsed % 60)}s"
+                if elapsed >= 60
+                else f"{elapsed:.1f}s"
+            )
+            result_msg = (
+                f"✅ Artikel tip scan klaar — {citizens_scanned} burgers gescand, "
+                f"{tips_stored} nieuwe tip-records opgeslagen. ⏱ {elapsed_str}"
+            )
+            logger.info(
+                "peil artikelen: %d citizens scanned, %d tips stored in %s",
+                citizens_scanned, tips_stored, elapsed_str,
+            )
+            try:
+                await status_msg.edit(content=result_msg)
+            except discord.HTTPException:
+                logger.warning("peil artikelen: interaction token expired, result saved to DB")
+        except Exception as exc:
+            logger.exception("peil artikelen: error")
+            try:
+                await status_msg.edit(content=f"❌ Artikel tip scan mislukt: {exc}")
+            except discord.HTTPException:
+                logger.warning("peil artikelen: interaction token expired while reporting error")
 
     # ------------------------------------------------------------------ #
     # Backfill subsystem                                                   #

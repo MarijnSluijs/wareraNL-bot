@@ -20,13 +20,18 @@ class LuckMixin:
         opens_count: int,
         rarity_json: Optional[str],
         updated_at: str,
+        *,
+        elite_luck_score: Optional[float] = None,
+        elite_opens_count: Optional[int] = None,
+        elite_rarity_json: Optional[str] = None,
     ) -> None:
         """Insert or replace a luck score (call flush_luck_scores to commit batch)."""
         await self._conn.execute(
             """
             INSERT OR REPLACE INTO citizen_luck
-                (user_id, country_id, citizen_name, luck_score, opens_count, rarity_json, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (user_id, country_id, citizen_name, luck_score, opens_count, rarity_json,
+                 updated_at, elite_luck_score, elite_opens_count, elite_rarity_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -36,6 +41,9 @@ class LuckMixin:
                 opens_count,
                 rarity_json,
                 updated_at,
+                elite_luck_score,
+                elite_opens_count,
+                elite_rarity_json,
             ),
         )
 
@@ -55,7 +63,8 @@ class LuckMixin:
         rows: list[dict] = []
         async with self._conn.execute(
             """
-            SELECT user_id, citizen_name, luck_score, opens_count, updated_at
+            SELECT user_id, citizen_name, luck_score, opens_count, updated_at,
+                   elite_luck_score, elite_opens_count, elite_rarity_json
             FROM citizen_luck
             WHERE country_id = ?
             ORDER BY luck_score DESC
@@ -70,6 +79,9 @@ class LuckMixin:
                         "luck_score": row[2],
                         "opens_count": row[3],
                         "updated_at": row[4],
+                        "elite_luck_score": row[5],
+                        "elite_opens_count": row[6],
+                        "elite_rarity_json": row[7],
                     }
                 )
         return rows
@@ -110,13 +122,18 @@ class LuckMixin:
         opens_count: int,
         rarity_json: Optional[str],
         updated_at: str,
+        *,
+        elite_luck_score: Optional[float] = None,
+        elite_opens_count: Optional[int] = None,
+        elite_rarity_json: Optional[str] = None,
     ) -> None:
         """Insert or replace a global luck entry (call flush_global_luck_scores to commit)."""
         await self._conn.execute(
             """
             INSERT OR REPLACE INTO global_citizen_luck
-                (user_id, country_id, citizen_name, luck_score, opens_count, rarity_json, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (user_id, country_id, citizen_name, luck_score, opens_count, rarity_json,
+                 updated_at, elite_luck_score, elite_opens_count, elite_rarity_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -126,6 +143,9 @@ class LuckMixin:
                 opens_count,
                 rarity_json,
                 updated_at,
+                elite_luck_score,
+                elite_opens_count,
+                elite_rarity_json,
             ),
         )
 
@@ -146,7 +166,8 @@ class LuckMixin:
         """Global luck entries sorted by luck_score DESC (or ASC for bottom)."""
         order = "ASC" if order.upper() == "ASC" else "DESC"
         sql = f"""
-            SELECT user_id, country_id, citizen_name, luck_score, opens_count, rarity_json, updated_at
+            SELECT user_id, country_id, citizen_name, luck_score, opens_count, rarity_json,
+                   updated_at, elite_luck_score, elite_opens_count, elite_rarity_json
             FROM global_citizen_luck
             ORDER BY luck_score {order}
         """
@@ -164,6 +185,9 @@ class LuckMixin:
                         "opens_count": row[4],
                         "rarity_json": row[5],
                         "updated_at": row[6],
+                        "elite_luck_score": row[7],
+                        "elite_opens_count": row[8],
+                        "elite_rarity_json": row[9],
                     }
                 )
         return rows

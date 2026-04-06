@@ -59,6 +59,14 @@ class DatabaseBase:
             ("processed_battles", "defender_country_id TEXT"),
             # known_mus — home country added post-launch
             ("known_mus", "country_id TEXT"),
+            # citizen_luck — elite case columns added post-launch
+            ("citizen_luck", "elite_luck_score REAL"),
+            ("citizen_luck", "elite_opens_count INTEGER"),
+            ("citizen_luck", "elite_rarity_json TEXT"),
+            # global_citizen_luck — elite case columns added post-launch
+            ("global_citizen_luck", "elite_luck_score REAL"),
+            ("global_citizen_luck", "elite_opens_count INTEGER"),
+            ("global_citizen_luck", "elite_rarity_json TEXT"),
         ]
         for table, column_def in migrations:
             try:

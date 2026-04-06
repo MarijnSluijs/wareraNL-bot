@@ -35,6 +35,14 @@ EXPECTED_RATES: dict[str, float] = {
     "uncommon": 0.30,
     "common": 0.62,
 }
+ELITE_EXPECTED_RATES: dict[str, float] = {
+    "mythic": 0.005,
+    "legendary": 0.025,
+    "epic": 0.15,
+    "rare": 0.32,
+    "uncommon": 0.50,
+    "common": 0.0,
+}
 RARITY_ORDER = ["mythic", "legendary", "epic", "rare", "uncommon", "common"]
 RARITY_LABELS: dict[str, str] = {
     "mythic": "Mythic",
@@ -48,6 +56,11 @@ _LUCK_WEIGHTS: dict[str, float] = {
     r: -_luck_math.log2(p) for r, p in EXPECTED_RATES.items()
 }
 _LUCK_WEIGHT_TOTAL: float = sum(_LUCK_WEIGHTS.values())
+_ELITE_LUCK_WEIGHTS: dict[str, float] = {
+    r: -_luck_math.log2(p) if p > 0 else 0.0
+    for r, p in ELITE_EXPECTED_RATES.items()
+}
+_ELITE_LUCK_WEIGHT_TOTAL: float = sum(v for v in _ELITE_LUCK_WEIGHTS.values() if v > 0)
 
 
 def _calc_luck_score(counts: dict[str, int], total: int) -> float:
@@ -62,6 +75,22 @@ def _calc_luck_score(counts: dict[str, int], total: int) -> float:
         deviation = (counts.get(rarity, 0) - expected_n) / _luck_math.sqrt(expected_n)
         score += _LUCK_WEIGHTS[rarity] * deviation
     return score / _LUCK_WEIGHT_TOTAL * 100.0
+
+
+def _calc_elite_luck_score(counts: dict[str, int], total: int) -> float:
+    """Poisson z-score luck % for elite case (case2) openings."""
+    if total == 0 or _ELITE_LUCK_WEIGHT_TOTAL <= 0:
+        return 0.0
+    score = 0.0
+    for rarity, expected_rate in ELITE_EXPECTED_RATES.items():
+        if expected_rate <= 0:
+            continue
+        expected_n = total * expected_rate
+        if expected_n <= 0:
+            continue
+        deviation = (counts.get(rarity, 0) - expected_n) / _luck_math.sqrt(expected_n)
+        score += _ELITE_LUCK_WEIGHTS[rarity] * deviation
+    return score / _ELITE_LUCK_WEIGHT_TOTAL * 100.0
 
 
 _ANSI_RARITY: dict[str, str] = {
@@ -115,12 +144,13 @@ def _luck_indicator_per_rarity(actual_n: int, expected_n: float) -> str:
     return "💀💀"
 
 
-def _build_luck_table(total: int, counts: dict[str, int]) -> str:
+def _build_luck_table(total: int, counts: dict[str, int], rates: dict[str, float] | None = None) -> str:
+    effective_rates = rates if rates is not None else EXPECTED_RATES
     header = f"{'Rarity':<14} {'Exp':>6} {'Got':>5}  {'Your%':>6}  Luck"
     sep = "─" * len(header)
     rows = [header, sep]
     for rarity in RARITY_ORDER:
-        rate = EXPECTED_RATES[rarity]
+        rate = effective_rates.get(rarity, 0.0)
         expected_n = total * rate
         actual_n = counts.get(rarity, 0)
         actual_rate = actual_n / total if total > 0 else 0.0
@@ -205,18 +235,19 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         self,
         user_id: str,
         max_cases: Optional[int] = None,
-    ) -> tuple[dict[str, int], int] | None:
-        """Fetch and return (rarity_counts, total_opens) live from the API.
+    ) -> tuple[dict[str, int], dict[str, int]] | None:
+        """Fetch and return (normal_counts, elite_counts) live from the API.
 
-        If *max_cases* is given, stops after that many valid (non-elite)
-        openings have been collected (the X most recent cases).
+        If *max_cases* is given, stops after that many normal case
+        openings have been collected (the X most recent normal cases).
         Returns None if the client is unavailable.
         """
         client = await self._get_client()
         if not client:
             return None
         item_rarities = await self._get_item_rarities()
-        counts: dict[str, int] = {r: 0 for r in RARITY_ORDER}
+        normal_counts: dict[str, int] = {r: 0 for r in RARITY_ORDER}
+        elite_counts: dict[str, int] = {r: 0 for r in RARITY_ORDER}
         cursor = None
         limit_reached = False
         while True:
@@ -250,21 +281,23 @@ class GlobalLuck(commands.Cog, name="globalluck"):
             for tx in items_list:
                 if not isinstance(tx, dict):
                     continue
-                # Skip elite cases (same filter as geluk.py)
-                if item_rarities.get(tx.get("itemCode", "")) == "mythic":
-                    continue
+                opened_case = tx.get("itemCode", "")
+                is_elite = item_rarities.get(opened_case) == "mythic"
                 received = tx.get("item") or {}
                 item_code = (
                     received.get("code") if isinstance(received, dict) else received
                 ) or ""
                 rarity = item_rarities.get(item_code, "common")
-                counts[rarity] = counts.get(rarity, 0) + 1
-                if max_cases is not None and sum(counts.values()) >= max_cases:
-                    limit_reached = True
-                    break
+                if is_elite:
+                    elite_counts[rarity] = elite_counts.get(rarity, 0) + 1
+                else:
+                    normal_counts[rarity] = normal_counts.get(rarity, 0) + 1
+                    if max_cases is not None and sum(normal_counts.values()) >= max_cases:
+                        limit_reached = True
+                        break
             if not cursor or not items_list or limit_reached:
                 break
-        return counts, sum(counts.values())
+        return normal_counts, elite_counts
 
     # ------------------------------------------------------------------ #
     # /globalluck                                                          #
@@ -454,8 +487,9 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         live = await self._fetch_live_luck(user_id, max_cases=max_cases)
 
         if live is not None:
-            counts, opens = live
-            luck_score = _calc_luck_score(counts, opens)
+            normal_counts, elite_counts = live
+            opens = sum(normal_counts.values())
+            luck_score = _calc_luck_score(normal_counts, opens)
             analysis_note = (
                 f"🔴 Live ({opens:,} meest recente)"
                 if max_cases is not None
@@ -464,7 +498,9 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         else:
             # Fall back to cached data
             counts_raw = target.get("rarity_json")
-            counts = json.loads(counts_raw) if counts_raw else {}
+            normal_counts = json.loads(counts_raw) if counts_raw else {}
+            elite_raw = target.get("elite_rarity_json")
+            elite_counts = json.loads(elite_raw) if elite_raw else {}
             opens = target["opens_count"]
             luck_score = target["luck_score"]
             analysis_note = f"Cache {rank_updated_at} UTC"
@@ -500,18 +536,28 @@ class GlobalLuck(commands.Cog, name="globalluck"):
             inline=True,
         )
 
-        if opens > 0 and counts:
-            table = _build_luck_table(opens, counts)
+        if opens > 0 and normal_counts:
+            table = _build_luck_table(opens, normal_counts)
             embed.add_field(
-                name="Geluksanalyse",
+                name="🎲 Case geluk",
                 value=f"```ansi\n{table}\n```",
+                inline=False,
+            )
+
+        elite_opens = sum(elite_counts.values()) if elite_counts else 0
+        if elite_opens > 0:
+            elite_table = _build_luck_table(elite_opens, elite_counts, ELITE_EXPECTED_RATES)
+            embed.add_field(
+                name="💎 Elite Case geluk",
+                value=f"```ansi\n{elite_table}\n```",
                 inline=False,
             )
 
         embed.set_footer(
             text=(
                 f"Kansen: mythic 0.01% • legendary 0.04% • epic 0.85% • rare 7.1%  "
-                f"•  Min. 20 cases vereist  •  Analyse: {analysis_note}  "
+                f"Elite: mythic 0.5% • legendary 2.5% • epic 15% • rare 32% • uncommon 50%  •  "
+                f"Min. 20 cases vereist  •  Analyse: {analysis_note}  "
                 f"•  Rang bijgewerkt: {rank_updated_at} UTC"
             )
         )

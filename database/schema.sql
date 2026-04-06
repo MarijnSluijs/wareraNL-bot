@@ -298,3 +298,28 @@ CREATE TABLE IF NOT EXISTS battle_country_hits (
 );
 CREATE INDEX IF NOT EXISTS idx_battle_country_hits_country  ON battle_country_hits(country_id);
 CREATE INDEX IF NOT EXISTS idx_battle_country_hits_created  ON battle_country_hits(battle_created_at);
+
+-- ── Article tips ──────────────────────────────────────────────────────────────
+
+-- article_tips: individual article tip transactions (outgoing from the tipper's perspective)
+--   Populated by /peil artikelen which scans known citizens' transactions.
+--   amount is always positive (abs(money)); tip_at comes from transaction.createdAt.
+CREATE TABLE IF NOT EXISTS article_tips (
+    user_id      TEXT NOT NULL,
+    country_id   TEXT,
+    citizen_name TEXT,
+    amount       REAL NOT NULL,
+    tip_at       TEXT NOT NULL,
+    recorded_at  TEXT NOT NULL,
+    PRIMARY KEY (user_id, tip_at)
+);
+CREATE INDEX IF NOT EXISTS idx_article_tips_date    ON article_tips(tip_at);
+CREATE INDEX IF NOT EXISTS idx_article_tips_country ON article_tips(country_id);
+
+-- article_tip_scans: tracks the last time a citizen was scanned for article tips.
+--   Used for incremental scanning: citizens with no tips are skipped until
+--   RESCAN_DAYS have passed since their last scan.
+CREATE TABLE IF NOT EXISTS article_tip_scans (
+    user_id        TEXT PRIMARY KEY,
+    last_scanned_at TEXT NOT NULL
+);

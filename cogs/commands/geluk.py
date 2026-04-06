@@ -91,6 +91,39 @@ EXPECTED_RATES: dict[str, float] = {
     "common": 0.62,  # 62   %
 }
 
+ELITE_EXPECTED_RATES: dict[str, float] = {
+    "mythic": 0.005,   # 0.5  %
+    "legendary": 0.025,  # 2.5  %
+    "epic": 0.15,    # 15   %
+    "rare": 0.32,    # 32   %
+    "uncommon": 0.50,  # 50   %
+    "common": 0.0,   # 0    %
+}
+
+_ELITE_LUCK_WEIGHTS: dict[str, float] = {
+    r: -_luck_math.log2(p) if p > 0 else 0.0
+    for r, p in ELITE_EXPECTED_RATES.items()
+}
+_ELITE_LUCK_WEIGHT_TOTAL: float = sum(v for v in _ELITE_LUCK_WEIGHTS.values() if v > 0)
+
+
+def calc_elite_luck_pct(counts: dict, total: int) -> float:
+    """Poisson z-score luck % for elite case (case2) openings."""
+    if total == 0:
+        return 0.0
+    score = 0.0
+    for rarity, expected_rate in ELITE_EXPECTED_RATES.items():
+        if expected_rate <= 0:
+            continue
+        expected_n = total * expected_rate
+        if expected_n <= 0:
+            continue
+        deviation = (counts.get(rarity, 0) - expected_n) / _luck_math.sqrt(expected_n)
+        score += _ELITE_LUCK_WEIGHTS[rarity] * deviation
+    if _ELITE_LUCK_WEIGHT_TOTAL <= 0:
+        return 0.0
+    return score / _ELITE_LUCK_WEIGHT_TOTAL * 100.0
+
 # Display labels (in Dutch / in-game naming)
 RARITY_LABELS: dict[str, str] = {
     "mythic": "Mythic",
@@ -162,13 +195,15 @@ def _luck_indicator(actual_n: int, expected_n: float) -> str:
 def _build_luck_table(
     total: int,
     counts: dict[str, int],
+    rates: dict[str, float] | None = None,
 ) -> str:
     """Build a compact fixed-width ANSI table comparing actual vs expected drops."""
+    effective_rates = rates if rates is not None else EXPECTED_RATES
     header = f"{'Rarity':<14} {'Exp':>6} {'Got':>5}  {'Your%':>6}  Luck"
     sep = "─" * len(header)
     rows = [header, sep]
     for rarity in RARITY_ORDER:
-        expected_rate = EXPECTED_RATES[rarity]
+        expected_rate = effective_rates.get(rarity, 0.0)
         expected_n = total * expected_rate
         actual_n = counts.get(rarity, 0)
         actual_rate = actual_n / total if total > 0 else 0.0
@@ -322,18 +357,19 @@ class Geluk(commands.Cog, name="geluk"):
         user_id: str,
         item_rarities: dict[str, str],
         max_cases: Optional[int] = None,
-    ) -> Optional[dict[str, int]]:
+    ) -> Optional[tuple[dict[str, int], dict[str, int]]]:
         """
         Page through openCase transactions for a user.
 
-        If *max_cases* is given, stops after that many valid (non-elite)
-        openings have been collected (i.e. the X most recent cases).
+        If *max_cases* is given, stops after that many normal (non-elite)
+        openings have been collected (i.e. the X most recent normal cases).
 
-        Returns a dict of {rarity: count}, or None if the endpoint is
+        Returns a tuple (normal_counts, elite_counts), or None if the endpoint is
         inaccessible (auth error).
         """
         client = await self._get_client()
-        counts: dict[str, int] = {r: 0 for r in RARITY_ORDER}
+        normal_counts: dict[str, int] = {r: 0 for r in RARITY_ORDER}
+        elite_counts: dict[str, int] = {r: 0 for r in RARITY_ORDER}
         cursor: Optional[str] = None
         page = 0
         total_fetched = 0
@@ -382,11 +418,8 @@ class Geluk(commands.Cog, name="geluk"):
             for tx in items:
                 if not isinstance(tx, dict):
                     continue
-                # Skip elite cases (case2, mythic rarity) — the profile ranking
-                # only counts regular case1 openings, so we do the same.
                 opened_case = tx.get("itemCode", "")
-                if item_rarities.get(opened_case) == "mythic":
-                    continue
+                is_elite = item_rarities.get(opened_case) == "mythic"
                 # "itemCode" is the *case* that was opened; the *received* drop is in item.code
                 received_item = tx.get("item") or {}
                 item_code = (
@@ -395,10 +428,13 @@ class Geluk(commands.Cog, name="geluk"):
                     else received_item
                 ) or ""
                 rarity = item_rarities.get(item_code, "common")
-                counts[rarity] = counts.get(rarity, 0) + 1
-                if max_cases is not None and sum(counts.values()) >= max_cases:
-                    limit_reached = True
-                    break
+                if is_elite:
+                    elite_counts[rarity] = elite_counts.get(rarity, 0) + 1
+                else:
+                    normal_counts[rarity] = normal_counts.get(rarity, 0) + 1
+                    if max_cases is not None and sum(normal_counts.values()) >= max_cases:
+                        limit_reached = True
+                        break
 
             total_fetched += len(items)
             page += 1
@@ -414,7 +450,7 @@ class Geluk(commands.Cog, name="geluk"):
             user_id,
             page,
         )
-        return counts
+        return normal_counts, elite_counts
 
     # ------------------------------------------------------------------
     # Slash command
@@ -474,10 +510,14 @@ class Geluk(commands.Cog, name="geluk"):
         item_rarities = await self._get_item_rarities()
 
         # 4. Try to fetch actual transaction history
-        counts = await self._fetch_all_case_transactions(
+        result = await self._fetch_all_case_transactions(
             resolved_user_id, item_rarities, max_cases=aantal_cases
         )
-        can_show_actual = counts is not None
+        can_show_actual = result is not None
+        normal_counts: dict[str, int] = {}
+        elite_counts: dict[str, int] = {}
+        if result is not None:
+            normal_counts, elite_counts = result
 
         # 5. Build embed
         embed = discord.Embed(
@@ -531,41 +571,56 @@ class Geluk(commands.Cog, name="geluk"):
                 )
         else:
             # We have actual data
-            total_counted = sum(counts.values())
+            total_counted = sum(normal_counts.values())
+            elite_total = sum(elite_counts.values())
 
-            if total_counted == 0:
+            if total_counted == 0 and elite_total == 0:
                 embed.description = "Deze speler heeft nog geen cases geopend (of er waren geen geregistreerde drops)."
             else:
-                analysed_note = (
-                    f"_{total_counted:,} meest recente case openings_"
-                    if aantal_cases is not None
-                    else f"_{total_counted:,} case openings gevonden_"
-                )
-                table = _build_luck_table(total_counted, counts)
-                embed.add_field(
-                    name="Geluksanalyse",
-                    value=f"{analysed_note}\n```ansi\n{table}\n```",
-                    inline=False,
-                )
+                # Normal cases table
+                if total_counted > 0:
+                    analysed_note = (
+                        f"_{total_counted:,} meest recente case openings_"
+                        if aantal_cases is not None
+                        else f"_{total_counted:,} case openings gevonden_"
+                    )
+                    table = _build_luck_table(total_counted, normal_counts)
+                    embed.add_field(
+                        name="🎲 Case geluk",
+                        value=f"{analysed_note}\n```ansi\n{table}\n```",
+                        inline=False,
+                    )
 
-        footer_base = "Odds: mythic 0.01% • legendary 0.04% • epic 0.85% • rare 7.1% • uncommon 30% • common 62%"
+                # Elite cases table
+                if elite_total > 0:
+                    elite_table = _build_luck_table(elite_total, elite_counts, ELITE_EXPECTED_RATES)
+                    embed.add_field(
+                        name="💎 Elite Case geluk",
+                        value=f"_{elite_total:,} elite case openings_\n```ansi\n{elite_table}\n```",
+                        inline=False,
+                    )
+
+        footer_base = "Kansen: mythic 0.01% • legendary 0.04% • epic 0.85% • rare 7.1% • uncommon 30% • common 62%  |  Elite: mythic 0.5% • legendary 2.5% • epic 15% • rare 32% • uncommon 50%"
 
         # Auto-upsert this player's luck score into the ranking DB if they're
         # an NL citizen with enough opens. This ensures /geluk always populates
         # the ranking even if daily_luck_refresh hasn't run yet.
         _nl_cid = self.config.get("nl_country_id", "")
         _player_country = (profile.get("country") or "") if profile else ""
-        if can_show_actual and counts and _nl_cid and _player_country == _nl_cid and aantal_cases is None:
-            _tc = sum(counts.values())
+        if can_show_actual and normal_counts and _nl_cid and _player_country == _nl_cid and aantal_cases is None:
+            _tc = sum(normal_counts.values())
             if _tc >= 20:
                 try:
                     from datetime import datetime as _dt
                     from datetime import timezone as _tz
 
-                    _luck = calc_luck_pct(counts, _tc)
-                    _rarity_json = __import__("json").dumps(counts)
+                    _luck = calc_luck_pct(normal_counts, _tc)
+                    _rarity_json = __import__("json").dumps(normal_counts)
                     _now = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                     _db = await self._get_db()
+                    _elite_tc = sum(elite_counts.values())
+                    _elite_luck = calc_elite_luck_pct(elite_counts, _elite_tc) if _elite_tc >= 5 else None
+                    _elite_rarity_json = __import__("json").dumps(elite_counts) if _elite_tc >= 5 else None
                     await _db.upsert_luck_score(
                         resolved_user_id,
                         _nl_cid,
@@ -574,6 +629,9 @@ class Geluk(commands.Cog, name="geluk"):
                         _tc,
                         _rarity_json,
                         _now,
+                        elite_luck_score=_elite_luck,
+                        elite_opens_count=_elite_tc if _elite_tc >= 5 else None,
+                        elite_rarity_json=_elite_rarity_json,
                     )
                     await _db.flush_luck_scores()
                     logger.info(

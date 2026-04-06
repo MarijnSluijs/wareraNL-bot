@@ -425,6 +425,33 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
         ]
         return _paginate_table(("#", "Land", "Bonus"), table_rows)
 
+    async def _section_artikel_tip(
+        self, days: Optional[int], limit: int, country_id: Optional[str] = None
+    ) -> list[str]:
+        assert self._db
+        rows = await self._db.get_top_tippers(days, limit, country_id)
+        if not rows:
+            return ["*Nog geen data — voer eerst `/peil artikelen` uit.*"]
+        table_rows = [
+            (
+                _medal(i + 1),
+                (r["citizen_name"] or r["user_id"])[:22],
+                f"{r['tip_total']:,.2f}",
+                str(r["tip_count"]),
+            )
+            for i, r in enumerate(rows)
+        ]
+        pages = _paginate_table(("#", "Speler", "Totaal CC", "Tips"), table_rows)
+        earliest, _ = await self._db.get_article_tips_date_range()
+        note = ""
+        if earliest:
+            note = f"\n-# Data vanaf {_fmt_date(earliest[:10])}"
+        if days:
+            note += f" · filter: laatste {days} dagen"
+        if note:
+            pages[-1] = pages[-1] + note
+        return pages
+
     async def _section_bevolking(self, limit: int) -> list[str]:
         client = self._client
         if not client:
@@ -578,6 +605,7 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
             app_commands.Choice(name="Wekelijks record — speler", value="wekelijks_speler"),
             app_commands.Choice(name="Wekelijks record — MU", value="wekelijks_mu"),
             app_commands.Choice(name="Wekelijks record — land", value="wekelijks_land"),
+            app_commands.Choice(name="Artikel tips (meest gegeven)", value="artikel_tip"),
             app_commands.Choice(name="Productie bonus (live)", value="productie_bonus"),
             app_commands.Choice(name="Actieve bevolking (live)", value="bevolking"),
             app_commands.Choice(name="Meeste regio's (live)", value="regio_count"),
@@ -645,6 +673,7 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
                 ("⚙️ Productie bonus", self._section_productie_bonus(_OVERVIEW_TOP)),
                 ("👥 Actieve bevolking", self._section_bevolking(_OVERVIEW_TOP)),
                 ("🗾 Meeste regio's", self._section_regio_count(_OVERVIEW_TOP)),
+                ("💬 Artikel tips", self._section_artikel_tip(days, _OVERVIEW_TOP, country_id)),
             ]
             for field_title, coro in sections:
                 pages = await coro
@@ -659,8 +688,8 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
 
         # ── Single type ───────────────────────────────────────────────
         type_titles = {
-            "speler_schade":   "⚔️ Top spelers — totale schade",
-            "gevecht":         "💥 Top gevechten — meeste schade",
+            "artikel_tip":     "💬 Top tippers — meeste artikel tips gegeven",
+            "speler_schade":   "⚔️ Top spelers — totale schade",            "gevecht":         "💥 Top gevechten — meeste schade",
             "solo":            "🎯 Solo records — meeste schade in 1 gevecht",
             "mu":              "🛡️ Top MUs — totale schade",
             "mu_record":       "🎖️ MU records — meeste schade in 1 gevecht",
@@ -676,8 +705,12 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
         }
         title = type_titles.get(soort, f"Leaderboard: {soort}")
 
+        # ── DB sections with optional day/country filter ─────────────
+        if soort == "artikel_tip":
+            pages = await self._section_artikel_tip(days, limit, country_id)
+            footer = "Dagelijks bijgewerkt via /peil artikelen"
         # ── Live / no-days sections ───────────────────────────────────
-        if soort == "vermogen":
+        elif soort == "vermogen":
             pages = await self._section_vermogen(limit)
             footer = "Live data van API · vermogen in CC · geen dagenfilter beschikbaar"
         elif soort == "productie_bonus":
