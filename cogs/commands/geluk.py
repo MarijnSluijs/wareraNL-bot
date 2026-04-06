@@ -10,7 +10,7 @@ import difflib
 import json
 import logging
 import math as _luck_math
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 
 import discord
 from discord import app_commands
@@ -464,6 +464,7 @@ class Geluk(commands.Cog, name="geluk"):
         speler="De gebruikersnaam van de speler om te controleren",
         gebruiker_id="Optioneel: WarEra user ID van de speler",
         aantal_cases="Optioneel: analyseer alleen de X meest recente case openings",
+        type="Toon alleen normale cases, elite cases, of gecombineerd (standaard: gecombineerd)",
     )
     @app_commands.autocomplete(speler=citizen_autocomplete)
     async def geluk(
@@ -472,6 +473,7 @@ class Geluk(commands.Cog, name="geluk"):
         speler: Optional[str] = None,
         gebruiker_id: Optional[str] = None,
         aantal_cases: Optional[int] = None,
+        type: Optional[Literal["normaal", "elite", "gecombineerd"]] = None,
     ) -> None:
         await interaction.response.defer(thinking=True)
 
@@ -578,7 +580,7 @@ class Geluk(commands.Cog, name="geluk"):
                 embed.description = "Deze speler heeft nog geen cases geopend (of er waren geen geregistreerde drops)."
             else:
                 # Normal cases table
-                if total_counted > 0:
+                if total_counted > 0 and type != "elite":
                     analysed_note = (
                         f"_{total_counted:,} meest recente case openings_"
                         if aantal_cases is not None
@@ -592,7 +594,7 @@ class Geluk(commands.Cog, name="geluk"):
                     )
 
                 # Elite cases table
-                if elite_total > 0:
+                if elite_total > 0 and type != "normaal":
                     elite_table = _build_luck_table(elite_total, elite_counts, ELITE_EXPECTED_RATES)
                     embed.add_field(
                         name="💎 Elite Case geluk",
@@ -645,6 +647,9 @@ class Geluk(commands.Cog, name="geluk"):
                         resolved_user_id,
                     )
 
+        _MIN_NORMAL = 20
+        _MIN_ELITE = 5
+
         # -- Gelukranking section (only for NL citizens) --
         try:
             nl_country_id = self.config.get("nl_country_id")
@@ -652,89 +657,146 @@ class Geluk(commands.Cog, name="geluk"):
                 db = await self._get_db()
                 ranking = await db.get_luck_ranking(nl_country_id)
                 if ranking:
-                    # Use the total from the last completed sweep so the denominator
-                    # stays consistent even while a new sweep is in progress.
                     try:
                         _stored = await db.get_poll_state("luck_ranking_total")
                         rank_total = int(_stored) if _stored else len(ranking)
                     except Exception:
                         rank_total = len(ranking)
-                    # rank_total from poll state may exceed the number of actual DB rows;
-                    # clamp to len(ranking) so index arithmetic stays in bounds.
-                    actual_len = len(ranking)
-                    rank_total = min(rank_total, actual_len)
-                    rank_target_idx: int | None = None
-                    for idx, entry in enumerate(ranking):
-                        if entry["user_id"] == resolved_user_id:
-                            rank_target_idx = idx
-                            break
-                    # Name fallback (in case user_id differs between search and DB)
-                    if rank_target_idx is None:
-                        for idx, entry in enumerate(ranking):
-                            if (
-                                entry["citizen_name"] or ""
-                            ).lower() == username.lower():
-                                rank_target_idx = idx
-                                break
+                    rank_total = min(rank_total, len(ranking))
 
-                    def _rank_row(idx: int, highlight: bool = False) -> str:
-                        e = ranking[idx]
-                        rn = idx + 1
-                        nm = (e["citizen_name"] or "?")[:12]
-                        pct = e["luck_score"]
-                        op = e.get("opens_count", 0)
-                        sign = "+" if pct >= 0 else ""
-                        ind = _luck_indicator_overall(pct)
-                        marker = " ◄" if highlight else ""
-                        return f"#{rn:<4} {nm:<12} {sign}{pct:>6.1f}%  {ind}  {op:>6,}{marker}"
-
-                    top5 = list(range(min(5, rank_total)))
-                    bot5 = list(range(max(0, rank_total - 5), rank_total))
-                    ctx_range = (
-                        list(
-                            range(
-                                max(0, rank_target_idx - 2),
-                                min(rank_total, rank_target_idx + 3),
-                            )
-                        )
-                        if rank_target_idx is not None
-                        else []
-                    )
-                    ordered = sorted(set(top5 + bot5 + ctx_range))
-
-                    rank_lines: list[str] = [
-                        f"{'rang':<5} {'naam':<12} {'score':>8}   {'geluk':<6} {'cases':>6}",
-                        "─" * 43,
-                    ]
-                    prev = -1
-                    for idx in ordered:
-                        if prev != -1 and idx > prev + 1:
-                            rank_lines.append("    • • •")
-                        rank_lines.append(
-                            _rank_row(idx, highlight=(idx == rank_target_idx))
-                        )
-                        prev = idx
-
-                    rank_block = "```\n" + "\n".join(rank_lines) + "\n```"
-
-                    updated_at = (ranking[0].get("updated_at") or "")[:16].replace(
-                        "T", " "
-                    )
+                    updated_at = (ranking[0].get("updated_at") or "")[:16].replace("T", " ")
                     _all_cases_note = "  _(ranking: alle cases)_" if aantal_cases is not None else ""
-                    if rank_target_idx is not None:
-                        rp = rank_target_idx + 1
-                        rpct = ranking[rank_target_idx]["luck_score"]
-                        rsign = "+" if rpct >= 0 else ""
-                        rank_title = (
-                            f"🏆 Gelukranking NL — "
-                            f"rang **#{rp}/{rank_total}** — "
-                            f"**{rsign}{rpct:.1f}%** {_luck_indicator_overall(rpct)}"
-                            f"{_all_cases_note}"
-                        )
-                    else:
-                        rank_title = f"🏆 Gelukranking NL — _{rank_total} spelers, niet in ranking (min. 20 cases)_{_all_cases_note}"
 
-                    embed.add_field(name=rank_title, value=rank_block, inline=False)
+                    # ── Helper: find player index in a sorted list ──
+                    def _find_player(sorted_list: list) -> int | None:
+                        for pos, entry in enumerate(sorted_list):
+                            uid = (entry if isinstance(entry, dict) else entry[1]).get("user_id")
+                            nm = ((entry if isinstance(entry, dict) else entry[1]).get("citizen_name") or "").lower()
+                            if uid == resolved_user_id or nm == username.lower():
+                                return pos
+                        return None
+
+                    # ── Helper: build leaderboard block ──
+                    def _build_lb(sorted_entries: list[dict], target_pos: int | None, score_fn) -> str:
+                        n = len(sorted_entries)
+                        top5 = list(range(min(5, n)))
+                        bot5 = list(range(max(0, n - 5), n))
+                        ctx = list(range(max(0, target_pos - 2), min(n, target_pos + 3))) if target_pos is not None else []
+                        ordered = sorted(set(top5 + bot5 + ctx))
+                        lines: list[str] = [
+                            f"{'rang':<5} {'naam':<12} {'score':>8}   {'geluk':<6} {'cases':>6}",
+                            "─" * 43,
+                        ]
+                        prev = -1
+                        for pos in ordered:
+                            if prev != -1 and pos > prev + 1:
+                                lines.append("    • • •")
+                            e = sorted_entries[pos]
+                            pct = score_fn(e)
+                            nm = (e.get("citizen_name") or "?")[:12]
+                            op = e.get("opens_count", 0)
+                            sign = "+" if pct >= 0 else ""
+                            ind = _luck_indicator_overall(pct)
+                            marker = " ◄" if pos == target_pos else ""
+                            lines.append(f"#{pos+1:<4} {nm:<12} {sign}{pct:>6.1f}%  {ind}  {op:>6,}{marker}")
+                            prev = pos
+                        return "```\n" + "\n".join(lines) + "\n```"
+
+                    if type == "normaal":
+                        # Normal-only view: sort by luck_score
+                        normal_sorted = sorted(ranking, key=lambda e: e["luck_score"], reverse=True)
+                        normal_target = _find_player(normal_sorted)
+                        if normal_target is not None:
+                            rp = normal_target + 1
+                            rpct = normal_sorted[normal_target]["luck_score"]
+                            rsign = "+" if rpct >= 0 else ""
+                            rank_title = (
+                                f"🏆 Gelukranking NL (normale cases) — "
+                                f"rang **#{rp}/{rank_total}** — "
+                                f"**{rsign}{rpct:.1f}%** {_luck_indicator_overall(rpct)}"
+                                f"{_all_cases_note}"
+                            )
+                        else:
+                            rank_title = f"🏆 Gelukranking NL (normale cases) — _{rank_total} spelers, niet in ranking (min. {_MIN_NORMAL} cases)_{_all_cases_note}"
+                        lb = _build_lb(normal_sorted, normal_target, lambda e: e["luck_score"])
+                        embed.add_field(name=rank_title, value=lb, inline=False)
+
+                    elif type == "elite":
+                        # Elite-only view: sort by elite_luck_score, exclude those without it
+                        elite_only = [e for e in ranking if e.get("elite_luck_score") is not None]
+                        elite_sorted = sorted(elite_only, key=lambda e: e["elite_luck_score"], reverse=True)  # type: ignore[arg-type]
+                        elite_target = _find_player(elite_sorted)
+                        n_elite = len(elite_sorted)
+                        if elite_target is not None:
+                            rp = elite_target + 1
+                            rpct = elite_sorted[elite_target]["elite_luck_score"]  # type: ignore[index]
+                            rsign = "+" if rpct >= 0 else ""
+                            rank_title = (
+                                f"🏆 Gelukranking NL (elite cases) — "
+                                f"rang **#{rp}/{n_elite}** — "
+                                f"**{rsign}{rpct:.1f}%** {_luck_indicator_overall(rpct)}"
+                                f"{_all_cases_note}"
+                            )
+                        else:
+                            rank_title = f"🏆 Gelukranking NL (elite cases) — _{n_elite} spelers, niet in ranking (min. {_MIN_ELITE} elite cases)_{_all_cases_note}"
+                        if elite_sorted:
+                            lb = _build_lb(elite_sorted, elite_target, lambda e: e["elite_luck_score"])  # type: ignore[arg-type]
+                            embed.add_field(name=rank_title, value=lb, inline=False)
+                        else:
+                            embed.add_field(name=rank_title, value="_Geen data beschikbaar._", inline=False)
+
+                    else:
+                        # Combined view (default)
+                        # ── Normal rank ──
+                        normal_sorted_c = sorted(ranking, key=lambda e: e["luck_score"], reverse=True)
+                        normal_target_c = _find_player(normal_sorted_c)
+                        if normal_target_c is not None:
+                            embed.add_field(
+                                name="🎲 Rang NL (normale cases)",
+                                value=f"**#{normal_target_c + 1}/{rank_total}** _(min. {_MIN_NORMAL} cases)_",
+                                inline=True,
+                            )
+
+                        # ── Elite rank ──
+                        elite_only_c = [e for e in ranking if e.get("elite_luck_score") is not None]
+                        elite_sorted_c = sorted(elite_only_c, key=lambda e: e["elite_luck_score"], reverse=True)  # type: ignore[arg-type]
+                        elite_target_c = _find_player(elite_sorted_c)
+                        n_elite_c = len(elite_sorted_c)
+                        if elite_target_c is not None:
+                            embed.add_field(
+                                name="💎 Rang NL (elite cases)",
+                                value=f"**#{elite_target_c + 1}/{n_elite_c}** _(min. {_MIN_ELITE} elite cases)_",
+                                inline=True,
+                            )
+
+                        # ── Combined leaderboard ──
+                        def _combined_score(e: dict) -> float:
+                            ls = e.get("luck_score")
+                            es = e.get("elite_luck_score")
+                            if ls is not None and es is not None:
+                                return (ls + es) / 2.0
+                            return ls if ls is not None else (es if es is not None else 0.0)
+
+                        combined_sorted = sorted(ranking, key=_combined_score, reverse=True)
+                        combined_target = _find_player(combined_sorted)
+
+                        lb = _build_lb(combined_sorted, combined_target, _combined_score)
+
+                        if combined_target is not None:
+                            rp = combined_target + 1
+                            rpct = _combined_score(combined_sorted[combined_target])
+                            rsign = "+" if rpct >= 0 else ""
+                            rank_title = (
+                                f"🏆 Gelukranking NL (gecombineerd) — "
+                                f"rang **#{rp}/{rank_total}** — "
+                                f"**{rsign}{rpct:.1f}%** {_luck_indicator_overall(rpct)}"
+                                f"{_all_cases_note}"
+                            )
+                        else:
+                            rank_title = f"🏆 Gelukranking NL (gecombineerd) — _{rank_total} spelers, niet in ranking (min. {_MIN_NORMAL} cases)_{_all_cases_note}"
+
+                        embed.add_field(name=rank_title, value=lb, inline=False)
+
                     if updated_at:
                         footer_base += f"  •  Ranking bijgewerkt: {updated_at} UTC"
         except Exception:
