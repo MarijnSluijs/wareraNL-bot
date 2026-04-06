@@ -305,12 +305,12 @@ class GlobalLuck(commands.Cog, name="globalluck"):
 
     @app_commands.command(
         name="globalluck",
-        description="Wereldwijde case-geluk ranking — top 5, bottom 5, of zoek een speler",
+        description="Worldwide case-opening luck ranking — top 5, bottom 5, or look up a player",
     )
     @app_commands.describe(
-        speler="Optioneel: zoek op spelernaam voor persoonlijke analyse + wereldwijde rang",
-        aantal_cases="Optioneel: analyseer alleen de X meest recente case openings (alleen bij speler-modus)",
-        type="Toon alleen normale cases, elite cases, of gecombineerd (standaard: gecombineerd)",
+        speler="Optional: search by player name for personal analysis + worldwide rank",
+        aantal_cases="Optional: analyse only the X most recent case openings (player mode only)",
+        type="Show only normal cases, elite cases, or combined (default: combined)",
     )
     @app_commands.autocomplete(speler=citizen_autocomplete)
     async def globalluck(
@@ -372,34 +372,34 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         )
 
         embed = discord.Embed(
-            title="🌍 Wereldwijde Gelukranking",
+            title="🌍 Worldwide Luck Ranking",
             description=(
-                f"Top 5 gelukkigste & ongelukkigste spelers wereldwijd\n"
-                f"_{total_ranked:,} spelers gescoord_"
+                f"Top 5 luckiest & unluckiest players worldwide\n"
+                f"_{total_ranked:,} players scored_"
             ),
             color=discord.Color.gold(),
         )
 
         def _row(rank: int, entry: dict) -> str:
-            name = (entry.get("citizen_name") or "?")[:18]
+            name = (entry.get("citizen_name") or "?")[:13]
             score = entry["luck_score"]
             opens = entry["opens_count"]
-            country = _cname(entry.get("country_id", ""))
+            country = _cname(entry.get("country_id", ""))[:6]
             sign = "+" if score >= 0 else ""
             ind = _luck_indicator_overall(score)
-            return f"#{rank:<4} {name:<18} {sign}{score:>7.1f}%  {ind}  {opens:>6,} ({country})"
+            return f"#{rank:<4} {name:<13} {sign}{score:>7.1f}%  {ind}  {opens:>5,} {country:<6}"
 
         header = (
-            f"{'rang':<5} {'naam':<18} {'score':>8}   {'geluk':<5}  {'cases':>6}  land"
+            f"{'rank':<5} {'name':<13} {'score':>8}   {'luck':<4}  {'cases':>5} ctry"
         )
-        sep = "─" * 72
+        sep = "─" * 50
 
         # Top 5
         top_lines = [header, sep]
         for i, entry in enumerate(top5, start=1):
             top_lines.append(_row(i, entry))
         embed.add_field(
-            name="🍀 Top 5 — Gelukkigste spelers",
+            name="🍀 Top 5 — Luckiest players",
             value="```\n" + "\n".join(top_lines) + "\n```",
             inline=False,
         )
@@ -410,16 +410,16 @@ class GlobalLuck(commands.Cog, name="globalluck"):
             rank = total_ranked - i
             bot_lines.append(_row(rank, entry))
         embed.add_field(
-            name="💀 Bottom 5 — Ongelukkigste spelers",
+            name="💀 Bottom 5 — Unluckiest players",
             value="```\n" + "\n".join(bot_lines) + "\n```",
             inline=False,
         )
 
         embed.set_footer(
             text=(
-                f"Kansen: mythic 0.01% • legendary 0.04% • epic 0.85% • rare 7.1%  "
-                f"•  Min. 20 cases vereist  •  Bijgewerkt: {updated_at} UTC  "
-                f"•  Gebruik /globalluck speler:naam voor analyse"
+                f"Odds: mythic 0.01% • legendary 0.04% • epic 0.85% • rare 7.1%  "
+                f"•  Min. 20 cases required  •  Updated: {updated_at} UTC  "
+                f"•  Use /globalluck speler:name for player analysis"
             )
         )
         await interaction.followup.send(embed=embed)
@@ -443,9 +443,9 @@ class GlobalLuck(commands.Cog, name="globalluck"):
 
         if not candidates:
             await interaction.followup.send(
-                f"❌ Geen speler gevonden die overeenkomt met **{discord.utils.escape_markdown(speler)}** "
-                f"in de globale ranking.\n"
-                f"Zorg dat de spelling klopt of wacht tot de ranking bijgewerkt is.",
+                f"❌ No player found matching **{discord.utils.escape_markdown(speler)}** "
+                f"in the global ranking.\n"
+                f"Check the spelling or wait until the ranking is updated.",
                 ephemeral=True,
             )
             return
@@ -472,7 +472,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
 
         if target is None:
             await interaction.followup.send(
-                f"❌ Geen resultaat voor **{discord.utils.escape_markdown(speler)}**.",
+                f"❌ No result for **{discord.utils.escape_markdown(speler)}**.",
                 ephemeral=True,
             )
             return
@@ -498,7 +498,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
             opens = sum(normal_counts.values())
             luck_score = _calc_luck_score(normal_counts, opens)
             analysis_note = (
-                f"🔴 Live ({opens:,} meest recente)"
+                f"🔴 Live ({opens:,} most recent)"
                 if max_cases is not None
                 else "🔴 Live"
             )
@@ -527,7 +527,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
             return luck_score
 
         embed = discord.Embed(
-            title=f"🌍 Wereldwijd geluk — {username}",
+            title=f"🌍 Worldwide luck — {username}",
             color=discord.Color.gold(),
         )
         embed.add_field(
@@ -536,38 +536,38 @@ class GlobalLuck(commands.Cog, name="globalluck"):
             inline=True,
         )
         embed.add_field(
-            name="Gecombineerde rang",
+            name="Combined rank",
             value=(
                 f"**{combined_rank_str}** / {total_ranked:,}"
-                + ("\n_gebaseerd op alle cases_" if max_cases is not None else "")
+                + ("\n_based on all cases_" if max_cases is not None else "")
             ),
             inline=True,
         )
         embed.add_field(
-            name="Land",
+            name="Country",
             value=_cname(country_id),
             inline=True,
         )
         embed.add_field(
-            name="Cases geopend",
-            value=f"{opens:,}" + (f" _(meest recente {max_cases:,})_" if max_cases is not None and live is not None else ""),
+            name="Cases opened",
+            value=f"{opens:,}" + (f" _(most recent {max_cases:,})_" if max_cases is not None and live is not None else ""),
             inline=True,
         )
 
         if opens > 0 and normal_counts and weergave != "elite":
             table = _build_luck_table(opens, normal_counts)
-            normal_rank_note = f"\nNormale cases rang: **{rank_str}** / {total_ranked:,}" if rank is not None else ""
+            normal_rank_note = f"\nNormal cases rank: **{rank_str}** / {total_ranked:,}" if rank is not None else ""
             embed.add_field(
-                name="🎲 Case geluk",
+                name="🎲 Case luck",
                 value=f"```ansi\n{table}\n```{normal_rank_note}",
                 inline=False,
             )
 
         if elite_opens > 0 and weergave != "normaal":
             elite_table = _build_luck_table(elite_opens, elite_counts, ELITE_EXPECTED_RATES)
-            elite_rank_note = f"\nElite cases rang: **{elite_rank_str}** / {elite_rank_total:,}" if elite_rank is not None else ""
+            elite_rank_note = f"\nElite cases rank: **{elite_rank_str}** / {elite_rank_total:,}" if elite_rank is not None else ""
             embed.add_field(
-                name="💎 Elite Case geluk",
+                name="💎 Elite Case luck",
                 value=f"```ansi\n{elite_table}\n```{elite_rank_note}",
                 inline=False,
             )
@@ -577,16 +577,16 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         _MIN_ELITE = 5
         try:
             def _row_lb(rn: int, entry: dict, score_val: float, highlight: bool = False) -> str:
-                name = (entry.get("citizen_name") or "?")[:18]
+                name = (entry.get("citizen_name") or "?")[:13]
                 c_opens = entry.get("opens_count") or 0
-                country = _cname(entry.get("country_id", ""))
+                country = _cname(entry.get("country_id", ""))[:6]
                 csign = "+" if score_val >= 0 else ""
                 cind = _luck_indicator_overall(score_val)
                 marker = " ◄" if highlight else ""
-                return f"#{rn:<4} {name:<18} {csign}{score_val:>7.1f}%  {cind}  {c_opens:>6,} ({country}){marker}"
+                return f"#{rn:<4} {name:<13} {csign}{score_val:>7.1f}%  {cind}  {c_opens:>5,} {country:<6}{marker}"
 
-            lb_header = f"{'rang':<5} {'naam':<18} {'score':>8}   {'geluk':<5}  {'cases':>6}  land"
-            lb_sep = "─" * 72
+            lb_header = f"{'rank':<5} {'name':<13} {'score':>8}   {'luck':<4}  {'cases':>5} ctry"
+            lb_sep = "─" * 50
 
             if weergave == "normaal":
                 # Normal-only worldwide leaderboard
@@ -610,9 +610,9 @@ class GlobalLuck(commands.Cog, name="globalluck"):
                     lb_block = "```\n" + "\n".join(top_lines + player_lines + bot_lines) + "\n```"
                     if rank is not None:
                         rsign = "+" if luck_score >= 0 else ""
-                        lb_title = f"🌍 Gelukranking Wereld (normale cases) — rang **{rank_str}/{total_ranked:,}** — **{rsign}{luck_score:.1f}%** {_luck_indicator_overall(luck_score)}"
+                        lb_title = f"🌍 World Luck Ranking (normal cases) — rank **{rank_str}/{total_ranked:,}** — **{rsign}{luck_score:.1f}%** {_luck_indicator_overall(luck_score)}"
                     else:
-                        lb_title = f"🌍 Gelukranking Wereld (normale cases) — _{total_ranked:,} spelers, niet in ranking (min. {_MIN_NORMAL} cases)_"
+                        lb_title = f"🌍 World Luck Ranking (normal cases) — _{total_ranked:,} players, not ranked (min. {_MIN_NORMAL} cases)_"
                     embed.add_field(name=lb_title, value=lb_block, inline=False)
 
             elif weergave == "elite":
@@ -640,12 +640,12 @@ class GlobalLuck(commands.Cog, name="globalluck"):
                     esc_player = live_elite_luck if live_elite_luck is not None else (target.get("elite_luck_score") or 0.0)
                     if elite_rank is not None:
                         esign = "+" if esc_player >= 0 else ""
-                        lb_title = f"🌍 Gelukranking Wereld (elite cases) — rang **{elite_rank_str}/{elite_total_world:,}** — **{esign}{esc_player:.1f}%** {_luck_indicator_overall(esc_player)}"
+                        lb_title = f"🌍 World Luck Ranking (elite cases) — rank **{elite_rank_str}/{elite_total_world:,}** — **{esign}{esc_player:.1f}%** {_luck_indicator_overall(esc_player)}"
                     else:
-                        lb_title = f"🌍 Gelukranking Wereld (elite cases) — _{elite_total_world:,} spelers, niet in ranking (min. {_MIN_ELITE} elite cases)_"
+                        lb_title = f"🌍 World Luck Ranking (elite cases) — _{elite_total_world:,} players, not ranked (min. {_MIN_ELITE} elite cases)_"
                     embed.add_field(name=lb_title, value=lb_block, inline=False)
                 else:
-                    embed.add_field(name="🌍 Gelukranking Wereld (elite cases)", value="_Geen elite data beschikbaar._", inline=False)
+                    embed.add_field(name="🌍 World Luck Ranking (elite cases)", value="_No elite data available._", inline=False)
 
             else:
                 # Combined worldwide leaderboard (default)
@@ -689,11 +689,11 @@ class GlobalLuck(commands.Cog, name="globalluck"):
 
                     lb_block = "```\n" + "\n".join(top_lines + player_lines + bot_lines) + "\n```"
 
-                    lb_rank_info = f"rang **{combined_rank_str}/{total_ranked:,}** — " if combined_rank is not None else ""
+                    lb_rank_info = f"rank **{combined_rank_str}/{total_ranked:,}** — " if combined_rank is not None else ""
                     cscore = _combined_score_local()
                     csign2 = "+" if cscore >= 0 else ""
                     lb_title = (
-                        f"🌍 Gelukranking Wereld (gecombineerd) — "
+                        f"🌍 World Luck Ranking (combined: cases + elite cases) — "
                         f"{lb_rank_info}**{csign2}{cscore:.1f}%** {_luck_indicator_overall(cscore)}"
                     )
                     embed.add_field(name=lb_title, value=lb_block, inline=False)
@@ -702,10 +702,10 @@ class GlobalLuck(commands.Cog, name="globalluck"):
 
         embed.set_footer(
             text=(
-                f"Kansen: mythic 0.01% • legendary 0.04% • epic 0.85% • rare 7.1%  "
+                f"Odds: mythic 0.01% • legendary 0.04% • epic 0.85% • rare 7.1%  "
                 f"Elite: mythic 0.5% • legendary 2.5% • epic 15% • rare 32% • uncommon 50%  •  "
-                f"Min. 20 cases vereist  •  Analyse: {analysis_note}  "
-                f"•  Rang bijgewerkt: {rank_updated_at} UTC"
+                f"Min. 20 cases required  •  Analysis: {analysis_note}  "
+                f"•  Rank updated: {rank_updated_at} UTC"
             )
         )
         await interaction.followup.send(embed=embed)
