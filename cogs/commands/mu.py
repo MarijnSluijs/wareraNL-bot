@@ -167,11 +167,9 @@ class MU(commands.Cog, name="mu"):
 
         mus = await self._get_all_dutch_mus()
         if not mus:
-            await interaction.followup.send(
-                embed=discord.Embed(
-                    description="Geen Nederlandse MU's gevonden (of de DB is leeg).",
-                    color=discord.Color.red(),
-                )
+            await self._send_api_offline(
+                interaction,
+                "Kon geen Nederlandse MU's ophalen. De API is mogelijk tijdelijk niet beschikbaar.",
             )
             return
 
@@ -277,11 +275,9 @@ class MU(commands.Cog, name="mu"):
 
         mus = await self._get_all_dutch_mus()
         if not mus:
-            await interaction.followup.send(
-                embed=discord.Embed(
-                    description="Geen Nederlandse MU's gevonden (of de DB is leeg).",
-                    color=discord.Color.red(),
-                )
+            await self._send_api_offline(
+                interaction,
+                "Kon geen Nederlandse MU's ophalen. De API is mogelijk tijdelijk niet beschikbaar.",
             )
             return
 
@@ -520,11 +516,9 @@ class MU(commands.Cog, name="mu"):
                 logger.warning("eco_donations: Failed to get MU %s: %s", mu_id, exc)
 
         if not mu_members:
-            await interaction.followup.send(
-                embed=discord.Embed(
-                    description="Kon geen MU-gegevens of leden ophalen.",
-                    color=discord.Color.red(),
-                )
+            await self._send_api_offline(
+                interaction,
+                "Kon geen MU-gegevens of leden ophalen. De API is mogelijk tijdelijk niet beschikbaar.",
             )
             return
 

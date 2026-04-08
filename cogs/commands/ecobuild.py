@@ -666,9 +666,7 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
         await interaction.response.defer(thinking=True)
 
         if not self._client:
-            await interaction.followup.send(
-                "❌ API client niet geïnitialiseerd.", ephemeral=True
-            )
+            await self._send_api_offline(interaction)
             return
 
         query = speler or interaction.user.display_name

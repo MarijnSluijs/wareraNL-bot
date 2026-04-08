@@ -6,6 +6,8 @@ Provides safe access to shared services and common Discord utilities.
 
 from __future__ import annotations
 
+from typing import Union
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -83,15 +85,47 @@ class CommandCogBase(commands.Cog):
         except Exception:
             return discord.Colour.gold()
 
-    async def _fetch_country_list(self, ctx: Context) -> list[dict] | None:
-        """Fetch and unwrap the country list; sends an error to ctx on failure."""
+    def _api_offline_embed(self, note: str = "") -> discord.Embed:
+        """Return a standardised 'API offline' embed."""
+        desc = (
+            "⚠️ De WarEra API is momenteel niet beschikbaar.\n"
+            "Probeer het later opnieuw."
+        )
+        if note:
+            desc += f"\n\n{note}"
+        return discord.Embed(
+            title="🔌 API Offline",
+            description=desc,
+            colour=discord.Colour.orange(),
+        )
+
+    async def _send_api_offline(
+        self,
+        ctx: Union[Context, discord.Interaction],
+        note: str = "",
+    ) -> None:
+        """Send a standardised 'API offline' message to *ctx* or *interaction*."""
+        embed = self._api_offline_embed(note)
+        if isinstance(ctx, discord.Interaction):
+            if ctx.response.is_done():
+                await ctx.followup.send(embed=embed)
+            else:
+                await ctx.response.send_message(embed=embed, ephemeral=True)
+        else:
+            await ctx.send(embed=embed)
+
+    async def _fetch_country_list(self, ctx: Union[Context, discord.Interaction]) -> list[dict] | None:
+        """Fetch and unwrap the country list; sends an API-offline embed on failure."""
+        if not self._client:
+            await self._send_api_offline(ctx)
+            return None
         try:
             resp = await self._client.get("/country.getAllCountries")
-        except Exception as exc:
-            await ctx.send(f"Ophalen van landen mislukt: {exc}")
+        except Exception:
+            await self._send_api_offline(ctx)
             return None
         result = extract_country_list(resp)
         if not result:
-            await ctx.send("Kon landenlijst niet ophalen van API.")
+            await self._send_api_offline(ctx, "Lege landenlijst ontvangen van de API.")
             return None
         return result

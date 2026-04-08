@@ -384,6 +384,44 @@ class Owner(commands.Cog, name="owner"):
     #     await context.send(embed=embed)
 
 
+    @commands.command(
+        name="apioffline",
+        description="Simuleer de API als offline of herstel de verbinding (test mode).",
+    )
+    @commands.is_owner()
+    async def apioffline(self, context: Context, state: str) -> None:
+        """Toggle API offline simulation for testing fallback behaviour.
+
+        Usage: !apioffline on   — null the shared client so all commands see the API as offline
+               !apioffline off  — restore the saved client
+        """
+        state = state.strip().lower()
+        if state == "on":
+            if getattr(self.bot, "_force_api_offline", False):
+                await context.send("⚠️ API offline-modus is al actief.")
+                return
+            # Save the real client and null it out so CommandCogBase sees None
+            self.bot._saved_ext_client = getattr(self.bot, "_ext_client", None)
+            self.bot._ext_client = None
+            self.bot._force_api_offline = True
+            await context.send(
+                "🔌 **API offline-modus ingeschakeld.** Alle API-afhankelijke commando's "
+                "zullen nu de offline-melding tonen. Gebruik `!apioffline off` om te herstellen."
+            )
+        elif state == "off":
+            if not getattr(self.bot, "_force_api_offline", False):
+                await context.send("✅ API offline-modus is niet actief.")
+                return
+            # Restore the saved client
+            saved = getattr(self.bot, "_saved_ext_client", None)
+            self.bot._ext_client = saved
+            self.bot._force_api_offline = False
+            self.bot._saved_ext_client = None
+            await context.send("✅ **API offline-modus uitgeschakeld.** Verbinding hersteld.")
+        else:
+            await context.send("❌ Gebruik: `!apioffline on` of `!apioffline off`")
+
+
 async def setup(bot) -> None:
     """Add the Owner cog to the bot."""
     await bot.add_cog(Owner(bot))

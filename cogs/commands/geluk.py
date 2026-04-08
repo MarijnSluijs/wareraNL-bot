@@ -228,7 +228,131 @@ class Geluk(commands.Cog, name="geluk"):
         self._item_rarity_cache: dict[str, str] = {}  # itemCode → rarity
         self._db: Optional[object] = None  # lazy Database connection for /gelukranking
 
+    def _build_cached_luck_embed(
+        self, entry: dict, type: Optional[Literal["normaal", "elite", "gecombineerd"]]
+    ) -> discord.Embed:
+        """Build an embed from a citizen_luck DB row when the API is offline."""
+        from datetime import datetime
+
+        cached_name = entry.get("citizen_name") or "Onbekend"
+        updated_at_raw = entry.get("updated_at") or ""
+        try:
+            dt = datetime.fromisoformat(updated_at_raw)
+            updated_at = dt.strftime("%d-%m-%Y %H:%M")
+        except Exception:
+            updated_at = (updated_at_raw or "")[:16].replace("T", " ") or "onbekend"
+
+        opens = int(entry.get("opens_count") or 0)
+        luck_score = float(entry.get("luck_score") or 0.0)
+        elite_opens = int(entry.get("elite_opens_count") or 0)
+
+        rarity_raw = entry.get("rarity_json")
+        normal_counts: dict[str, int] = json.loads(rarity_raw) if rarity_raw else {}
+        elite_raw = entry.get("elite_rarity_json")
+        elite_counts: dict[str, int] = json.loads(elite_raw) if elite_raw else {}
+
+        embed = discord.Embed(
+            title=f"🎰 Case-geluk van {cached_name}",
+            description=(
+                "⚠️ De API is offline — gecachete data wordt weergegeven."
+                f"\n-# Gegevens bijgewerkt: {updated_at} UTC"
+            ),
+            color=discord.Color.gold(),
+        )
+
+        sign = "+" if luck_score >= 0 else ""
+        ind = _luck_indicator_overall(luck_score)
+        embed.add_field(
+            name="Cases geopend",
+            value=f"**{opens:,}**",
+            inline=True,
+        )
+        embed.add_field(
+            name="Luck score",
+            value=f"**{sign}{luck_score:.1f}%** {ind}",
+            inline=True,
+        )
+
+        if opens > 0 and normal_counts and type != "elite":
+            table = _build_luck_table(opens, normal_counts)
+            embed.add_field(
+                name="🎲 Case geluk",
+                value=f"_{opens:,} case openings_\n```ansi\n{table}\n```",
+                inline=False,
+            )
+        if elite_opens > 0 and elite_counts and type != "normaal":
+            elite_table = _build_luck_table(elite_opens, elite_counts, ELITE_EXPECTED_RATES)
+            embed.add_field(
+                name="💎 Elite Case geluk",
+                value=f"_{elite_opens:,} elite case openings_\n```ansi\n{elite_table}\n```",
+                inline=False,
+            )
+
+        embed.set_footer(
+            text="Kansen: mythic 0.01% • legendary 0.04% • epic 0.85% • rare 7.1%"
+            " • uncommon 30% • common 62%  |  Elite: mythic 0.5% • legendary 2.5%"
+            " • epic 15% • rare 32% • uncommon 50%"
+        )
+        return embed
+
+    def _api_offline_embed(self, note: str = "") -> discord.Embed:
+        """Return a standardised 'API offline' embed."""
+        desc = (
+            "⚠️ De WarEra API is momenteel niet beschikbaar.\n"
+            "Probeer het later opnieuw."
+        )
+        if note:
+            desc += f"\n\n{note}"
+        return discord.Embed(
+            title="🔌 API Offline",
+            description=desc,
+            colour=discord.Colour.orange(),
+        )
+
+    @staticmethod
+    def _find_in_ranking(
+        sorted_list: list, uid: Optional[str], name: str
+    ) -> Optional[int]:
+        """Return the 0-based position of the player in *sorted_list*, or None."""
+        name_low = (name or "").lower().strip()
+        for pos, e in enumerate(sorted_list):
+            item = e if isinstance(e, dict) else e[1]
+            if item.get("user_id") == uid or (item.get("citizen_name") or "").lower().strip() == name_low:
+                return pos
+        return None
+
+    @staticmethod
+    def _build_ranking_block(
+        sorted_entries: list, target_pos: Optional[int], score_fn
+    ) -> str:
+        """Build the fixed-width leaderboard text block."""
+        n = len(sorted_entries)
+        top5 = list(range(min(5, n)))
+        bot5 = list(range(max(0, n - 5), n))
+        ctx = list(range(max(0, target_pos - 2), min(n, target_pos + 3))) if target_pos is not None else []
+        ordered = sorted(set(top5 + bot5 + ctx))
+        lines: list[str] = [
+            f"{'rang':<5} {'naam':<12} {'score':>8}   {'geluk':<6} {'cases':>6}",
+            "\u2500" * 43,
+        ]
+        prev = -1
+        for pos in ordered:
+            if prev != -1 and pos > prev + 1:
+                lines.append("    \u2022 \u2022 \u2022")
+            e = sorted_entries[pos]
+            pct = score_fn(e)
+            nm = (e.get("citizen_name") or "?")[:12]
+            op = e.get("opens_count", 0)
+            sign = "+" if pct >= 0 else ""
+            ind = _luck_indicator_overall(pct)
+            marker = " \u25c4" if pos == target_pos else ""
+            lines.append(f"#{pos+1:<4} {nm:<12} {sign}{pct:>6.1f}%  {ind}  {op:>6,}{marker}")
+            prev = pos
+        return "```\n" + "\n".join(lines) + "\n```"
+
     async def _get_client(self) -> APIClient:
+        if getattr(self.bot, "_force_api_offline", False):
+            raise RuntimeError("API offline (test mode)")
         if self._client is None:
             base_url = self.config.get("api_base_url", "https://api2.warera.io/trpc")
             api_keys = None
@@ -262,10 +386,14 @@ class Geluk(commands.Cog, name="geluk"):
             logger.warning("Geluk: could not load item rarities: %s", exc)
         return self._item_rarity_cache
 
-    async def _search_user(self, username: str) -> list[str]:
-        """Search for a player by username and return up to 5 candidate user IDs."""
-        client = await self._get_client()
+    async def _search_user(self, username: str) -> list[str] | None:
+        """Search for a player by username and return up to 5 candidate user IDs.
+
+        Returns None if the API is unreachable (connection/timeout error).
+        Returns an empty list [] if the API responded but found nothing.
+        """
         try:
+            client = await self._get_client()
             raw = await client.get(
                 "/search.searchAnything",
                 params={"input": json.dumps({"searchText": username})},
@@ -275,7 +403,7 @@ class Geluk(commands.Cog, name="geluk"):
             return user_ids[:5]
         except Exception as exc:
             logger.warning("Geluk: search failed for %r: %s", username, exc)
-            return []
+            return None  # None = API unreachable; [] = API up but no results
 
     async def _get_user_profile(self, user_id: str) -> Optional[dict]:
         """Return getUserLite data for a user."""
@@ -308,16 +436,23 @@ class Geluk(commands.Cog, name="geluk"):
 
     async def _resolve_user_from_query(
         self, query: str
-    ) -> tuple[Optional[str], Optional[dict]]:
+    ) -> tuple[Optional[str], Optional[dict], bool]:
         """Resolve user by query: exact username first, closest search candidate as fallback.
 
         Falls back to local DB fuzzy name match when the API search returns nothing.
+
+        Returns (user_id, profile, api_offline) where api_offline=True means the API
+        was unreachable (as opposed to the player genuinely not being found).
         """
         s_low = query.lower().strip()
         user_ids = await self._search_user(query)
 
+        if user_ids is None:
+            # API is unreachable — signal caller to show offline embed
+            return None, None, True
+
         if not user_ids:
-            # API returned nothing — try fuzzy match against local citizen_levels cache
+            # API responded but found nothing — try fuzzy match against local citizen_levels cache
             db = await self._get_db()
             nl_country_id = self.config.get("nl_country_id")
             match = await db.fuzzy_citizen_by_name(query, country_id=nl_country_id)
@@ -325,8 +460,8 @@ class Geluk(commands.Cog, name="geluk"):
                 uid, _ = match
                 p = await self._get_user_profile(uid)
                 if p is not None:
-                    return uid, p
-            return None, None
+                    return uid, p, False
+            return None, None, False
 
         candidates: list[tuple[str, dict]] = []
         for uid in user_ids:
@@ -336,7 +471,7 @@ class Geluk(commands.Cog, name="geluk"):
 
         for uid, p in candidates:
             if (p.get("username") or "").lower().strip() == s_low:
-                return uid, p
+                return uid, p, False
 
         best_uid: Optional[str] = None
         best_profile: Optional[dict] = None
@@ -350,7 +485,7 @@ class Geluk(commands.Cog, name="geluk"):
                 best_uid = uid
                 best_profile = p
 
-        return best_uid, best_profile
+        return best_uid, best_profile, False
 
     async def _fetch_all_case_transactions(
         self,
@@ -483,22 +618,112 @@ class Geluk(commands.Cog, name="geluk"):
         # 1. Find player — by gebruiker_id if provided, otherwise by username.
         profile: Optional[dict] = None
         resolved_user_id: Optional[str] = None
-        if gebruiker_id:
+        api_offline = False
+        if getattr(self.bot, "_force_api_offline", False):
+            # Skip all API calls immediately when test mode forces offline.
+            api_offline = True
+        elif gebruiker_id:
             p = await self._get_user_profile(gebruiker_id)
             if p is not None:
                 profile = p
                 resolved_user_id = gebruiker_id
             elif speler:
-                resolved_user_id, profile = await self._resolve_user_from_query(speler)
+                resolved_user_id, profile, api_offline = await self._resolve_user_from_query(speler)
         elif speler:
-            resolved_user_id, profile = await self._resolve_user_from_query(speler)
+            resolved_user_id, profile, api_offline = await self._resolve_user_from_query(speler)
 
         lookup_label = gebruiker_id or speler or "?"
         if resolved_user_id is None or profile is None:
-            await interaction.followup.send(
-                f"❌ Speler **{discord.utils.escape_markdown(lookup_label)}** niet gevonden.",
-                ephemeral=True,
-            )
+            if api_offline:
+                db = await self._get_db()
+                entry: Optional[dict] = None
+                if db:
+                    try:
+                        entry = await db.get_luck_entry_by_name(lookup_label)
+                    except Exception as exc:
+                        logger.warning("Geluk: DB name lookup failed: %s", exc)
+                if entry is not None:
+                    embed_off = self._build_cached_luck_embed(entry, type)
+                    # Add ranking if this is an NL citizen
+                    nl_country_id_off = self.config.get("nl_country_id")
+                    if nl_country_id_off and entry.get("country_id") == nl_country_id_off:
+                        try:
+                            ranking_off = await db.get_luck_ranking(nl_country_id_off)
+                            if ranking_off:
+                                try:
+                                    _stored_off = await db.get_poll_state("luck_ranking_total")
+                                    rank_total_off = int(_stored_off) if _stored_off else len(ranking_off)
+                                except Exception:
+                                    rank_total_off = len(ranking_off)
+                                rank_total_off = min(rank_total_off, len(ranking_off))
+                                _MIN_NORMAL_OFF = 20
+                                _MIN_ELITE_OFF = 5
+                                _e_uid = entry.get("user_id")
+                                _e_name = entry.get("citizen_name") or ""
+                                updated_at_r = (ranking_off[0].get("updated_at") or "")[:16].replace("T", " ")
+
+                                if type == "normaal":
+                                    ns = sorted(ranking_off, key=lambda e: e["luck_score"], reverse=True)
+                                    tgt = Geluk._find_in_ranking(ns, _e_uid, _e_name)
+                                    if tgt is not None:
+                                        rpct = ns[tgt]["luck_score"]; rsign = "+" if rpct >= 0 else ""
+                                        rt = f"\U0001f3c6 Gelukranking NL (normale cases) \u2014 rang **#{tgt+1}/{rank_total_off}** \u2014 **{rsign}{rpct:.1f}%** {_luck_indicator_overall(rpct)}"
+                                    else:
+                                        rt = f"\U0001f3c6 Gelukranking NL (normale cases) \u2014 _{rank_total_off} spelers, niet in ranking (min. {_MIN_NORMAL_OFF} cases)_"
+                                    embed_off.add_field(name=rt, value=Geluk._build_ranking_block(ns, tgt, lambda e: e["luck_score"]), inline=False)
+
+                                elif type == "elite":
+                                    eo = [e for e in ranking_off if e.get("elite_luck_score") is not None]
+                                    es = sorted(eo, key=lambda e: e["elite_luck_score"], reverse=True)
+                                    tgt = Geluk._find_in_ranking(es, _e_uid, _e_name)
+                                    n_e = len(es)
+                                    if tgt is not None:
+                                        rpct = es[tgt]["elite_luck_score"]; rsign = "+" if rpct >= 0 else ""
+                                        rt = f"\U0001f3c6 Gelukranking NL (elite cases) \u2014 rang **#{tgt+1}/{n_e}** \u2014 **{rsign}{rpct:.1f}%** {_luck_indicator_overall(rpct)}"
+                                    else:
+                                        rt = f"\U0001f3c6 Gelukranking NL (elite cases) \u2014 _{n_e} spelers, niet in ranking (min. {_MIN_ELITE_OFF} elite cases)_"
+                                    embed_off.add_field(name=rt, value=Geluk._build_ranking_block(es, tgt, lambda e: e["elite_luck_score"]) if es else "_Geen data beschikbaar._", inline=False)
+
+                                else:
+                                    def _cs_off(e: dict) -> float:
+                                        ls = e.get("luck_score"); es_ = e.get("elite_luck_score")
+                                        if ls is not None and es_ is not None: return (ls + es_) / 2.0
+                                        return ls if ls is not None else (es_ if es_ is not None else 0.0)
+                                    ns_c = sorted(ranking_off, key=lambda e: e["luck_score"], reverse=True)
+                                    nt_c = Geluk._find_in_ranking(ns_c, _e_uid, _e_name)
+                                    if nt_c is not None:
+                                        embed_off.add_field(name="\U0001f3b2 Rang NL (normale cases)", value=f"**#{nt_c+1}/{rank_total_off}** _(min. {_MIN_NORMAL_OFF} cases)_", inline=True)
+                                    eo_c = [e for e in ranking_off if e.get("elite_luck_score") is not None]
+                                    es_c = sorted(eo_c, key=lambda e: e["elite_luck_score"], reverse=True)
+                                    et_c = Geluk._find_in_ranking(es_c, _e_uid, _e_name)
+                                    if et_c is not None:
+                                        embed_off.add_field(name="\U0001f48e Rang NL (elite cases)", value=f"**#{et_c+1}/{len(es_c)}** _(min. {_MIN_ELITE_OFF} elite cases)_", inline=True)
+                                    comb = sorted(ranking_off, key=_cs_off, reverse=True)
+                                    ct = Geluk._find_in_ranking(comb, _e_uid, _e_name)
+                                    lb_off = Geluk._build_ranking_block(comb, ct, _cs_off)
+                                    if ct is not None:
+                                        rpct = _cs_off(comb[ct]); rsign = "+" if rpct >= 0 else ""
+                                        rt = f"\U0001f3c6 Gelukranking NL (gecombineerd) \u2014 rang **#{ct+1}/{rank_total_off}** \u2014 **{rsign}{rpct:.1f}%** {_luck_indicator_overall(rpct)}"
+                                    else:
+                                        rt = f"\U0001f3c6 Gelukranking NL (gecombineerd) \u2014 _{rank_total_off} spelers, niet in ranking (min. {_MIN_NORMAL_OFF} cases)_"
+                                    embed_off.add_field(name=rt, value=lb_off, inline=False)
+
+                                if updated_at_r:
+                                    _ft = embed_off.footer.text or ""
+                                    if "Ranking bijgewerkt" not in _ft:
+                                        embed_off.set_footer(text=_ft + f"  \u2022  Ranking bijgewerkt: {updated_at_r} UTC")
+                        except Exception:
+                            logger.exception("Geluk: failed to add ranking to offline embed")
+                    await interaction.followup.send(embed=embed_off)
+                else:
+                    await interaction.followup.send(
+                        embed=self._api_offline_embed(), ephemeral=True
+                    )
+            else:
+                await interaction.followup.send(
+                    f"❌ Speler **{discord.utils.escape_markdown(lookup_label)}** niet gevonden.",
+                    ephemeral=True,
+                )
             return
 
         username: str = profile.get("username") or speler or gebruiker_id or "?"
@@ -667,40 +892,12 @@ class Geluk(commands.Cog, name="geluk"):
                     updated_at = (ranking[0].get("updated_at") or "")[:16].replace("T", " ")
                     _all_cases_note = "  _(ranking: alle cases)_" if aantal_cases is not None else ""
 
-                    # ── Helper: find player index in a sorted list ──
+                    # ── Helpers (delegate to shared static methods) ──
                     def _find_player(sorted_list: list) -> int | None:
-                        for pos, entry in enumerate(sorted_list):
-                            uid = (entry if isinstance(entry, dict) else entry[1]).get("user_id")
-                            nm = ((entry if isinstance(entry, dict) else entry[1]).get("citizen_name") or "").lower()
-                            if uid == resolved_user_id or nm == username.lower():
-                                return pos
-                        return None
+                        return Geluk._find_in_ranking(sorted_list, resolved_user_id, username)
 
-                    # ── Helper: build leaderboard block ──
                     def _build_lb(sorted_entries: list[dict], target_pos: int | None, score_fn) -> str:
-                        n = len(sorted_entries)
-                        top5 = list(range(min(5, n)))
-                        bot5 = list(range(max(0, n - 5), n))
-                        ctx = list(range(max(0, target_pos - 2), min(n, target_pos + 3))) if target_pos is not None else []
-                        ordered = sorted(set(top5 + bot5 + ctx))
-                        lines: list[str] = [
-                            f"{'rang':<5} {'naam':<12} {'score':>8}   {'geluk':<6} {'cases':>6}",
-                            "─" * 43,
-                        ]
-                        prev = -1
-                        for pos in ordered:
-                            if prev != -1 and pos > prev + 1:
-                                lines.append("    • • •")
-                            e = sorted_entries[pos]
-                            pct = score_fn(e)
-                            nm = (e.get("citizen_name") or "?")[:12]
-                            op = e.get("opens_count", 0)
-                            sign = "+" if pct >= 0 else ""
-                            ind = _luck_indicator_overall(pct)
-                            marker = " ◄" if pos == target_pos else ""
-                            lines.append(f"#{pos+1:<4} {nm:<12} {sign}{pct:>6.1f}%  {ind}  {op:>6,}{marker}")
-                            prev = pos
-                        return "```\n" + "\n".join(lines) + "\n```"
+                        return Geluk._build_ranking_block(sorted_entries, target_pos, score_fn)
 
                     if type == "normaal":
                         # Normal-only view: sort by luck_score

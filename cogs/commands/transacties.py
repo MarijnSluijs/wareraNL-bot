@@ -457,7 +457,10 @@ class TransactiesCog(CommandCogBase, name="transacties"):
 
         user_id, username = await self._resolve_user(speler)
         if not user_id:
-            await ctx.send(f"Geen speler gevonden voor **{speler}**.")
+            await ctx.send(
+                f"Geen speler gevonden voor **{speler}**.\n"
+                "-# Als de API momenteel offline is, probeer het later opnieuw."
+            )
             return
 
         counts, totals, item_breakdown, truncated = await self._fetch_transactions(user_id)

@@ -422,7 +422,7 @@ class PillenfabriekenCog(CommandCogBase, name="pillenfabrieken"):
     async def pillenfabrieken(self, ctx: Context) -> None:
         """Scan all companies for cocain producers outside NL-controlled regions."""
         if not self._client:
-            await ctx.send("API-client niet geïnitialiseerd.")
+            await self._send_api_offline(ctx)
             return
 
         if hasattr(ctx, "defer"):
@@ -435,7 +435,7 @@ class PillenfabriekenCog(CommandCogBase, name="pillenfabrieken"):
         )
 
         if not all_ids:
-            await ctx.send("Kon geen bedrijfsdata ophalen van de API.")
+            await self._send_api_offline(ctx, "Kon geen bedrijfslijst ophalen van de API.")
             return
 
         total_companies = len(all_ids)

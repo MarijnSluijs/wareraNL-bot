@@ -145,29 +145,40 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
         return dict(zip(mu_ids, results))
 
     async def _fetch_country_map(self) -> dict[str, str]:
-        """Return {country_id: country_name} by calling country.getAllCountries."""
+        """Return {country_id: country_name}.
+
+        Tries the live API first; falls back to the country_snapshots DB cache.
+        """
         client = self._client
-        if not client:
-            return {}
-        try:
-            raw = await client.get("/country.getAllCountries")
-            data = _unwrap(raw)
-            countries: list[dict] = []
-            if isinstance(data, list):
-                countries = data
-            elif isinstance(data, dict):
-                for key in ("items", "countries", "data", "results"):
-                    v = data.get(key)
-                    if isinstance(v, list):
-                        countries = v
-                        break
-            return {
-                c["_id"]: c.get("name") or c["_id"]
-                for c in countries
-                if isinstance(c, dict) and c.get("_id")
-            }
-        except Exception:
-            return {}
+        if client:
+            try:
+                raw = await client.get("/country.getAllCountries")
+                data = _unwrap(raw)
+                countries: list[dict] = []
+                if isinstance(data, list):
+                    countries = data
+                elif isinstance(data, dict):
+                    for key in ("items", "countries", "data", "results"):
+                        v = data.get(key)
+                        if isinstance(v, list):
+                            countries = v
+                            break
+                result = {
+                    c["_id"]: c.get("name") or c["_id"]
+                    for c in countries
+                    if isinstance(c, dict) and c.get("_id")
+                }
+                if result:
+                    return result
+            except Exception:
+                pass
+        # Fallback: read country names cached in DB from production polling
+        if self._db:
+            try:
+                return await self._db.get_country_name_map()
+            except Exception:
+                pass
+        return {}
 
     # ------------------------------------------------------------------ #
     # Section builders

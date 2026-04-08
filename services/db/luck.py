@@ -86,6 +86,79 @@ class LuckMixin:
                 )
         return rows
 
+    async def get_luck_entry_by_name(
+        self, name: str, cutoff: float = 0.55
+    ) -> Optional[dict]:
+        """Fuzzy-match a player by citizen_name in citizen_luck.
+
+        Returns the full luck row dict (with rarity_json, luck_score, etc.) or None.
+        """
+        import difflib  # local import to avoid circular
+
+        rows: list[dict] = []
+        async with self._conn.execute(
+            """
+            SELECT user_id, citizen_name, country_id, luck_score, opens_count,
+                   rarity_json, updated_at, elite_luck_score, elite_opens_count,
+                   elite_rarity_json
+            FROM citizen_luck
+            WHERE citizen_name IS NOT NULL
+            """
+        ) as cur:
+            async for row in cur:
+                rows.append(
+                    {
+                        "user_id": row[0],
+                        "citizen_name": row[1],
+                        "country_id": row[2],
+                        "luck_score": row[3],
+                        "opens_count": row[4],
+                        "rarity_json": row[5],
+                        "updated_at": row[6],
+                        "elite_luck_score": row[7],
+                        "elite_opens_count": row[8],
+                        "elite_rarity_json": row[9],
+                    }
+                )
+        if not rows:
+            return None
+        q_low = name.lower().strip()
+        best: Optional[dict] = None
+        best_ratio = cutoff
+        for entry in rows:
+            n = (entry["citizen_name"] or "").lower()
+            ratio = difflib.SequenceMatcher(None, q_low, n).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best = entry
+        return best
+        """All luck entries for a country, sorted by luck_score DESC."""
+        rows: list[dict] = []
+        async with self._conn.execute(
+            """
+            SELECT user_id, citizen_name, luck_score, opens_count, updated_at,
+                   elite_luck_score, elite_opens_count, elite_rarity_json
+            FROM citizen_luck
+            WHERE country_id = ?
+            ORDER BY luck_score DESC
+            """,
+            (country_id,),
+        ) as cur:
+            async for row in cur:
+                rows.append(
+                    {
+                        "user_id": row[0],
+                        "citizen_name": row[1] or row[0],
+                        "luck_score": row[2],
+                        "opens_count": row[3],
+                        "updated_at": row[4],
+                        "elite_luck_score": row[5],
+                        "elite_opens_count": row[6],
+                        "elite_rarity_json": row[7],
+                    }
+                )
+        return rows
+
     async def get_citizens_for_luck_refresh(
         self, country_id: str
     ) -> list[tuple[str, Optional[str]]]:

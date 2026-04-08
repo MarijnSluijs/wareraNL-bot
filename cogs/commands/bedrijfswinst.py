@@ -760,9 +760,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
         await interaction.response.defer(thinking=True)
 
         if not self._client:
-            await interaction.followup.send(
-                "❌ API client niet geïnitialiseerd.", ephemeral=True
-            )
+            await self._send_api_offline(interaction)
             return
 
         # Resolve player ------------------------------------------------

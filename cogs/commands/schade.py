@@ -760,7 +760,7 @@ class SchadeCog(CommandCogBase, name="schade"):
     ) -> None:
         """/schade — schadevermogen over 8 uur."""
         if not self._client:
-            await ctx.send("API-client niet beschikbaar.")
+            await self._send_api_offline(ctx)
             return
 
         n_modes = sum(x is not None for x in (speler, land, mu))

@@ -168,6 +168,17 @@ class ProductionMixin:
                 result[row[0]] = row[1]
         return result
 
+    async def get_country_name_map(self) -> dict[str, str]:
+        """Return {country_id: name} for all countries in country_snapshots."""
+        result: dict[str, str] = {}
+        async with self._conn.execute(
+            "SELECT country_id, name FROM country_snapshots"
+            " WHERE name IS NOT NULL AND name != ''"
+        ) as cur:
+            async for row in cur:
+                result[row[0]] = row[1]
+        return result
+
     # ── deposit_top ──────────────────────────────────────────────────────────
 
     async def get_deposit_top(self, item: str) -> Optional[dict]:

@@ -111,14 +111,14 @@ class ProxyCog(CommandCogBase, name="proxy"):
         await interaction.response.defer(thinking=True)
 
         if not self._client:
-            await interaction.followup.send("API-client is niet beschikbaar.")
+            await self._send_api_offline(interaction)
             return
 
         try:
             response = await self._client.get("/country.getAllCountries")
             countries = extract_country_list(response)
-        except Exception as exc:
-            await interaction.followup.send(f"Ophalen van landen mislukt: {exc}")
+        except Exception:
+            await self._send_api_offline(interaction)
             return
 
         if not countries:

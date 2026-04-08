@@ -89,6 +89,8 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
         cursor: str | None = None
 
         while True:
+            if not self._client:
+                break
             params: dict[str, Any] = {"limit": 100}
             if cursor:
                 params["cursor"] = cursor
