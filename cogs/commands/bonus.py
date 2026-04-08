@@ -445,7 +445,7 @@ class BonusCog(CommandCogBase, name="bonus"):
     )
     async def verhuiskosten(self, ctx: Context, bonuses: str = ""):
         """Break-even table: hours of Automated Engine production to recover the 5-concrete move cost."""
-        parts = bonuses.split()
+        parts = bonuses.replace(",", ".").split()
         bonus: float = 0.0
         new_bonus: float | None = None
         try:
