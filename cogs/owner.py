@@ -8,9 +8,13 @@ Prefix commands (owner-only unless noted):
   !clearluck                    — clear the luck-score cache
   !congres_analyse              — generate a congressional analysis report
   !shutdown                     — gracefully shut down the bot
+  !restart                      — restart the bot process in-place
   !say (message)                — make the bot send a message
   /purge (amount)               — delete messages in bulk (requires manage_messages)
 """
+
+import os
+import sys
 
 import discord
 from discord import app_commands
@@ -203,6 +207,21 @@ class Owner(commands.Cog, name="owner"):
             description=f"De `{cog}` module is succesvol herladen.", color=self.color
         )
         await context.send(embed=embed)
+
+    @commands.hybrid_command(
+        name="restart",
+        description="Herstart het bot-proces volledig.",
+    )
+    @commands.is_owner()
+    async def restart(self, context: Context) -> None:
+        """Restart the bot by re-executing the current process."""
+        embed = discord.Embed(
+            description="De bot wordt herstart. Even geduld... :arrows_counterclockwise:",
+            color=self.color,
+        )
+        await context.send(embed=embed)
+        await self.bot.close()
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
     @commands.hybrid_command(
         name="shutdown",
