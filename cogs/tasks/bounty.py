@@ -131,6 +131,8 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
         _rate_re = re.compile(r"\*\*Beloning:\*\*\s*([\d.]+)")
         _total_re = re.compile(r"\*\*Totale pool:\*\*\s*([\d,. ]+)")
         _ts_re = re.compile(r"<t:(\d+):[^>]+>")
+        _title_re = re.compile(r"(?:Bounty|Aankomende bounty):\s*(.+?)\s+vs\s+(.+)", re.IGNORECASE)
+        _funder_re = re.compile(r"\*\*Aangeboden door:\*\*\s*(.+)")
 
         try:
             async for msg in channel.history(limit=50):
@@ -156,12 +158,31 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                     if ts_m:
                         pending_until_ts = float(ts_m.group(1))
 
-                # Store under both side keys — we don't know which side from the message alone.
-                # The first real poll will compare rates; if unchanged it will skip re-posting.
+                # Determine which side this message belongs to by matching the funder
+                # country against the attacker/defender names from the title.
+                # This prevents erroneous deletions when both side keys point to the same msg.id.
+                detected_side: str | None = None
+                if embed.title:
+                    title_m = _title_re.search(embed.title)
+                    funder_m = _funder_re.search(desc)
+                    if title_m and funder_m:
+                        att_name = title_m.group(1).strip()
+                        def_name = title_m.group(2).strip()
+                        funder = funder_m.group(1).strip()
+                        if funder == att_name:
+                            detected_side = "atk"
+                        elif funder == def_name:
+                            detected_side = "dfn"
+
                 for side_key in ("atk", "dfn"):
                     known_key = f"{battle_id}:{side_key}"
-                    if known_key not in self._known:
-                        self._known[known_key] = (rate, total, msg.id, pending_until_ts)
+                    if known_key in self._known:
+                        continue
+                    # Use the real msg.id only for the side we identified; store None for
+                    # the other side so an erroneous "no bounty" match never deletes this
+                    # message.  A None msg_id still suppresses re-posting via the rate check.
+                    stored_msg_id = msg.id if (detected_side is None or detected_side == side_key) else None
+                    self._known[known_key] = (rate, total, stored_msg_id, pending_until_ts)
 
         except Exception:
             logger.exception("bounty_poll: failed to preload known bounties from channel")
