@@ -22,6 +22,13 @@
             "thumbnail": "https://media.warera.io/avatars/mu/mu-695c338ec617ea3c92421bc3-1770834028326-m4wudnb7.png"
         },
         {
+            "id": "699f7d14c629e138fa86ec9c",
+            "type": "Eco",
+            "role_id": 1476503487033376769,
+            "name": "De Munterij",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-699f7d14c629e138fa86ec9c-1775107202237-7euxbobw.png"
+        },
+        {
             "id": "697de1e370af1f7f8aa169ea",
             "type": "Eco",
             "role_id": 1469778210190262342,
@@ -36,11 +43,11 @@
             "thumbnail": "https://media.warera.io/avatars/mu/mu-699b1d30b34e1837aaf9c1bf-1771774830441-nfjy03l9.png"
         },
         {
-            "id": "699f7d14c629e138fa86ec9c",
-            "type": "Eco",
-            "role_id": 1476503487033376769,
-            "name": "EBITDA Compagnie",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-699f7d14c629e138fa86ec9c-1772468380534-mayiwkxz.png"
+            "id": "69af031d6157435c4f5c4ed0",
+            "type": "Standaard",
+            "role_id": 1481610760877637643,
+            "name": "AIVD",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69af031d6157435c4f5c4ed0-1773162627838-ip070k7z.png"
         },
         {
             "id": "69a42247cedfd3ae87863a6c",
@@ -64,11 +71,32 @@
             "thumbnail": "https://media.warera.io/avatars/mu/mu-69a41d7b75b50126c381cca5-1772464760674-h8gtqo40.png"
         },
         {
+            "id": "69bc0bf57e5e55af7b3d9bda",
+            "type": "Standaard",
+            "role_id": 1485177286373146745,
+            "name": "De Nachtwacht",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69bc0bf57e5e55af7b3d9bda-1774220855304-5kjezly9.png"
+        },
+        {
+            "id": "69c08ac1638466f7dba620e0",
+            "type": "Standaard",
+            "role_id": 1490769739109367992,
+            "name": "De Reddingsbrigade",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69c08ac1638466f7dba620e0-1775253319104-h2ol5ekg.png"
+        },
+        {
             "id": "69a538c84833b3070e6adf17",
             "type": "Standaard",
             "role_id": 1478061900230295736,
             "name": "De Waardgelders",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-69a538c84833b3070e6adf17-1772821821157-agsl1zf5.png"
+        },
+        {
+            "id": "69d25fc3ecdc50cc8b25a434",
+            "type": "Standaard",
+            "role_id": 1490434382018777088,
+            "name": "Geuzen Legioen",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69d25fc3ecdc50cc8b25a434-1775396574748-ku6qk2eo-static.gif"
         },
         {
             "id": "69a41cd5cedfd3ae877c2def",
@@ -82,14 +110,14 @@
             "type": "Standaard",
             "role_id": 1479412616144224357,
             "name": "kikkers-defence",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-69a896d1214e4eeda01ba4c5-1772656893137-qae7e5uo.jpg"
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69a896d1214e4eeda01ba4c5-1775820595230-9wqrwj6c.webp"
         },
         {
             "id": "699bf0f5b232a1efde5b9aed",
             "type": "Standaard",
             "role_id": 1475444320076169328,
             "name": "MIVD",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-699bf0f5b232a1efde5b9aed-1772095865354-sivps2wd.png"
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-699bf0f5b232a1efde5b9aed-1773162649297-y0fnnz20.png"
         },
         {
             "id": "69906c5a8b9151ad2ba50435",
@@ -97,6 +125,13 @@
             "role_id": 1474045597668348055,
             "name": "Oranje Huurlingen",
             "thumbnail": "https://media.warera.io/avatars/mu/mu-69906c5a8b9151ad2ba50435-1771584723193-r0xr7d1l.png"
+        },
+        {
+            "id": "69b8ffbf0e5eb9b6e5241c9a",
+            "type": "Standaard",
+            "role_id": 1490771143706018084,
+            "name": "Ordo Mercenarius",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69b8ffbf0e5eb9b6e5241c9a-1775226603756-dqzih5vw-static.gif"
         },
         {
             "id": "69a5d8546719fc1a7c787cb8",
@@ -141,6 +176,13 @@
             "thumbnail": "https://media.warera.io/avatars/mu/mu-6970dd1ebea7a2698be2e84e-1770831355728-6mctkthl.png"
         },
         {
+            "id": "69b2a977b5486e4fd9b299cb",
+            "type": "Standaard",
+            "role_id": 1483127909324554332,
+            "name": "V.O.C.",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69b2a977b5486e4fd9b299cb-1773731376308-bnhzdcnl.png"
+        },
+        {
             "id": "698f253efffb3268e9276ac1",
             "type": "Standaard",
             "role_id": 1471870072778920069,
@@ -149,28 +191,34 @@
         }
     ],
     "posted_message_ids": [
-        1480204162305232937,
-        1480204163353804840,
-        1480204164670689292,
-        1480204166398742568,
-        1480204167438929930,
-        1480204168357609694,
-        1480204188226031771,
-        1480204189912268931,
-        1480204190872502322,
-        1480204191988449351,
-        1480204193154339008,
-        1480204194882256907,
-        1480204215233024217,
-        1480204216629985352,
-        1480204217233707201,
-        1480204218546786394,
-        1480204219326664898,
-        1480204237551177891,
-        1480204238675247235,
-        1480204239287615622,
-        1480204240717746196,
-        1480204241795809370
+        1490771281690361956,
+        1490771283535724785,
+        1490771286224277585,
+        1490771289105895544,
+        1490771290926219295,
+        1490771293149069542,
+        1490771294575399015,
+        1490771296424952100,
+        1490771324988166399,
+        1490771326909157548,
+        1490771328297467904,
+        1490771329312489688,
+        1490771331560636556,
+        1490771333083173014,
+        1490771351596830811,
+        1490771353136140288,
+        1490771354314870865,
+        1490771356093251786,
+        1490771364548972545,
+        1490771378260152370,
+        1490771379799200002,
+        1490771380902297751,
+        1490771382877819012,
+        1490771384455004220,
+        1490771385902174468,
+        1490771387457998988,
+        1490771406563053910,
+        1490771408471589046
     ],
-    "mu_info_updated_at": "2026-03-09T11:50:46.895972+00:00"
+    "mu_info_updated_at": "2026-04-12T08:39:20.723206+00:00"
 }
