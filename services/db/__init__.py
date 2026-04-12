@@ -13,6 +13,9 @@ Mixin                Tables
 :mod:`.luck`         ``citizen_luck``
 :mod:`.resistance`   ``resistance_state``
 :mod:`.mus_registry` ``known_mus``
+:mod:`.battle_drops`    ``battle_drops``
+:mod:`.battle_rankings` ``battle_hits``, ``processed_battles``
+:mod:`.article_tips`    ``article_tips``
 ===================  ========================================
 
 Usage::
@@ -23,7 +26,10 @@ Usage::
     await db.close()
 """
 
+from .article_tips import ArticleTipsMixin
 from .base import DatabaseBase
+from .battle_drops import BattleDropsMixin
+from .battle_rankings import BattleRankingsMixin
 from .citizens import CitizensMixin
 from .events import EventsMixin
 from .giveaways_db import GiveawaysMixin
@@ -45,6 +51,9 @@ class Database(
     LuckMixin,
     ResistanceMixin,
     MusRegistryMixin,
+    BattleDropsMixin,
+    BattleRankingsMixin,
+    ArticleTipsMixin,
     DatabaseBase,
 ):
     """Async SQLite database for the WarEra Discord bot.

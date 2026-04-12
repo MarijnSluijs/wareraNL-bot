@@ -59,19 +59,16 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
         except Exception:
             logger.exception("mu_refresh: refresh_all_mu_names failed")
 
-        # Also refresh DB MU memberships so /paraatheid nl_mus has data
-        citizen_cache = getattr(self.bot, "_ext_citizen_cache", None)
-        nl_country_id = self.config.get("nl_country_id")
-        if citizen_cache and nl_country_id:
-            path = mus_path(getattr(self.bot, "testing", False))
-            try:
-                count = await citizen_cache.refresh_mu_memberships(nl_country_id, path)
-                logger.info("mu_refresh: %d MU assignments refreshed", count)
-            except Exception:
-                logger.exception("mu_refresh: refresh_mu_memberships failed")
+        # MU membership sweep (country tagging) is triggered on-demand via /peil mus
+        # and is deliberately NOT run here — it makes 579 API calls and is too heavy
+        # to run every hour.
 
     async def refresh_all_mu_names(self) -> int:
         """Paginate mu.getManyPaginated and upsert every MU into known_mus.
+
+        Does a full global scan (no orgId filter) to keep mu names current.
+        country_id is populated via refresh_mu_memberships (per-country template files)
+        and is preserved on upsert thanks to COALESCE logic in upsert_known_mu.
 
         Returns the total number of MUs upserted.
         """
@@ -79,13 +76,26 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
             return 0
 
         now = datetime.now(timezone.utc).isoformat()
+        return await self._paginate_mu_names(now, org_id=None)
+
+    async def _paginate_mu_names(self, now: str, *, org_id: str | None) -> int:
+        """Paginate mu.getManyPaginated and upsert results.
+
+        When *org_id* is given it is passed as an orgId filter to the API, but
+        note that the game API currently ignores this parameter and returns all MUs.
+        country_id is only set when the API itself returns one in the response.
+        """
         total = 0
         cursor: str | None = None
 
         while True:
+            if not self._client:
+                break
             params: dict[str, Any] = {"limit": 100}
             if cursor:
                 params["cursor"] = cursor
+            if org_id:
+                params["orgId"] = org_id
 
             try:
                 resp = await self._client.get(
@@ -93,7 +103,7 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
                     params={"input": json.dumps(params)},
                 )
             except Exception:
-                logger.exception("refresh_all_mu_names: API call failed")
+                logger.exception("_paginate_mu_names: API call failed (orgId=%s)", org_id)
                 break
 
             # Unwrap nested result/data envelope
@@ -123,7 +133,23 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
                 mu_id = str(item.get("_id") or item.get("id") or "").strip()
                 mu_name = str(item.get("name") or item.get("title") or "").strip()
                 if mu_id and mu_name:
-                    await self._db.upsert_known_mu(mu_id, mu_name, now)
+                    # Extract home country from API response — try common field names
+                    country_id: str | None = None
+                    country_obj = item.get("country") or item.get("nation")
+                    if isinstance(country_obj, dict):
+                        country_id = (
+                            str(country_obj.get("_id") or country_obj.get("id") or "").strip()
+                            or None
+                        )
+                    if not country_id:
+                        raw = (
+                            item.get("countryId")
+                            or item.get("country_id")
+                            or item.get("nationId")
+                        )
+                        if raw:
+                            country_id = str(raw).strip() or None
+                    await self._db.upsert_known_mu(mu_id, mu_name, now, country_id)
                     total += 1
 
             if items:

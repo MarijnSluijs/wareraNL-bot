@@ -30,6 +30,20 @@ _LUCK_WEIGHTS: dict[str, float] = {
 }
 _LUCK_WEIGHT_TOTAL: float = sum(_LUCK_WEIGHTS.values())
 
+_ELITE_EXPECTED: dict[str, float] = {
+    "mythic": 0.005,
+    "legendary": 0.025,
+    "epic": 0.15,
+    "rare": 0.32,
+    "uncommon": 0.50,
+    "common": 0.0,
+}
+_ELITE_LUCK_WEIGHTS: dict[str, float] = {
+    r: -_luck_math.log2(p) if p > 0 else 0.0
+    for r, p in _ELITE_EXPECTED.items()
+}
+_ELITE_LUCK_WEIGHT_TOTAL: float = sum(v for v in _ELITE_LUCK_WEIGHTS.values() if v > 0)
+
 MIN_OPENS = 20
 
 
@@ -54,6 +68,22 @@ def _calc_luck_pct(counts: dict, total: int) -> float:
         deviation = (counts.get(rarity, 0) - expected_n) / _luck_math.sqrt(expected_n)
         score += _LUCK_WEIGHTS[rarity] * deviation
     return score / _LUCK_WEIGHT_TOTAL * 100.0
+
+
+def _calc_elite_luck_pct(counts: dict, total: int) -> float:
+    """Poisson z-score luck % for elite case (case2) openings."""
+    if total == 0 or _ELITE_LUCK_WEIGHT_TOTAL <= 0:
+        return 0.0
+    score = 0.0
+    for rarity, expected_rate in _ELITE_EXPECTED.items():
+        if expected_rate <= 0:
+            continue
+        expected_n = total * expected_rate
+        if expected_n <= 0:
+            continue
+        deviation = (counts.get(rarity, 0) - expected_n) / _luck_math.sqrt(expected_n)
+        score += _ELITE_LUCK_WEIGHTS[rarity] * deviation
+    return score / _ELITE_LUCK_WEIGHT_TOTAL * 100.0
 
 
 class GlobalLuckTasks(TaskCogBase, name="global_luck_tasks"):
@@ -123,9 +153,14 @@ class GlobalLuckTasks(TaskCogBase, name="global_luck_tasks"):
 
     async def _fetch_luck_data(
         self, user_id: str, item_rarities: dict
-    ) -> tuple[dict[str, int], int]:
-        """Page all openCase transactions for a user. Returns (rarity_counts, total)."""
-        counts: dict[str, int] = {r: 0 for r in _LUCK_EXPECTED}
+    ) -> tuple[dict[str, int], dict[str, int]]:
+        """Page all openCase transactions for a user.
+
+        Returns (normal_counts, elite_counts) separated by case type.
+        """
+        rarity_keys = list(_LUCK_EXPECTED.keys())
+        normal_counts: dict[str, int] = {r: 0 for r in rarity_keys}
+        elite_counts: dict[str, int] = {r: 0 for r in rarity_keys}
         cursor = None
         while True:
             payload: dict = {
@@ -156,19 +191,20 @@ class GlobalLuckTasks(TaskCogBase, name="global_luck_tasks"):
             for tx in items:
                 if not isinstance(tx, dict):
                     continue
-                # Skip elite cases (same as geluk.py — only count regular case openings)
                 opened_case = tx.get("itemCode", "")
-                if item_rarities.get(opened_case) == "mythic":
-                    continue
+                is_elite = item_rarities.get(opened_case) == "mythic"
                 received = tx.get("item") or {}
                 item_code = (
                     received.get("code") if isinstance(received, dict) else received
                 ) or ""
                 rarity = item_rarities.get(item_code, "common")
-                counts[rarity] = counts.get(rarity, 0) + 1
+                if is_elite:
+                    elite_counts[rarity] = elite_counts.get(rarity, 0) + 1
+                else:
+                    normal_counts[rarity] = normal_counts.get(rarity, 0) + 1
             if not cursor or not items:
                 break
-        return counts, sum(counts.values())
+        return normal_counts, elite_counts
 
     async def _run_global_sweep(self, now_utc: datetime, _t0: float) -> None:
         """Heavy sweep: iterate all cached citizens, compute luck, store in DB."""
@@ -213,12 +249,15 @@ class GlobalLuckTasks(TaskCogBase, name="global_luck_tasks"):
         recorded = 0
         for i, (user_id, country_id, citizen_name) in enumerate(citizens):
             try:
-                counts, total_opens = await self._fetch_luck_data(
+                normal_counts, elite_counts = await self._fetch_luck_data(
                     user_id, item_rarities
                 )
+                total_opens = sum(normal_counts.values())
                 if total_opens < MIN_OPENS:
                     continue
-                luck_pct = _calc_luck_pct(counts, total_opens)
+                luck_pct = _calc_luck_pct(normal_counts, total_opens)
+                elite_total = sum(elite_counts.values())
+                elite_luck_pct = _calc_elite_luck_pct(elite_counts, elite_total) if elite_total >= 5 else None
                 updated_at = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
                 await self._db.upsert_global_luck_score(
                     user_id,
@@ -226,8 +265,11 @@ class GlobalLuckTasks(TaskCogBase, name="global_luck_tasks"):
                     citizen_name,
                     luck_pct,
                     total_opens,
-                    json.dumps(counts),
+                    json.dumps(normal_counts),
                     updated_at,
+                    elite_luck_score=elite_luck_pct,
+                    elite_opens_count=elite_total if elite_total >= 5 else None,
+                    elite_rarity_json=json.dumps(elite_counts) if elite_total >= 5 else None,
                 )
                 recorded += 1
             except Exception:

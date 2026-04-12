@@ -168,6 +168,17 @@ class ProductionMixin:
                 result[row[0]] = row[1]
         return result
 
+    async def get_country_name_map(self) -> dict[str, str]:
+        """Return {country_id: name} for all countries in country_snapshots."""
+        result: dict[str, str] = {}
+        async with self._conn.execute(
+            "SELECT country_id, name FROM country_snapshots"
+            " WHERE name IS NOT NULL AND name != ''"
+        ) as cur:
+            async for row in cur:
+                result[row[0]] = row[1]
+        return result
+
     # ── deposit_top ──────────────────────────────────────────────────────────
 
     async def get_deposit_top(self, item: str) -> Optional[dict]:
@@ -255,3 +266,24 @@ class ProductionMixin:
             ),
         )
         await self._conn.commit()
+
+    async def get_top_countries_by_production_bonus(self, limit: int) -> list[dict]:
+        """Return the top countries ranked by production_bonus from the latest snapshot."""
+        rows: list[dict] = []
+        async with self._conn.execute(
+            "SELECT country_id, name, production_bonus, updated_at "
+            "FROM country_snapshots "
+            "WHERE production_bonus IS NOT NULL "
+            "ORDER BY production_bonus DESC LIMIT ?",
+            (limit,),
+        ) as cur:
+            async for row in cur:
+                rows.append(
+                    {
+                        "country_id": row[0],
+                        "name": row[1],
+                        "production_bonus": row[2] or 0.0,
+                        "updated_at": row[3],
+                    }
+                )
+        return rows

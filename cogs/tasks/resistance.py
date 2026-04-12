@@ -1,74 +1,54 @@
-"""Background task: daily resistance overview for NL-occupied foreign regions."""
+"""Slash command: on-demand resistance overview for NL-occupied foreign regions."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 
 import discord
-from discord.ext import tasks
+from discord import app_commands
 
 from cogs.tasks._base import TaskCogBase
 
 logger = logging.getLogger("discord_bot")
 
 
-def _seconds_until_hour(target_hour: int) -> float:
-    """Seconds to sleep until the next target_hour:00:00 UTC."""
-    from datetime import timedelta
-
-    now = datetime.now(timezone.utc)
-    target = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
-    if target <= now:
-        target += timedelta(days=1)
-    return max(1.0, (target - now).total_seconds())
-
-
-class ResistanceTasks(TaskCogBase, name="resistance_tasks"):
+class ResistanceCog(TaskCogBase, name="resistance"):
     def __init__(self, bot) -> None:
         self.bot = bot
 
-    def cog_load(self) -> None:
-        self.resistance_poll.start()
-
-    def cog_unload(self) -> None:
-        self.resistance_poll.cancel()
-
     # ------------------------------------------------------------------ #
-    # Daily resistance overview (09:00 UTC)                               #
+    # Slash command                                                        #
     # ------------------------------------------------------------------ #
 
-    @tasks.loop(hours=24)
-    async def resistance_poll(self) -> None:
-        """Daily overview: resistance in NL-controlled foreign regions."""
-        if not self._client or not self._db:
+    @app_commands.command(
+        name="bezetting",
+        description="Toon het actuele verzetsoverzicht van door NL bezette regio's.",
+    )
+    async def bezetting(self, interaction: discord.Interaction) -> None:
+        """Fetch and display resistance status for NL-occupied regions on demand."""
+        await interaction.response.defer(thinking=True)
+        embed = await self.build_resistance_embed()
+        if embed is None:
+            await interaction.followup.send(
+                "Geen door NL bezette buitenlandse regio's gevonden, of de API is niet beschikbaar.",
+                ephemeral=True,
+            )
             return
-        try:
-            await self._run_resistance_poll()
-        except Exception:
-            logger.exception("resistance_poll: unexpected error")
-
-    @resistance_poll.before_loop
-    async def before_resistance_poll(self) -> None:
-        await self._wait_for_services()
-        await asyncio.sleep(_seconds_until_hour(9))
-
-    async def run_resistance_poll(self) -> None:
-        """Public wrapper so /peil and debug commands can trigger the poll."""
-        await self._run_resistance_poll(silent=True)
+        await interaction.followup.send(embed=embed)
 
     # ------------------------------------------------------------------ #
     # Internals                                                            #
     # ------------------------------------------------------------------ #
 
-    async def _run_resistance_poll(self, *, silent: bool = False) -> None:
-        """Fetch all regions, find NL originals occupied by others, report resistance."""
+    async def build_resistance_embed(self) -> discord.Embed | None:
+        """Fetch regions, compute resistance deltas, upsert DB, return embed or None."""
+        if not self._client or not self._db:
+            return None
+
         nl_country_id = self.config.get("nl_country_id")
-        channels = self.config.get("channels", {})
-        channel_id = channels.get("bot_mededelingen") or channels.get("testing-area")
-        if not channel_id or not nl_country_id:
-            return
+        if not nl_country_id:
+            return None
 
         try:
             resp = await self._client.get(
@@ -76,8 +56,8 @@ class ResistanceTasks(TaskCogBase, name="resistance_tasks"):
                 params={"input": "{}"},
             )
         except Exception as exc:
-            logger.warning("resistance_poll: failed to fetch regions: %s", exc)
-            return
+            logger.warning("bezetting: failed to fetch regions: %s", exc)
+            return None
 
         data: dict | list = {}
         if isinstance(resp, dict):
@@ -104,7 +84,7 @@ class ResistanceTasks(TaskCogBase, name="resistance_tasks"):
                         if cid and cname:
                             country_names[str(cid)] = str(cname)
         except Exception:
-            logger.debug("resistance_poll: could not build country name cache")
+            logger.debug("bezetting: could not build country name cache")
 
         occupied: list[dict] = []
         for r in regions:
@@ -114,10 +94,7 @@ class ResistanceTasks(TaskCogBase, name="resistance_tasks"):
                 occupied.append(r)
 
         if not occupied:
-            logger.info(
-                "resistance_poll: NL controls no foreign regions (no resistance active)"
-            )
-            return
+            return None
 
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         current: list[tuple[str, str, str, float, float]] = []
@@ -140,40 +117,27 @@ class ResistanceTasks(TaskCogBase, name="resistance_tasks"):
                 delta_str = f" ({arrow} {delta:+.0f})"
             return f"Verzet: `{bar}` {res:.0f}/{maxr:.0f} ({pct:.0f}%){delta_str}"
 
-        fields: list[tuple[str, str]] = []
-        for rid, rname, orig, res, maxr in current:
-            stored = await self._db.get_resistance_state(rid)
-            old_val: float | None = stored["resistance_value"] if stored else None
-            delta = (res - old_val) if old_val is not None else None
-            fields.append((f"{rname} ({orig})", _region_field(res, maxr, delta)))
-            await self._db.upsert_resistance_state(rid, rname, orig, res, maxr, now_str)
-
         embed = discord.Embed(
-            title="⚔️ Door NL bezette regio's — dagelijks verzetsoverzicht",
+            title="⚔️ Door NL bezette regio's — verzetsoverzicht",
             description="Regio's die NL beheert maar oorspronkelijk aan een ander land toebehoren.",
             color=discord.Color.orange(),
             timestamp=datetime.now(timezone.utc),
         )
-        for rname, field_val in fields:
-            embed.add_field(name=rname, value=field_val, inline=False)
-        embed.set_footer(text="WarEra — verzetspeiling")
-
-        if silent:
-            logger.info(
-                "resistance_poll: DB updated silently (%d regions), skipping post",
-                len(fields),
+        for rid, rname, orig, res, maxr in current:
+            stored = await self._db.get_resistance_state(rid)
+            old_val: float | None = stored["resistance_value"] if stored else None
+            delta = (res - old_val) if old_val is not None else None
+            embed.add_field(
+                name=f"{rname} ({orig})",
+                value=_region_field(res, maxr, delta),
+                inline=False,
             )
-            return
+            await self._db.upsert_resistance_state(rid, rname, orig, res, maxr, now_str)
 
-        for guild in self.bot.guilds:
-            ch = guild.get_channel(channel_id)
-            if ch:
-                try:
-                    await ch.send(embed=embed)
-                except Exception:
-                    logger.exception("resistance_poll: failed to post daily overview")
+        embed.set_footer(text="WarEra — verzetspeiling")
+        return embed
 
 
 async def setup(bot) -> None:
-    """Add the ResistanceTasks cog to the bot."""
-    await bot.add_cog(ResistanceTasks(bot))
+    """Add the ResistanceCog to the bot."""
+    await bot.add_cog(ResistanceCog(bot))

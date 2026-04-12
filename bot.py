@@ -199,7 +199,7 @@ class DiscordBot(commands.Bot):
             "citizen_tasks": "📊 Statistieken & Polls",
             "event_tasks": "📊 Statistieken & Polls",
             "luck_tasks": "📊 Statistieken & Polls",
-            "resistance_tasks": "📊 Statistieken & Polls",
+            "resistance": "📊 Statistieken & Polls",
             "service_coordinator": "📊 Statistieken & Polls",
             "bonus": "📊 Statistieken & Polls",
             "paraatheid": "📊 Statistieken & Polls",

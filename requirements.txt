@@ -17,3 +17,4 @@ httpx
 curl_cffi
 yarl
 requests
+openai

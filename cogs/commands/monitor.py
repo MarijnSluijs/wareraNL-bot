@@ -19,7 +19,7 @@ from discord.ext.commands import Context
 
 from cogs.commands._base import CommandCogBase, country_autocomplete
 from services.country_utils import country_id as cid_of
-from services.country_utils import extract_country_list, find_country
+from services.country_utils import find_country
 
 logger = logging.getLogger("discord_bot")
 
@@ -91,13 +91,9 @@ class MonitorCog(CommandCogBase, name="monitor"):
             return
 
         # ── Resolve country ────────────────────────────────────────────
-        try:
-            resp = await self._client.get("/country.getAllCountries")
-        except Exception as exc:
-            await ctx.send(f"Ophalen van landen mislukt: {exc}")
+        country_list = await self._fetch_country_list(ctx)
+        if country_list is None:
             return
-
-        country_list = extract_country_list(resp)
         target = find_country(land, country_list)
         if target is None:
             await ctx.send(f"Land `{land}` niet gevonden.")

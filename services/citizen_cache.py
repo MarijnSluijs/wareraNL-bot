@@ -207,9 +207,12 @@ class CitizenCache:
         await self._db.clear_citizen_mus_for_known_mu_ids(country_id, known_mu_ids)
 
         updated = 0
+        now_iso = datetime.now(timezone.utc).isoformat()
         for mu_id, mu_name in mu_entries:
             member_ids, live_name = await self._fetch_mu_members_and_name(mu_id)
             effective_name = live_name or mu_name
+            # Tag this MU as belonging to country_id in the known_mus registry
+            await self._db.upsert_known_mu(mu_id, effective_name, now_iso, country_id)
             for uid in member_ids:
                 await self._db.update_citizen_mu(uid, mu_id, effective_name)
                 updated += 1
@@ -221,6 +224,69 @@ class CitizenCache:
             )
 
         return updated
+
+    async def sweep_all_mu_memberships(
+        self,
+        progress_callback=None,
+    ) -> tuple[int, int]:
+        """Sweep every MU in known_mus: fetch its members, infer home country, update DB.
+
+        For each MU:
+        1. Call /mu.getById to get the current member list.
+        2. Query citizen_levels to find the country_id for as many members as possible.
+        3. Tag known_mus.country_id with the majority country found.
+        4. Write mu_id / mu_name back to citizen_levels for every matched member.
+
+        *progress_callback*, when supplied, is called as
+        ``await progress_callback(done, total, mu_name)`` after each MU.
+
+        Returns ``(mus_tagged, citizens_updated)``.
+        """
+        from collections import Counter
+
+        mu_rows = await self._db.get_all_known_mu_ids()
+        total = len(mu_rows)
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        mus_tagged = 0
+        citizens_updated = 0
+
+        for idx, (mu_id, mu_name, existing_country_id) in enumerate(mu_rows):
+            member_ids, live_name = await self._fetch_mu_members_and_name(mu_id)
+            effective_name = live_name or mu_name
+
+            inferred_country_id: str | None = existing_country_id
+
+            if member_ids:
+                country_map = await self._db.get_country_ids_for_users(member_ids)
+                if country_map:
+                    counter: Counter[str] = Counter(country_map.values())
+                    inferred_country_id = counter.most_common(1)[0][0]
+
+                # Update citizen_levels.mu_id for every known member
+                for uid in member_ids:
+                    await self._db.update_citizen_mu(uid, mu_id, effective_name)
+                    citizens_updated += 1
+                await self._db.flush_citizen_levels()
+
+            await self._db.upsert_known_mu(mu_id, effective_name, now_iso, inferred_country_id)
+            if inferred_country_id:
+                mus_tagged += 1
+
+            logger.debug(
+                "sweep_all_mu_memberships: [%d/%d] %s → country=%s members=%d",
+                idx + 1,
+                total,
+                effective_name,
+                inferred_country_id,
+                len(member_ids),
+            )
+
+            if progress_callback:
+                await progress_callback(idx + 1, total, effective_name)
+
+        await self._db.flush_known_mus()
+        return mus_tagged, citizens_updated
 
     # ------------------------------------------------------------------ #
     # Private helpers                                                      #
@@ -524,6 +590,7 @@ class CitizenCache:
         dates = obj.get("dates")
         if isinstance(dates, dict):
             for key in (
+                "lastConnectionAt",
                 "lastLoginAt",
                 "lastSeenAt",
                 "lastOnlineAt",
@@ -535,6 +602,7 @@ class CitizenCache:
                     return val
         # Fall back to root-level keys
         for key in (
+            "lastConnectionAt",
             "lastLoginAt",
             "lastSeenAt",
             "lastOnlineAt",
@@ -545,3 +613,180 @@ class CitizenCache:
             if isinstance(val, str) and val:
                 return val
         return None
+
+    # ------------------------------------------------------------------ #
+    # Article tips sweep                                                   #
+    # ------------------------------------------------------------------ #
+
+    async def sweep_article_tips(
+        self,
+        country_id: str | None = None,
+        progress_callback=None,
+    ) -> tuple[int, int]:
+        """Scan known citizens' transactions for outgoing article tips and store them.
+
+        Incremental behaviour:
+        - Citizens who have stored tips are re-scanned from their latest known tip
+          onwards (using MAX(tip_at) as a cutoff — transactions older than this are
+          skipped during pagination).
+        - Citizens who have never tipped get a full scan the first time; afterwards
+          their scan timestamp is recorded and they are skipped for RESCAN_DAYS so
+          subsequent sweeps don't re-hit the API for every zero-tip citizen.
+
+        *progress_callback* is called as
+        ``await progress_callback(done, total, citizen_name)`` after each citizen.
+
+        Returns ``(citizens_scanned, tips_stored)``.
+        """
+        from datetime import datetime, timezone, timedelta
+
+        RESCAN_DAYS = 7  # skip zero-tip citizens re-scanned within this many days
+
+        if country_id:
+            rows = await self._db.get_citizens_in_country(country_id)
+        else:
+            rows = await self._db.get_all_citizens_for_tips_scan()
+
+        total = len(rows)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        rescan_cutoff = (datetime.now(timezone.utc) - timedelta(days=RESCAN_DAYS)).isoformat()
+
+        citizens_scanned = 0
+        tips_stored = 0
+
+        for idx, (user_id, c_country_id, citizen_name) in enumerate(rows):
+            cutoff = await self._db.get_latest_tip_at_for_user(user_id)
+
+            # If this citizen has never tipped, check if we scanned them recently.
+            # If so, skip them to avoid redundant full API scans every sweep.
+            if cutoff is None:
+                last_scan = await self._db.get_last_scanned_at(user_id)
+                if last_scan and last_scan >= rescan_cutoff:
+                    # scanned recently, no tips found then — skip
+                    if progress_callback:
+                        await progress_callback(idx + 1, total, citizen_name or user_id)
+                    continue
+
+            page_tips = await self._fetch_tip_transactions(
+                user_id, c_country_id, citizen_name, now_iso, cutoff=cutoff
+            )
+            for tip_record in page_tips:
+                inserted = await self._db.upsert_article_tip(*tip_record)
+                if inserted:
+                    tips_stored += 1
+
+            # Record that this citizen was scanned so zero-tip citizens are skipped
+            # for RESCAN_DAYS on the next sweep.
+            await self._db.upsert_scan_timestamp(user_id, now_iso)
+            await self._db.flush_article_tips()
+            citizens_scanned += 1
+
+            logger.debug(
+                "sweep_article_tips: [%d/%d] %s → %d tips",
+                idx + 1, total, citizen_name or user_id, len(page_tips),
+            )
+
+            if progress_callback:
+                await progress_callback(idx + 1, total, citizen_name or user_id)
+
+        # Bulk-stamp any citizen not explicitly tracked yet (e.g. everyone scanned
+        # by a previous run of the old code that had no timestamp tracking).
+        # OR IGNORE means already-tracked citizens keep their existing timestamp.
+        await self._db.bulk_init_scan_timestamps(now_iso)
+
+        return citizens_scanned, tips_stored
+
+    async def _fetch_tip_transactions(
+        self,
+        user_id: str,
+        country_id: str | None,
+        citizen_name: str | None,
+        recorded_at: str,
+        *,
+        cutoff: str | None = None,
+    ) -> list[tuple]:
+        """Fetch outgoing articleTip transactions for a single user.
+
+        Each returned tuple is: (user_id, country_id, citizen_name, amount, tip_at, recorded_at)
+
+        If *cutoff* is given (ISO timestamp of the latest tip already stored for
+        this user), pagination stops as soon as we encounter a transaction with
+        ``createdAt <= cutoff`` so that we only fetch *new* records.
+        """
+        records: list[tuple] = []
+        cursor: str | None = None
+        page_size = 100
+        max_pages = 200  # safety cap: 20 000 tip transactions per citizen
+
+        for _ in range(max_pages):
+            payload: dict = {
+                "userId": user_id,
+                "transactionType": "articleTip",
+                "limit": page_size,
+            }
+            if cursor:
+                payload["cursor"] = cursor
+
+            try:
+                raw = await self._client.post(
+                    "/transaction.getPaginatedTransactions",
+                    json=payload,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "_fetch_tip_transactions(%s): request failed: %s", user_id, exc
+                )
+                break
+
+            # Unwrap tRPC envelope
+            if isinstance(raw, list):
+                items = raw
+                cursor = None
+            elif isinstance(raw, dict):
+                data = raw.get("result", {}).get("data", raw)
+                if not isinstance(data, dict):
+                    data = {}
+                items = (
+                    data.get("items")
+                    or data.get("transactions")
+                    or data.get("results")
+                    or []
+                )
+                cursor = data.get("nextCursor") or data.get("cursor")
+            else:
+                break
+
+            for tx in items:
+                if not isinstance(tx, dict):
+                    continue
+                tx_type = tx.get("type") or tx.get("transactionType") or ""
+                if tx_type != "articleTip":
+                    continue
+                money = tx.get("money")
+                if money is None:
+                    continue
+                money_f = float(money)
+                # Only outgoing tips (tipper's perspective → money is negative)
+                if money_f >= 0:
+                    continue
+                amount = abs(money_f)
+                tip_at = (
+                    tx.get("createdAt")
+                    or tx.get("date")
+                    or tx.get("timestamp")
+                    or recorded_at
+                )
+                # Incremental scan: stop once we reach already-processed transactions.
+                # Transactions are returned newest-first, so the first tx older than
+                # the cutoff means all remaining are already stored.
+                if cutoff and tip_at and tip_at <= cutoff:
+                    cursor = None  # signal to stop pagination
+                    break
+                records.append(
+                    (user_id, country_id, citizen_name, amount, tip_at, recorded_at)
+                )
+
+            if not cursor or not items:
+                break
+
+        return records

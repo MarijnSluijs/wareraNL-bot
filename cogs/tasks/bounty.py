@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 import discord
@@ -19,6 +20,9 @@ from cogs.tasks._base import TaskCogBase
 logger = logging.getLogger("discord_bot")
 
 _BATTLE_URL = "https://app.warera.io/battle/{battle_id}"
+
+# Thresholds for which Discord roles exist (must match role names exactly, e.g. "0.2bounty")
+_BOUNTY_THRESHOLDS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
 
 def _extract_bounty(side: dict) -> tuple[float, float] | None:
@@ -77,13 +81,16 @@ def _extract_bounty(side: dict) -> tuple[float, float] | None:
 class BountyTasks(TaskCogBase, name="bounty_tasks"):
     def __init__(self, bot) -> None:
         self.bot = bot
-        # battle_id -> (rate_per_1000, total_pool, message_id) — last posted state
-        self._known: dict[str, tuple[float, float, int | None]] = {}
+        # known_key -> (rate, total, msg_id, pending_until_ts)
+        # pending_until_ts: UTC unix timestamp when the bounty becomes payable, or None if already active
+        self._known: dict[str, tuple[float, float, int | None, float | None]] = {}
         # country_id -> country_name cache
         self._country_names: dict[str, str] = {}
         # Set of country IDs that should never be targeted by bounty alerts
         # (NL itself + all current allies).  Refreshed each poll cycle.
         self._protected_ids: set[str] = set()
+        # Set of country IDs that are enemies of NL (declared war / at war).
+        self._enemy_ids: set[str] = set()
 
     def cog_load(self) -> None:
         self.bounty_poll.start()
@@ -103,18 +110,105 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
     @bounty_poll.before_loop
     async def before_bounty_poll(self) -> None:
         await self._wait_for_services()
+        await self._preload_known_from_channel()
 
     # ------------------------------------------------------------------ #
     # Internals                                                            #
     # ------------------------------------------------------------------ #
 
+    async def _preload_known_from_channel(self) -> None:
+        """Scan recent channel messages and pre-populate _known so existing bounty
+        posts are not re-sent after a bot restart."""
+        channels = self.config.get("channels", {})
+        channel_id = channels.get("bounties")
+        if not channel_id:
+            return
+        channel = self.bot.get_channel(int(channel_id))
+        if channel is None:
+            return
+
+        _battle_url_re = re.compile(r"https?://(?:app\.)?warera\.io/battle/([A-Za-z0-9_-]+)")
+        _rate_re = re.compile(r"\*\*Beloning:\*\*\s*([\d.]+)")
+        _total_re = re.compile(r"\*\*Totale pool:\*\*\s*([\d,. ]+)")
+        _ts_re = re.compile(r"<t:(\d+):[^>]+>")
+        _title_re = re.compile(r"(?:Bounty|Aankomende bounty):\s*(.+?)\s+vs\s+(.+)", re.IGNORECASE)
+        _funder_re = re.compile(r"\*\*Aangeboden door:\*\*\s*(.+)")
+
+        try:
+            async for msg in channel.history(limit=50):
+                if msg.author != self.bot.user or not msg.embeds:
+                    continue
+                embed = msg.embeds[0]
+                url = embed.url or ""
+                m = _battle_url_re.search(url)
+                if not m:
+                    continue
+                battle_id = m.group(1)
+
+                desc = embed.description or ""
+                rate_m = _rate_re.search(desc)
+                total_m = _total_re.search(desc)
+                rate = float(rate_m.group(1)) if rate_m else 0.0
+                total = float((total_m.group(1) or "0").replace(",", "").replace(" ", "")) if total_m else 0.0
+
+                is_pending = embed.title is not None and embed.title.startswith("⏳")
+                pending_until_ts: float | None = None
+                if is_pending:
+                    ts_m = _ts_re.search(desc)
+                    if ts_m:
+                        pending_until_ts = float(ts_m.group(1))
+
+                # Determine which side this message belongs to by matching the funder
+                # country against the attacker/defender names from the title.
+                # This prevents erroneous deletions when both side keys point to the same msg.id.
+                detected_side: str | None = None
+                if embed.title:
+                    title_m = _title_re.search(embed.title)
+                    funder_m = _funder_re.search(desc)
+                    if title_m and funder_m:
+                        att_name = title_m.group(1).strip()
+                        def_name = title_m.group(2).strip()
+                        funder = funder_m.group(1).strip()
+                        if funder == att_name:
+                            detected_side = "atk"
+                        elif funder == def_name:
+                            detected_side = "dfn"
+
+                for side_key in ("atk", "dfn"):
+                    known_key = f"{battle_id}:{side_key}"
+                    if known_key in self._known:
+                        continue
+                    # Use the real msg.id only for the side we identified; store None for
+                    # the other side so an erroneous "no bounty" match never deletes this
+                    # message.  A None msg_id still suppresses re-posting via the rate check.
+                    stored_msg_id = msg.id if (detected_side is None or detected_side == side_key) else None
+                    self._known[known_key] = (rate, total, stored_msg_id, pending_until_ts)
+
+        except Exception:
+            logger.exception("bounty_poll: failed to preload known bounties from channel")
+
+    async def _fetch_effective_at(self, battle_id: str, side_key: str) -> float | None:
+        """Return UTC unix timestamp when the bounty becomes payable, or None."""
+        try:
+            resp = await self._client.get(
+                "/battle.getLiveBattleData",
+                params={"input": json.dumps({"battleId": battle_id})},
+            )
+            inner = resp.get("result", resp) if isinstance(resp, dict) else {}
+            data = inner.get("data", inner) if isinstance(inner, dict) else {}
+            battle_live = data.get("battle", {}) if isinstance(data, dict) else {}
+            prefix = "attacker" if side_key == "atk" else "defender"
+            eff_str = battle_live.get(f"{prefix}BountyEffectiveAt")
+            if eff_str:
+                dt = datetime.fromisoformat(eff_str.replace("Z", "+00:00"))
+                return dt.timestamp()
+        except Exception as exc:
+            logger.debug("bounty_poll: could not fetch effective timestamp for %s [%s]: %s", battle_id, side_key, exc)
+        return None
+
     async def _run_bounty_poll(self) -> None:
         channels = self.config.get("channels", {})
-        # In testing mode use the testing-area channel; in production use bot_mededelingen.
-        if getattr(self.bot, "testing", False):
-            channel_id = channels.get("testing-area")
-        else:
-            channel_id = channels.get("bot_mededelingen")
+        channel_id = channels.get("bounties")
         if not channel_id:
             logger.warning("bounty_poll: no channel configured, skipping")
             return
@@ -179,20 +273,33 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                 if isinstance(nl_data, dict):
                     allies = nl_data.get("allies") or []
                     protected.update(str(a) for a in allies if a)
+                    # Also collect declared enemies (field names vary by API version)
+                    raw_enemies = (
+                        nl_data.get("enemies")
+                        or nl_data.get("permanentEnemies")
+                        or nl_data.get("atWarWith")
+                        or []
+                    )
+                    self._enemy_ids = {str(e) for e in raw_enemies if e}
             except Exception:
                 pass  # keep previous protected set on error
         self._protected_ids = protected
-
-        # Remove stale entries for battles that are no longer active
-        active_ids = {str(b.get("_id") or "") for b in battles}
-        self._known = {
-            k: v for k, v in self._known.items() if k.split(":")[0] in active_ids
-        }
 
         channel = self.bot.get_channel(int(channel_id))
         if channel is None:
             logger.warning("bounty_poll: channel %s not found in cache", channel_id)
             return
+
+        # Remove stale entries for battles that are no longer active, deleting their messages
+        active_ids = {str(b.get("_id") or "") for b in battles}
+        stale = {k: v for k, v in self._known.items() if k.split(":")[0] not in active_ids}
+        for stale_val in stale.values():
+            if stale_val[2]:
+                try:
+                    await channel.get_partial_message(stale_val[2]).delete()
+                except Exception:
+                    pass
+        self._known = {k: v for k, v in self._known.items() if k.split(":")[0] in active_ids}
 
         def _cname(side: dict) -> str:
             cid = str(side.get("country") or "")
@@ -233,17 +340,24 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                 ("atk", attacker, att_country_id),
                 ("dfn", defender, def_country_id),
             ):
-                # Skip bounties placed ON NL or one of its allies — these are
-                # enemy bounties incentivising people to fight our side.
-                if side_country_id and side_country_id in self._protected_ids:
+                # Determine the opponent's country ID for this side
+                opponent_country_id = def_country_id if side_key == "atk" else att_country_id
+
+                # Skip if the bounty funder is fighting against NL or an ally — paying
+                # people to battle our side.
+                if opponent_country_id and opponent_country_id in self._protected_ids:
+                    continue
+
+                # Skip if the funder is a known enemy of NL — don't help them recruit.
+                if side_country_id and side_country_id in self._enemy_ids:
                     continue
 
                 known_key = f"{battle_id}:{side_key}"
 
                 b = _extract_bounty(side)
 
-                # Pool depleted or bounty removed — delete any previously posted message.
-                if not b or (b[1] <= 0):
+                # No bounty, rate below threshold, or pool exhausted (paid out) — delete any previously posted message.
+                if b is None or b[0] < 0.1 or b[1] <= 0:
                     prev = self._known.pop(known_key, None)
                     if prev and prev[2]:
                         try:
@@ -254,40 +368,88 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
 
                 rate, total = b
 
-                if rate < 0.8:
-                    continue  # Below minimum threshold
-
-                if total < 1000:
-                    continue  # Pool too small
-
+                now_ts = datetime.now(timezone.utc).timestamp()
                 prev = self._known.get(known_key)
-                if prev is not None:
-                    prev_rate, _prev_total, _prev_msg = prev
-                    if rate - prev_rate < 0.1:
-                        continue  # Rate not increased enough
+
+                # Determine pending state and decide whether to (re-)post
+                pending_until_ts: float | None = None
+                skip = False
+
+                if prev is None:
+                    # New bounty: fetch live data for effective timestamp
+                    eff = await self._fetch_effective_at(battle_id, side_key)
+                    if eff is not None and eff > now_ts:
+                        pending_until_ts = eff
+                else:
+                    prev_rate, _prev_total, _prev_msg, prev_pending_until = prev
+
+                    if prev_pending_until is not None:
+                        if now_ts < prev_pending_until:
+                            # Still pending
+                            if rate - prev_rate < 0.1:
+                                skip = True  # same rate, still pending → nothing new
+                            pending_until_ts = prev_pending_until
+                        else:
+                            # Was pending, now active — delete pending message and re-post with pings
+                            if _prev_msg:
+                                try:
+                                    await channel.get_partial_message(_prev_msg).delete()
+                                except Exception:
+                                    pass
+                            pending_until_ts = None  # now active
+                    else:
+                        # Was already active
+                        if rate - prev_rate < 0.1:
+                            skip = True
+
+                if skip:
+                    continue
+
+                is_pending = pending_until_ts is not None and pending_until_ts > now_ts
 
                 funder_name = _cname(side)
                 lines: list[str] = []
                 if region_name:
                     lines.append(f"**Regio:** {region_name}")
                 lines.append(f"**Aangeboden door:** {funder_name}")
+                if is_pending:
+                    lines.append(f"**Actief over:** <t:{int(pending_until_ts)}:R>")
                 if rate > 0:
-                    lines.append(f"**Beloning:** {rate:.1f} CC per 1k schade")
+                    lines.append(f"**Beloning:** {rate:g} CC per 1k schade")
                 if total > 0:
                     lines.append(f"**Totale pool:** {total:,.2f} CC")
 
+                if is_pending:
+                    embed_title = f"⏳ Aankomende bounty: {att_name} vs {def_name}"
+                    embed_colour = discord.Colour.orange()
+                else:
+                    embed_title = f"💰 Bounty: {att_name} vs {def_name}"
+                    embed_colour = discord.Colour.gold()
+
                 embed = discord.Embed(
-                    title=f"💰 Bounty: {att_name} vs {def_name}",
+                    title=embed_title,
                     description="\n".join(lines) if lines else None,
                     url=battle_url,
-                    colour=discord.Colour.gold(),
+                    colour=embed_colour,
                     timestamp=datetime.now(timezone.utc),
                 )
                 embed.set_footer(text="WarEra — bounty alert")
 
+                # Ping roles for both pending and active bounties
+                content = None
+                guild = getattr(channel, "guild", None)
+                ping_parts: list[str] = []
+                if guild:
+                    for t in _BOUNTY_THRESHOLDS:
+                        if t <= rate:
+                            r = discord.utils.get(guild.roles, name=f"{t:g}bounty")
+                            if r:
+                                ping_parts.append(r.mention)
+                content = " ".join(ping_parts) if ping_parts else None
+
                 try:
-                    msg = await channel.send(embed=embed)
-                    self._known[known_key] = (rate, total, msg.id)
+                    msg = await channel.send(content=content, embed=embed)
+                    self._known[known_key] = (rate, total, msg.id, pending_until_ts)
                 except Exception as exc:
                     logger.warning(
                         "bounty_poll: failed to send embed for battle %s [%s]: %s",
@@ -295,7 +457,7 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                         side_key,
                         exc,
                     )
-                    self._known[known_key] = (rate, total, None)
+                    self._known[known_key] = (rate, total, None, pending_until_ts)
 
 
 async def setup(bot) -> None:

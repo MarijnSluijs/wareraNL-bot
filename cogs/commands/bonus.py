@@ -350,14 +350,29 @@ class BonusCog(CommandCogBase, name="bonus"):
         if best_embed.fields:
             await ctx.send(embed=best_embed)
 
-        await ctx.send(
-            "_"
-            "**K/PP** = hoogste kooporder / PP\n"
-            "**V/PP** = laagste verkooporder / PP\n"
-            "**MK/PP** = K/PP × max bonus\n"
-            "**MV/PP** = V/PP × max bonus"
-            "_"
-        )
+        legend_parts = [
+            "**K/PP** = hoogste kooporder / PP",
+            "**V/PP** = laagste verkooporder / PP",
+            "**MK/PP** = K/PP × max bonus",
+            "**MV/PP** = V/PP × max bonus",
+        ]
+        if not self._client:
+            legend_parts.append(
+                "⚠️ Marktprijzen niet beschikbaar (API offline)"
+                " — K/PP, V/PP, MK/PP en MV/PP staan op ?"
+            )
+        all_db_timestamps = [
+            r.get("updated_at") for r in tops + deposit_tops if r.get("updated_at")
+        ]
+        if all_db_timestamps:
+            latest_ts = max(all_db_timestamps)
+            try:
+                _dt = datetime.fromisoformat(latest_ts)
+                ts_str = _dt.strftime("%d-%m-%Y %H:%M")
+            except Exception:
+                ts_str = (latest_ts or "")[:16].replace("T", " ") or "onbekend"
+            legend_parts.append(f"-# Productiedata bijgewerkt: {ts_str} UTC")
+        await ctx.send("_" + "\n".join(legend_parts) + "_")
 
     # ------------------------------------------------------------------ #
     # /topbonus                                                            #
@@ -430,7 +445,7 @@ class BonusCog(CommandCogBase, name="bonus"):
     )
     async def verhuiskosten(self, ctx: Context, bonuses: str = ""):
         """Break-even table: hours of Automated Engine production to recover the 5-concrete move cost."""
-        parts = bonuses.split()
+        parts = bonuses.replace(",", ".").split()
         bonus: float = 0.0
         new_bonus: float | None = None
         try:
@@ -444,15 +459,15 @@ class BonusCog(CommandCogBase, name="bonus"):
             )
             return
         if not self._client:
-            await ctx.send("API-client is niet geïnitialiseerd.")
+            await self._send_api_offline(ctx)
             return
         if hasattr(ctx, "defer"):
             await ctx.defer()
 
         try:
             prices_resp = await self._client.get("/itemTrading.getPrices")
-        except Exception as exc:
-            await ctx.send(f"Ophalen van marktprijzen mislukt: {exc}")
+        except Exception:
+            await self._send_api_offline(ctx)
             return
 
         prices = self._unwrap_prices(prices_resp)

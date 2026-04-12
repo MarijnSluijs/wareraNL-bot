@@ -193,7 +193,7 @@ class MudmgCog(CommandCogBase, name="mudmg"):
     ) -> None:
         """Show MU damage overview or per-member breakdown."""
         if not self._client:
-            await ctx.send("API-client niet geïnitialiseerd.")
+            await self._send_api_offline(ctx)
             return
 
         if hasattr(ctx, "defer"):
@@ -218,7 +218,7 @@ class MudmgCog(CommandCogBase, name="mudmg"):
             results = await self._client.batch_get("/mu.getById", inputs)
         except Exception as exc:
             logger.warning("mudmg overview: batch_get failed: %s", exc)
-            await ctx.send("Kon MU-data niet ophalen van de API.")
+            await self._send_api_offline(ctx)
             return
 
         # Map entry id → live payload
@@ -321,7 +321,7 @@ class MudmgCog(CommandCogBase, name="mudmg"):
         mu_data, total_resp = await asyncio.gather(_fetch_mu(), _fetch_total_ranking())
 
         if not isinstance(mu_data, dict):
-            await ctx.send("Kon MU-data niet ophalen van de API.")
+            await self._send_api_offline(ctx)
             return
 
         weekly_total, dmg_total = _mu_rankings(mu_data)

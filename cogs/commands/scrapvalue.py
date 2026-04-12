@@ -53,7 +53,7 @@ class ScrapvalueCog(CommandCogBase, name="scrapvalue"):
     async def scrapvalue(self, ctx: Context) -> None:
         """Calculate scrap values for each equipment rarity using live market prices."""
         if not self._client:
-            await ctx.send("API-client is niet geïnitialiseerd.")
+            await self._send_api_offline(ctx)
             return
         if hasattr(ctx, "defer"):
             await ctx.defer()
@@ -61,9 +61,9 @@ class ScrapvalueCog(CommandCogBase, name="scrapvalue"):
         # --- Fetch market prices (contains scraps key) -----------------------
         try:
             prices_resp = await self._client.get("/itemTrading.getPrices")
-        except Exception as exc:
-            logger.exception("Failed to fetch item prices")
-            await ctx.send(f"Ophalen van marktprijzen mislukt: {exc}")
+        except Exception:
+            logger.exception("scrapvalue: failed to fetch item prices")
+            await self._send_api_offline(ctx)
             return
 
         prices_data = _unwrap(prices_resp)
@@ -83,9 +83,9 @@ class ScrapvalueCog(CommandCogBase, name="scrapvalue"):
                 "/tradingOrder.getTopOrders",
                 json={"itemCode": "scraps", "limit": 1},
             )
-        except Exception as exc:
-            logger.exception("Failed to fetch top orders for scraps")
-            await ctx.send(f"Ophalen van orders mislukt: {exc}")
+        except Exception:
+            logger.exception("scrapvalue: failed to fetch top orders")
+            await self._send_api_offline(ctx)
             return
 
         orders_data = _unwrap(orders_resp)

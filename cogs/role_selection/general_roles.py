@@ -23,7 +23,10 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
                 for embed_data in template["embeds"]:
                     if embed_data.get("buttons"):
                         self.bot.add_view(
-                            RoleToggleView(embed_data["buttons"], exclusive=False)
+                            RoleToggleView(
+                                embed_data["buttons"],
+                                exclusive=bool(embed_data.get("exclusive", False)),
+                            )
                         )
             elif template.get("buttons"):
                 self.bot.add_view(RoleToggleView(template["buttons"], exclusive=False))
@@ -88,6 +91,7 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
                     btn["role_id"] = role.id
                     template_dirty = True
 
+            exclusive = bool(embed_data.get("exclusive", False))
             embed = discord.Embed(
                 title=embed_data.get("title", "Kies je rollen"),
                 description=embed_data.get(
@@ -96,7 +100,7 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
                 color=color,
             )
             await target_channel.send(
-                embed=embed, view=RoleToggleView(buttons, exclusive=False)
+                embed=embed, view=RoleToggleView(buttons, exclusive=exclusive)
             )
 
         if template_dirty:

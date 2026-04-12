@@ -8,9 +8,13 @@ Prefix commands (owner-only unless noted):
   !clearluck                    — clear the luck-score cache
   !congres_analyse              — generate a congressional analysis report
   !shutdown                     — gracefully shut down the bot
+  !restart                      — restart the bot process in-place
   !say (message)                — make the bot send a message
   /purge (amount)               — delete messages in bulk (requires manage_messages)
 """
+
+import os
+import sys
 
 import discord
 from discord import app_commands
@@ -205,6 +209,21 @@ class Owner(commands.Cog, name="owner"):
         await context.send(embed=embed)
 
     @commands.hybrid_command(
+        name="restart",
+        description="Herstart het bot-proces volledig.",
+    )
+    @commands.is_owner()
+    async def restart(self, context: Context) -> None:
+        """Restart the bot by re-executing the current process."""
+        embed = discord.Embed(
+            description="De bot wordt herstart. Even geduld... :arrows_counterclockwise:",
+            color=self.color,
+        )
+        await context.send(embed=embed)
+        await self.bot.close()
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    @commands.hybrid_command(
         name="shutdown",
         description="Zet de bot uit.",
     )
@@ -382,6 +401,44 @@ class Owner(commands.Cog, name="owner"):
     #     """
     #     embed = discord.Embed(description=message, color=0xBEBEFE)
     #     await context.send(embed=embed)
+
+
+    @commands.command(
+        name="apioffline",
+        description="Simuleer de API als offline of herstel de verbinding (test mode).",
+    )
+    @commands.is_owner()
+    async def apioffline(self, context: Context, state: str) -> None:
+        """Toggle API offline simulation for testing fallback behaviour.
+
+        Usage: !apioffline on   — null the shared client so all commands see the API as offline
+               !apioffline off  — restore the saved client
+        """
+        state = state.strip().lower()
+        if state == "on":
+            if getattr(self.bot, "_force_api_offline", False):
+                await context.send("⚠️ API offline-modus is al actief.")
+                return
+            # Save the real client and null it out so CommandCogBase sees None
+            self.bot._saved_ext_client = getattr(self.bot, "_ext_client", None)
+            self.bot._ext_client = None
+            self.bot._force_api_offline = True
+            await context.send(
+                "🔌 **API offline-modus ingeschakeld.** Alle API-afhankelijke commando's "
+                "zullen nu de offline-melding tonen. Gebruik `!apioffline off` om te herstellen."
+            )
+        elif state == "off":
+            if not getattr(self.bot, "_force_api_offline", False):
+                await context.send("✅ API offline-modus is niet actief.")
+                return
+            # Restore the saved client
+            saved = getattr(self.bot, "_saved_ext_client", None)
+            self.bot._ext_client = saved
+            self.bot._force_api_offline = False
+            self.bot._saved_ext_client = None
+            await context.send("✅ **API offline-modus uitgeschakeld.** Verbinding hersteld.")
+        else:
+            await context.send("❌ Gebruik: `!apioffline on` of `!apioffline off`")
 
 
 async def setup(bot) -> None:

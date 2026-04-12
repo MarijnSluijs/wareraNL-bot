@@ -6,10 +6,23 @@ from __future__ import annotations
 class MusRegistryMixin:
     """Mixin for the ``known_mus`` table."""
 
-    async def upsert_known_mu(self, mu_id: str, mu_name: str, updated_at: str) -> None:
+    async def upsert_known_mu(
+        self,
+        mu_id: str,
+        mu_name: str,
+        updated_at: str,
+        country_id: str | None = None,
+    ) -> None:
         await self._conn.execute(
-            "INSERT OR REPLACE INTO known_mus (mu_id, mu_name, updated_at) VALUES (?, ?, ?)",
-            (mu_id, mu_name, updated_at),
+            """
+            INSERT INTO known_mus (mu_id, mu_name, updated_at, country_id)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(mu_id) DO UPDATE SET
+                mu_name    = excluded.mu_name,
+                updated_at = excluded.updated_at,
+                country_id = COALESCE(excluded.country_id, known_mus.country_id)
+            """,
+            (mu_id, mu_name, updated_at, country_id),
         )
 
     async def flush_known_mus(self) -> None:
@@ -30,6 +43,16 @@ class MusRegistryMixin:
             async for row in cur:
                 names.append(row[0])
         return names
+
+    async def get_all_known_mu_ids(self) -> list[tuple[str, str, str | None]]:
+        """Return [(mu_id, mu_name, country_id)] for every row in known_mus."""
+        rows: list[tuple[str, str, str | None]] = []
+        async with self._conn.execute(
+            "SELECT mu_id, mu_name, country_id FROM known_mus ORDER BY mu_name"
+        ) as cur:
+            async for row in cur:
+                rows.append((row[0], row[1], row[2]))
+        return rows
 
     async def get_known_mu_by_name(
         self, query: str

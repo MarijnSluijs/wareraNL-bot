@@ -1,22 +1,191 @@
 {
   "embeds": [
     {
-      "title": "Pings",
-      "description": "Kies met onderstaande knoppen je ping-rollen.\n\n**Journalist**: Om gepingd te worden voor roddels.\n**Economie**: Om gepingd te worden bij economische updates, zoals verandering in production bonusses.",
+      "title": "Overheid meldingen",
+      "description": "Kies voor welke overheidsberichten je gepingd wilt worden.\n\n**Overheid**: Officiële mededelingen vanuit de overheid.\n**Oorlog updates**: Updates over orders, prioriteiten en overige niet kritieke militaire mededelingen.\n**Dagelijkse update**: Dagelijkse updates vanuit de overheid en het kabinet.\n**Congres update**: Updates namens het congres.\n**Referendum**: Pings bij referendums en polls vanuit congres of kabinet.",
       "buttons": [
-        { "label": "Journalist", "role_id": 1468889038953123947, "style": "primary", "row": 0 },
-        { "label": "Economie", "role_id": 1470753092390617129, "style": "primary", "row": 0 }
+        {
+          "label": "Overheid",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Oorlog updates",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Dagelijkse update",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Congres update",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Referendum",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        }
       ]
     },
-
+    {
+      "title": "WarEra meldingen",
+      "description": "Kies voor welke WarEra-gebeurtenissen je gepingd wilt worden.\n\n**Oorlog**: Pings als er direct damage nodig is of als Nederland aangevallen wordt.\n**WarEra Aankondigingen**: Pings over updates, patches en nieuwe ontwikkelingen in WarEra.\n**Economie**: Pings bij economische updates, zoals verandering in production bonusses.",
+      "buttons": [
+        {
+          "label": "Oorlog",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "WarEra Aankondigingen",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Economie",
+          "role_id": 1470753092390617129,
+          "style": "primary",
+          "row": 0
+        }
+      ]
+    },
+    {
+      "title": "Community meldingen",
+      "description": "Kies voor welke community-activiteiten je gepingd wilt worden.\n\n**Discord Server**: Pings bij wijzigingen aan de Discord server.\n**Giveaways**: Pings bij winacties en weggeefacties.\n**Community**: Pings voor community zaken zoals de Wikipedia.\n**Promotie Team**: Word gepingd om mee te helpen met Reddit- of social media posts.\n**Journalist**: Pings voor roddels.",
+      "buttons": [
+        {
+          "label": "Discord Server",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Giveaways",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Community",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Promotie Team",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Journalist",
+          "role_id": 1468889038953123947,
+          "style": "primary",
+          "row": 0
+        }
+      ]
+    },
     {
       "title": "Verkiezingen",
-      "description": "Kies met onderstaande knoppen je toegang tot de campagnekanalen.\n\n**Kandidaat-President**: Voor deelname aan de presidentsverkiezingen.\n**Kandidaat-Congreslid**: Voor deelname aan de congresverkiezingen.",
+      "description": "Kies met onderstaande knoppen je toegang tot de campagnekanalen.\n\n**Kandidaat-President**: Voor deelname aan de presidentsverkiezingen.\n**Kandidaat-Congreslid**: Voor deelname aan de congresverkiezingen.\n**Verkiezingen**: Pings bij verkiezingen en gerelateerde aankondigingen.",
       "buttons": [
-        { "label": "Kandidaat-President", "role_id": 1468889923565125632, "style": "primary", "row": 0 },
-        { "label": "Kandidaat-Congreslid", "role_id": 1468316379877736643, "style": "primary", "row": 0 }
+        {
+          "label": "Kandidaat-President",
+          "role_id": 1468889923565125632,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Kandidaat-Congreslid",
+          "role_id": 1468316379877736643,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Verkiezingen",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        }
+      ]
+    },
+    {
+      "title": "Bounty meldingen",
+      "description": "Kies met onderstaande knoppen je drempelwaarde voor bounty meldingen.\n\nDe bot pingt je zodra er een bounty verschijnt die gelijk is aan of hoger dan jouw gekozen waarde.\n\nJe kunt slechts één drempelwaarde tegelijk hebben.",
+      "exclusive": true,
+      "buttons": [
+        {
+          "label": "0.1bounty",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "0.2bounty",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "0.3bounty",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "0.4bounty",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "0.5bounty",
+          "role_id": 0,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "0.6bounty",
+          "role_id": 0,
+          "style": "primary",
+          "row": 1
+        },
+        {
+          "label": "0.7bounty",
+          "role_id": 0,
+          "style": "primary",
+          "row": 1
+        },
+        {
+          "label": "0.8bounty",
+          "role_id": 0,
+          "style": "primary",
+          "row": 1
+        },
+        {
+          "label": "0.9bounty",
+          "role_id": 0,
+          "style": "primary",
+          "row": 1
+        },
+        {
+          "label": "1.0bounty",
+          "role_id": 0,
+          "style": "primary",
+          "row": 1
+        }
       ]
     }
-  
   ]
 }

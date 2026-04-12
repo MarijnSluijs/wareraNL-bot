@@ -15,7 +15,9 @@
         "belgian": 1475467520365428807,
         "wachtlijst": 1470742053527748823,
         "officier": 1475206894992883723,
-        "twijfelgeval": 1468219354754711674
+        "twijfelgeval": 1468219354754711674,
+        "congreslid": 1451181300009537547,
+        "samenvatting_allowed": [1451181300009537547, 1458527742646816892, 1401530996725383178]
     },
     "channels": {
         "welcome_message": 1401530718223335499,
@@ -38,6 +40,7 @@
         "stembureau": 1466165467155665080,
         "events": 1474472809215299706,
         "mu_aanmelden": 1480649484819235019,
+        "bounties": 1456399375755509772,
         "id_controle": 1483193363653202020
     },
     "welcome_message": "# Welcome to the Official Nederland War Era Server!\n\nGreetings, traveler! You have arrived at the gates of Nederland.\n\nPlease select your status below to proceed with verification:",
