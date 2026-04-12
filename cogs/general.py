@@ -219,7 +219,7 @@ class General(commands.Cog, name="general"):
         :param context: The hybrid command context.
         """
         embed = discord.Embed(
-            description="Used [Krypton's](https://krypton.ninja) template",
+            description="Rijksoverheid bot voor de Nederlandse WarEra Discord-server.",
             color=self.color,
         )
         embed.set_author(name="Bot-informatie")

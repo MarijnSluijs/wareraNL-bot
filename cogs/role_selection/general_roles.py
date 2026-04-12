@@ -6,6 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from cogs.commands.bedrijvenbonuscheck import BedrijvenBonusCheckView, _load_state, _save_state
 from utils.checks import has_privileged_role
 
 from .roles import RoleToggleView, general_roles_path, load_roles_template
@@ -58,7 +59,8 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
 
         try:
             await target_channel.purge(
-                limit=50, check=lambda m: m.author == self.bot.user
+                limit=50,
+                check=lambda m: m.author == self.bot.user,
             )
         except (discord.Forbidden, discord.HTTPException):
             pass
@@ -109,6 +111,22 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
                     json.dump(template, f, indent=2, ensure_ascii=False)
             except Exception as e:
                 self.bot.logger.error("Failed to save general roles template: %s", e)
+
+        # Post the Company bonus check (bedrijven bonus check) button
+        bw_embed = discord.Embed(
+            title="Bedrijven bonus check",
+            description=(
+                "Wil je een melding ontvangen als een van je bedrijven **0% productiebonus** heeft?\n\n"
+                "Klik op de knop hieronder om je aan te melden. "
+                "Je in-game gebruikersnaam wordt gevraagd via een popup.\n\n"
+                "Klik nogmaals op de knop om je weer af te melden."
+            ),
+            colour=discord.Colour.blue(),
+        )
+        bw_msg = await target_channel.send(embed=bw_embed, view=BedrijvenBonusCheckView())
+        state = _load_state(self.bot.testing)
+        state["button_message_id"] = bw_msg.id
+        _save_state(state, self.bot.testing)
 
         await interaction.followup.send(
             f"✅ Rol-knoppen gepost in {target_channel.mention}.", ephemeral=True

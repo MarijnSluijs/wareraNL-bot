@@ -323,3 +323,43 @@ CREATE TABLE IF NOT EXISTS article_tip_scans (
     user_id        TEXT PRIMARY KEY,
     last_scanned_at TEXT NOT NULL
 );
+
+-- ── Bedrijven bonus check (company bonus monitor) ────────────────────────────────────
+
+-- company_bonus_watchers: Discord users who want to be notified when one of their
+--   companies has a 0% production bonus in its current region.
+CREATE TABLE IF NOT EXISTS company_bonus_watchers (
+    discord_user_id  TEXT PRIMARY KEY,
+    discord_username TEXT NOT NULL,
+    game_username    TEXT NOT NULL,
+    game_user_id     TEXT,               -- resolved in-game ID (cached)
+    guild_id         TEXT NOT NULL,
+    added_at         TEXT NOT NULL
+);
+
+-- company_bonus_alerts: tracks which (user, company, region) combinations have
+--   already been pinged, so we don't spam.  When the company moves to a new
+--   region the old row is deleted, allowing a fresh alert if the new region
+--   also has 0% bonus.
+CREATE TABLE IF NOT EXISTS company_bonus_alerts (
+    discord_user_id TEXT NOT NULL,
+    company_id      TEXT NOT NULL,
+    region_id       TEXT NOT NULL,
+    alerted_at      TEXT NOT NULL,
+    PRIMARY KEY (discord_user_id, company_id)
+);
+
+-- player_tx_cache: cached transaction aggregates per player for /transacties.
+--   On each command invocation only *new* transactions (createdAt > newest_tx_at)
+--   are fetched, then merged into the stored aggregates.
+CREATE TABLE IF NOT EXISTS player_tx_cache (
+    user_id        TEXT PRIMARY KEY,
+    username       TEXT NOT NULL,
+    counts_json    TEXT NOT NULL DEFAULT '{}',   -- JSON dict type→count
+    totals_json    TEXT NOT NULL DEFAULT '{}',   -- JSON dict type→total_cc
+    breakdown_json TEXT NOT NULL DEFAULT '{}',   -- JSON dict type→subkey→[count,total]
+    newest_tx_at   TEXT,                         -- ISO timestamp of newest cached tx
+    total_tx       INTEGER NOT NULL DEFAULT 0,
+    truncated      INTEGER NOT NULL DEFAULT 0,   -- 1 if original fetch was capped
+    updated_at     TEXT NOT NULL
+);

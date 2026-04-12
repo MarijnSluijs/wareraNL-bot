@@ -16,8 +16,9 @@ Mixin                Tables
 :mod:`.battle_drops`    ``battle_drops``
 :mod:`.battle_rankings` ``battle_hits``, ``processed_battles``
 :mod:`.article_tips`    ``article_tips``
+:mod:`.company_bonus`   ``company_bonus_watchers``, ``company_bonus_alerts``
+:mod:`.tx_cache`        ``player_tx_cache``
 ===================  ========================================
-
 Usage::
 
     db = Database("database/external.db")
@@ -31,6 +32,8 @@ from .base import DatabaseBase
 from .battle_drops import BattleDropsMixin
 from .battle_rankings import BattleRankingsMixin
 from .citizens import CitizensMixin
+from .company_bonus import CompanyBonusMixin
+from .tx_cache import TxCacheMixin
 from .events import EventsMixin
 from .giveaways_db import GiveawaysMixin
 from .identities import IdentityLinksMixin
@@ -54,6 +57,8 @@ class Database(
     BattleDropsMixin,
     BattleRankingsMixin,
     ArticleTipsMixin,
+    CompanyBonusMixin,
+    TxCacheMixin,
     DatabaseBase,
 ):
     """Async SQLite database for the WarEra Discord bot.
