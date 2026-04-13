@@ -401,6 +401,13 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                         # Was already active
                         if rate - prev_rate < 0.1:
                             skip = True
+                        else:
+                            # Rate increased enough — delete old message before re-posting
+                            if _prev_msg:
+                                try:
+                                    await channel.get_partial_message(_prev_msg).delete()
+                                except Exception:
+                                    pass
 
                 if skip:
                     continue
