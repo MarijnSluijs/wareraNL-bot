@@ -67,6 +67,8 @@ class DatabaseBase:
             ("global_citizen_luck", "elite_luck_score REAL"),
             ("global_citizen_luck", "elite_opens_count INTEGER"),
             ("global_citizen_luck", "elite_rarity_json TEXT"),
+            # company_bonus_watchers — game_user_id cached at runtime
+            ("company_bonus_watchers", "game_user_id TEXT"),
         ]
         for table, column_def in migrations:
             try:

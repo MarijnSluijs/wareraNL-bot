@@ -130,6 +130,9 @@ def _sort_breakdown(
     if tx_type in _BD_BY_RARITY:
         order = {r: i for i, r in enumerate(_RARITY_ORDER)}
         entries.sort(key=lambda x: order.get(x[0], 999))
+    elif tx_type in _BD_BY_ITEM_NAME:
+        # trading: sort by absolute total CC (highest volume on top)
+        entries.sort(key=lambda x: -abs(x[2]))
     else:
         entries.sort(key=lambda x: -x[1])
     return entries
@@ -328,13 +331,15 @@ class TransactiesCog(CommandCogBase, name="transacties"):
         return None, None
 
     async def _fetch_transactions(
-        self, user_id: str
-    ) -> "tuple[dict[str, int], dict[str, float], dict[str, dict[str, tuple[int, float]]], bool]":
-        """Page through all transactions for *user_id* and aggregate them.
+        self, user_id: str, since_iso: "str | None" = None
+    ) -> "tuple[dict[str, int], dict[str, float], dict[str, dict[str, tuple[int, float]]], bool, str | None]":
+        """Page through transactions for *user_id*, stopping at *since_iso* if given.
 
-        Returns ``(counts, coin_totals, item_breakdown, truncated)`` where
-        *item_breakdown* maps tx_type → rarity → (count, total) and
-        *truncated* is True when the fetch was capped at ``_MAX_PAGES * _PAGE_SIZE``.
+        Returns ``(counts, coin_totals, item_breakdown, truncated, newest_tx_at)``
+        where *newest_tx_at* is the ISO timestamp of the newest seen transaction
+        (``None`` if no new transactions were fetched).
+        If *since_iso* is given, only transactions newer than that timestamp are
+        aggregated; paging stops as soon as the cursor reaches older data.
         """
         client = await self._get_client()
         item_rarities, _item_names, item_types = await self._get_item_rarities()
@@ -344,6 +349,8 @@ class TransactiesCog(CommandCogBase, name="transacties"):
         item_breakdown: dict[str, dict[str, tuple[int, float]]] = {}
         cursor: Optional[str] = None
         truncated = False
+        newest_tx_at: Optional[str] = None
+        done_by_cache = False  # True when stopped because we hit already-cached data
 
         for page in range(_MAX_PAGES):
             payload: dict = {"userId": user_id, "limit": _PAGE_SIZE}
@@ -379,6 +386,17 @@ class TransactiesCog(CommandCogBase, name="transacties"):
             for tx in items:
                 if not isinstance(tx, dict):
                     continue
+                created_at: str = tx.get("createdAt") or ""
+
+                # Track newest timestamp seen in this batch (first page, first tx)
+                if created_at and (newest_tx_at is None or created_at > newest_tx_at):
+                    newest_tx_at = created_at
+
+                # Stop when we reach already-cached transactions
+                if since_iso and created_at and created_at <= since_iso:
+                    done_by_cache = True
+                    break
+
                 tx_type: str = (
                     tx.get("type")
                     or tx.get("transactionType")
@@ -426,13 +444,13 @@ class TransactiesCog(CommandCogBase, name="transacties"):
                         cur = by_type.get(sub_key, (0, 0.0))
                         by_type[sub_key] = (cur[0] + 1, cur[1] + amount)
 
-            if not cursor or not items:
+            if done_by_cache or not cursor or not items:
                 break
         else:
             # Loop exhausted all pages without breaking — more data exists
             truncated = True
 
-        return counts, totals, item_breakdown, truncated
+        return counts, totals, item_breakdown, truncated, newest_tx_at
 
     # ------------------------------------------------------------------ #
     # Command
@@ -463,8 +481,67 @@ class TransactiesCog(CommandCogBase, name="transacties"):
             )
             return
 
-        counts, totals, item_breakdown, truncated = await self._fetch_transactions(user_id)
+        # ── Load cache and fetch (possibly incremental) ──────────────────────
+        cache = await self._db.get_player_tx_cache(user_id) if self._db else None
+        since_iso: Optional[str] = cache["newest_tx_at"] if cache else None
+
+        new_counts, new_totals, new_breakdown, new_truncated, newest_tx_at = (
+            await self._fetch_transactions(user_id, since_iso)
+        )
+
+        # ── Merge new data with cached data ──────────────────────────────────
+        if cache:
+            cached_counts: dict = json.loads(cache["counts_json"])
+            cached_totals: dict = json.loads(cache["totals_json"])
+            cached_bd_raw: dict = json.loads(cache["breakdown_json"])
+            cached_truncated: bool = bool(cache["truncated"])
+
+            counts: dict = dict(cached_counts)
+            for k, v in new_counts.items():
+                counts[k] = counts.get(k, 0) + v
+
+            totals_merged: dict = dict(cached_totals)
+            for k, v in new_totals.items():
+                totals_merged[k] = totals_merged.get(k, 0.0) + v
+
+            # Re-hydrate cached breakdown (JSON lists → tuples)
+            item_breakdown: dict = {
+                tx_type: {sk: (sv[0], sv[1]) for sk, sv in sub.items()}
+                for tx_type, sub in cached_bd_raw.items()
+            }
+            for tx_type, sub in new_breakdown.items():
+                by_type = item_breakdown.setdefault(tx_type, {})
+                for sub_key, (cnt, total) in sub.items():
+                    cur = by_type.get(sub_key, (0, 0.0))
+                    by_type[sub_key] = (cur[0] + cnt, cur[1] + total)
+
+            if newest_tx_at is None:
+                newest_tx_at = cache["newest_tx_at"]
+
+            truncated = new_truncated or cached_truncated
+            totals = totals_merged
+        else:
+            counts, totals, item_breakdown, truncated = (
+                new_counts, new_totals, new_breakdown, new_truncated
+            )
+
         total_tx = sum(counts.values())
+
+        # ── Persist updated cache ────────────────────────────────────────────
+        if self._db and newest_tx_at and (new_counts or cache is None):
+            try:
+                await self._db.set_player_tx_cache(
+                    user_id=user_id,
+                    username=username,
+                    counts=counts,
+                    totals=totals,
+                    breakdown=item_breakdown,
+                    newest_tx_at=newest_tx_at,
+                    total_tx=total_tx,
+                    truncated=truncated,
+                )
+            except Exception:
+                logger.warning("Transacties: failed to save tx cache for %s", user_id)
 
         if total_tx == 0:
             await ctx.send(

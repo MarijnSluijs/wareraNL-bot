@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
 import discord
@@ -55,6 +56,12 @@ def _medal(rank: int) -> str:
     return f"{rank:>2}."
 
 
+def _fmt_bonus(value: float) -> str:
+    """Format a production bonus percentage: show 2 decimals only if the second is non-zero."""
+    s = f"{value:.2f}"
+    return (s if not s.endswith("0") else f"{value:.1f}") + "%"
+
+
 def _fmt_date(date_str: str) -> str:
     """Convert '2026-03-31' → '31 mrt \'26'."""
     try:
@@ -88,6 +95,50 @@ def _paginate_table(header: tuple, rows: list[tuple]) -> list[str]:
     return pages
 
 
+# ── Entry field helpers for /ranking.getRanking responses ────────────────────
+
+def _entry_user_id(entry: dict) -> str:
+    user = entry.get("user") or {}
+    if isinstance(user, str):
+        return user
+    return user.get("_id") or user.get("id") or ""
+
+
+def _entry_user_name(entry: dict) -> str:
+    user = entry.get("user") or {}
+    if isinstance(user, dict):
+        return user.get("username") or user.get("name") or ""
+    return ""
+
+
+def _entry_country_id(entry: dict) -> str:
+    country = entry.get("country") or {}
+    if isinstance(country, str):
+        return country
+    return country.get("_id") or country.get("id") or ""
+
+
+def _entry_country_name(entry: dict) -> str:
+    country = entry.get("country") or {}
+    if isinstance(country, dict):
+        return country.get("name") or country.get("shortName") or ""
+    return ""
+
+
+def _entry_mu_id(entry: dict) -> str:
+    mu = entry.get("mu") or entry.get("org") or {}
+    if isinstance(mu, str):
+        return mu
+    return mu.get("_id") or mu.get("id") or ""
+
+
+def _entry_mu_name(entry: dict) -> str:
+    mu = entry.get("mu") or entry.get("org") or {}
+    if isinstance(mu, dict):
+        return mu.get("name") or mu.get("fullName") or ""
+    return ""
+
+
 # ── Cog ──────────────────────────────────────────────────────────────────────
 
 class LeaderboardCog(CommandCogBase, name="leaderboard"):
@@ -95,6 +146,32 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
 
     def __init__(self, bot: DiscordBot) -> None:
         self.bot = bot
+
+    # ------------------------------------------------------------------ #
+    # Ranking API helper
+    # ------------------------------------------------------------------ #
+
+    async def _fetch_ranking(self, ranking_type: str) -> list[dict]:
+        """Fetch global ranking entries from /ranking.getRanking."""
+        if not self._client:
+            return []
+        try:
+            resp = await self._client.post(
+                "/ranking.getRanking",
+                json={"rankingType": ranking_type},
+            )
+        except Exception as exc:
+            logger.warning("_fetch_ranking(%s) failed: %s", ranking_type, exc)
+            return []
+        data = _unwrap(resp)
+        if isinstance(data, list):
+            return [e for e in data if isinstance(e, dict)]
+        if isinstance(data, dict):
+            for key in ("items", "ranking", "rankings", "data", "results"):
+                v = data.get(key)
+                if isinstance(v, list):
+                    return [e for e in v if isinstance(e, dict)]
+        return []
 
     # ------------------------------------------------------------------ #
     # Name resolution
@@ -187,6 +264,23 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
     async def _section_speler_schade(
         self, days: Optional[int], limit: int, country_id: Optional[str] = None
     ) -> list[str]:
+        # Use live ranking API when no day/country filter (more complete data)
+        if days is None and country_id is None and self._client:
+            entries = await self._fetch_ranking("userDamages")
+            if entries:
+                entries = entries[:limit]
+                user_ids = [_entry_user_id(e) for e in entries]
+                inline_names = [_entry_user_name(e) for e in entries]
+                missing = [uid for uid, nm in zip(user_ids, inline_names) if not nm and uid]
+                resolved = await self._resolve_names(missing)
+                table_rows = [
+                    (_medal(i + 1), (inline or resolved.get(uid) or uid)[:20], fmt_damage(e.get("value", 0)))
+                    for i, (e, uid, inline) in enumerate(zip(entries, user_ids, inline_names))
+                ]
+                pages = _paginate_table(("#", "Speler", "Schade"), table_rows)
+                pages[-1] += "\n-# Live data van API"
+                return pages
+        # Fallback: DB
         assert self._db
         rows = await self._db.get_top_players_by_damage(days, limit, country_id)
         if not rows:
@@ -261,6 +355,24 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
     async def _section_mu(
         self, days: Optional[int], limit: int, country_id: Optional[str] = None
     ) -> list[str]:
+        if days is None and country_id is None and self._client:
+            entries = await self._fetch_ranking("muDamages")
+            if entries:
+                entries = entries[:limit]
+                mu_ids = [_entry_mu_id(e) for e in entries]
+                inline_names = [_entry_mu_name(e) for e in entries]
+                missing = [mid for mid, nm in zip(mu_ids, inline_names) if not nm and mid]
+                resolved = await self._resolve_mu_names(missing)
+                table_rows = [
+                    (_medal(i + 1),
+                     (inline or resolved.get(mid) or mid)[:24],
+                     fmt_damage(e.get("value", 0)))
+                    for i, (e, mid, inline) in enumerate(zip(entries, mu_ids, inline_names))
+                ]
+                pages = _paginate_table(("#", "MU", "Totaal"), table_rows)
+                pages[-1] += "\n-# Live data van API"
+                return pages
+        # Fallback: DB
         assert self._db
         rows = await self._db.get_top_mus_by_damage(days, limit, country_id)
         if not rows:
@@ -283,6 +395,24 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
         self, days: Optional[int], limit: int,
         country_map: Optional[dict[str, str]] = None,
     ) -> list[str]:
+        if days is None and self._client:
+            entries = await self._fetch_ranking("countryDamages")
+            if entries:
+                entries = entries[:limit]
+                if country_map is None:
+                    country_map = await self._fetch_country_map()
+                table_rows = [
+                    (
+                        _medal(i + 1),
+                        (_entry_country_name(e) or country_map.get(_entry_country_id(e)) or _entry_country_id(e))[:20],
+                        fmt_damage(e.get("value", 0)),
+                    )
+                    for i, e in enumerate(entries)
+                ]
+                pages = _paginate_table(("#", "Land", "Totaal"), table_rows)
+                pages[-1] += "\n-# Live data van API"
+                return pages
+        # Fallback: DB
         assert self._db
         rows = await self._db.get_top_countries_by_damage(days, limit)
         if not rows:
@@ -358,6 +488,27 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
     async def _section_wekelijks_speler(
         self, days: Optional[int], limit: int, country_id: Optional[str] = None
     ) -> list[str]:
+        # Use live API for current week when no filters (DB data is incomplete)
+        if days is None and country_id is None and self._client:
+            entries = await self._fetch_ranking("weeklyUserDamages")
+            if entries:
+                entries = entries[:limit]
+                user_ids = [_entry_user_id(e) for e in entries]
+                inline_names = [_entry_user_name(e) for e in entries]
+                missing = [uid for uid, nm in zip(user_ids, inline_names) if not nm and uid]
+                resolved = await self._resolve_names(missing)
+                table_rows = [
+                    (
+                        _medal(i + 1),
+                        (inline or resolved.get(uid) or uid)[:14],
+                        fmt_damage(e.get("value", 0)),
+                    )
+                    for i, (e, uid, inline) in enumerate(zip(entries, user_ids, inline_names))
+                ]
+                pages = _paginate_table(("#", "Speler", "Schade"), table_rows)
+                pages[-1] += "\n-# Live data · huidige week"
+                return pages
+        # Fallback: DB
         assert self._db
         rows = await self._db.get_best_player_week(days, limit, country_id)
         if not rows:
@@ -378,6 +529,26 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
     async def _section_wekelijks_mu(
         self, days: Optional[int], limit: int, country_id: Optional[str] = None
     ) -> list[str]:
+        if days is None and country_id is None and self._client:
+            entries = await self._fetch_ranking("muWeeklyDamages")
+            if entries:
+                entries = entries[:limit]
+                mu_ids = [_entry_mu_id(e) for e in entries]
+                inline_names = [_entry_mu_name(e) for e in entries]
+                missing = [mid for mid, nm in zip(mu_ids, inline_names) if not nm and mid]
+                resolved = await self._resolve_mu_names(missing)
+                table_rows = [
+                    (
+                        _medal(i + 1),
+                        (inline or resolved.get(mid) or mid)[:24],
+                        fmt_damage(e.get("value", 0)),
+                    )
+                    for i, (e, mid, inline) in enumerate(zip(entries, mu_ids, inline_names))
+                ]
+                pages = _paginate_table(("#", "MU", "Schade"), table_rows)
+                pages[-1] += "\n-# Live data · huidige week"
+                return pages
+        # Fallback: DB
         assert self._db
         rows = await self._db.get_best_mu_week(days, limit, country_id)
         if not rows:
@@ -403,6 +574,24 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
         country_map: Optional[dict[str, str]] = None,
         country_id: Optional[str] = None,
     ) -> list[str]:
+        if days is None and country_id is None and self._client:
+            entries = await self._fetch_ranking("weeklyCountryDamages")
+            if entries:
+                entries = entries[:limit]
+                if country_map is None:
+                    country_map = await self._fetch_country_map()
+                table_rows = [
+                    (
+                        _medal(i + 1),
+                        (_entry_country_name(e) or country_map.get(_entry_country_id(e)) or _entry_country_id(e))[:20],
+                        fmt_damage(e.get("value", 0)),
+                    )
+                    for i, e in enumerate(entries)
+                ]
+                pages = _paginate_table(("#", "Land", "Schade"), table_rows)
+                pages[-1] += "\n-# Live data · huidige week"
+                return pages
+        # Fallback: DB
         assert self._db
         rows = await self._db.get_best_country_week(days, limit, country_id)
         if not rows:
@@ -430,7 +619,7 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
             (
                 _medal(i + 1),
                 (r["name"] or r["country_id"])[:20],
-                f"{r['production_bonus']:.1f}%",
+                _fmt_bonus(r["production_bonus"]),
             )
             for i, r in enumerate(rows)
         ]
@@ -694,6 +883,7 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
                     inline=False,
                 )
             embed.set_footer(text="/leaderboard type:... voor meer detail")
+            embed.timestamp = datetime.now(timezone.utc)
             await ctx.send(embed=embed)
             return
 
@@ -766,6 +956,7 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
                 colour=self._embed_colour(),
             )
             embed.set_footer(text=footer)
+            embed.timestamp = datetime.now(timezone.utc)
             await ctx.send(embed=embed)
 
 
