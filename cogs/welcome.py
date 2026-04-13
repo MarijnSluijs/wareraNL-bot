@@ -434,11 +434,11 @@ async def create_verification_channel(
         mofa_user_info = config.get("users", {}).get("mofa")
         mofa_user_id = mofa_user_info.get("discord_id") if mofa_user_info else None
         mofa_ingame_id = mofa_user_info.get("in_game_id") if mofa_user_info else None
-        mofa_mention = f"<@{mofa_user_id}>" if mofa_user_id else "the MoFA"
+        mofa_mention = f"<@{mofa_user_id}>" if mofa_user_id else ""
         instruction_text = (
             f"Hello, please send a message with your Discord name to our MoFA {mofa_mention} on WarEra "
             "to complete your verification request. \n"
-            f"Link: https://app.warera.io/user/{mofa_ingame_id['in_game_user_id'] if mofa_ingame_id else 'unknown'}"
+            f"Link: https://app.warera.io/user/{mofa_ingame_id if mofa_ingame_id else 'unknown'}"
         )
     else:
         instruction_text = (
