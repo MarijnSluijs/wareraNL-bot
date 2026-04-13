@@ -50,6 +50,9 @@
         "error": "0xE02B2B",
         "warning": "0xF59E42"
     },
+    "users": {
+        "mofa": { "discord_id": "219398950287835136", "in_game_id": "69820c895312557c1f363ab7" }
+    },
     "ticket_counter": 222,
     "api_base_url": "https://api2.warera.io/trpc",
     "articles_db_path": "database/articles.db",

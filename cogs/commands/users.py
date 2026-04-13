@@ -317,6 +317,43 @@ class Users(CommandCogBase, name="users"):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(
+        name="setmofa",
+        description="Stel de huidige MoFA in voor het embassy request kanaal"
+    )
+    @app_commands.describe(
+        user="Discord gebruiker"
+    )
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def set_mofa(self, interaction: discord.Interaction, user: discord.Member):
+        db = await self._get_db()
+        in_game_id = db.get_identity_link_by_discord(
+            discord_user_id=str(user.id)
+            )
+
+        if not in_game_id or not in_game_id.get("in_game_user_id"):
+            await interaction.response.send_message(
+                f"De opgegeven gebruiker {user.mention} heeft geen gekoppelde in-game ID. "
+                "Zorg ervoor dat deze gebruiker eerst een mapping heeft via `/linkid`.",
+                ephemeral=True,
+            )
+            return
+
+        config = self.config
+        if "users" not in config:
+            config["users"] = {}
+        config["users"]["mofa"] = {
+            "discord_id": str(user.id),
+            "in_game_id": in_game_id.get("in_game_user_id"),
+        }
+        config_path = Path("config/config.json")
+        config_path.write_text(json.dumps(config, indent=4), encoding="utf-8")
+
+        await interaction.response.send_message(
+            f"MoFA ingesteld op {user.mention} (`{user.id}`).",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
         name="linkid",
         description="Link een Discord gebruiker aan een in-game ID (of update bestaande mapping)",
     )

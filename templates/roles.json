@@ -6,31 +6,31 @@
       "buttons": [
         {
           "label": "Overheid",
-          "role_id": 0,
+          "role_id": 1492814506320199830,
           "style": "primary",
           "row": 0
         },
         {
           "label": "Oorlog updates",
-          "role_id": 0,
+          "role_id": 1492814507276505258,
           "style": "primary",
           "row": 0
         },
         {
           "label": "Dagelijkse update",
-          "role_id": 0,
+          "role_id": 1492814508366893066,
           "style": "primary",
           "row": 0
         },
         {
           "label": "Congres update",
-          "role_id": 0,
+          "role_id": 1492814509524652174,
           "style": "primary",
           "row": 0
         },
         {
           "label": "Referendum",
-          "role_id": 0,
+          "role_id": 1492814511181402222,
           "style": "primary",
           "row": 0
         }
@@ -42,13 +42,13 @@
       "buttons": [
         {
           "label": "Oorlog",
-          "role_id": 0,
+          "role_id": 1492814523537817674,
           "style": "primary",
           "row": 0
         },
         {
           "label": "WarEra Aankondigingen",
-          "role_id": 0,
+          "role_id": 1474463344328179806,
           "style": "primary",
           "row": 0
         },
@@ -66,25 +66,25 @@
       "buttons": [
         {
           "label": "Discord Server",
-          "role_id": 0,
+          "role_id": 1492814528608731340,
           "style": "primary",
           "row": 0
         },
         {
           "label": "Giveaways",
-          "role_id": 0,
+          "role_id": 1492814530294841444,
           "style": "primary",
           "row": 0
         },
         {
           "label": "Community",
-          "role_id": 0,
+          "role_id": 1492814531502805032,
           "style": "primary",
           "row": 0
         },
         {
           "label": "Promotie Team",
-          "role_id": 0,
+          "role_id": 1492814532400119949,
           "style": "primary",
           "row": 0
         },
@@ -114,7 +114,7 @@
         },
         {
           "label": "Verkiezingen",
-          "role_id": 0,
+          "role_id": 1492814534975684619,
           "style": "primary",
           "row": 0
         }
@@ -127,61 +127,61 @@
       "buttons": [
         {
           "label": "0.1bounty",
-          "role_id": 0,
+          "role_id": 1492814537995456596,
           "style": "primary",
           "row": 0
         },
         {
           "label": "0.2bounty",
-          "role_id": 0,
+          "role_id": 1492814541569003570,
           "style": "primary",
           "row": 0
         },
         {
           "label": "0.3bounty",
-          "role_id": 0,
+          "role_id": 1492814542856519722,
           "style": "primary",
           "row": 0
         },
         {
           "label": "0.4bounty",
-          "role_id": 0,
+          "role_id": 1492814543561429114,
           "style": "primary",
           "row": 0
         },
         {
           "label": "0.5bounty",
-          "role_id": 0,
+          "role_id": 1492814544987361341,
           "style": "primary",
           "row": 0
         },
         {
           "label": "0.6bounty",
-          "role_id": 0,
+          "role_id": 1492814550259466260,
           "style": "primary",
           "row": 1
         },
         {
           "label": "0.7bounty",
-          "role_id": 0,
+          "role_id": 1492814556123238420,
           "style": "primary",
           "row": 1
         },
         {
           "label": "0.8bounty",
-          "role_id": 0,
+          "role_id": 1492814557037727767,
           "style": "primary",
           "row": 1
         },
         {
           "label": "0.9bounty",
-          "role_id": 0,
+          "role_id": 1492814558828691527,
           "style": "primary",
           "row": 1
         },
         {
           "label": "1.0bounty",
-          "role_id": 0,
+          "role_id": 1492814560053297182,
           "style": "primary",
           "row": 1
         }

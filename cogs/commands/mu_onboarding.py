@@ -153,7 +153,7 @@ async def create_mu_request_channel(
         roles_cfg.get("officier"),
     ]
     embed_color = discord.Color.red()
-    request_title = "Emergency Embassy Request"
+    request_title = "MU Aanvraag"
 
     # Sanitize channel name (Discord requires lowercase, no spaces, max 100 chars)
     channel_name = channel_name.lower().replace(" ", "-")[:100]

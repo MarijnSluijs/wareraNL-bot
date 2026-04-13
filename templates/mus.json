@@ -130,8 +130,8 @@
             "id": "69b8ffbf0e5eb9b6e5241c9a",
             "type": "Standaard",
             "role_id": 1490771143706018084,
-            "name": "Ordo Mercenarius",
-            "thumbnail": "https://media.warera.io/avatars/mu/mu-69b8ffbf0e5eb9b6e5241c9a-1775226603756-dqzih5vw-static.gif"
+            "name": "TSCo",
+            "thumbnail": "https://media.warera.io/avatars/mu/mu-69b8ffbf0e5eb9b6e5241c9a-1775993099033-ygb0i4hf.jpg"
         },
         {
             "id": "69a5d8546719fc1a7c787cb8",
@@ -220,5 +220,5 @@
         1490771406563053910,
         1490771408471589046
     ],
-    "mu_info_updated_at": "2026-04-12T08:39:20.723206+00:00"
+    "mu_info_updated_at": "2026-04-13T07:48:21.665905+00:00"
 }
