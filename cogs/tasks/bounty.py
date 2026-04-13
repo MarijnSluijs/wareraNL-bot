@@ -405,6 +405,16 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                 if skip:
                     continue
 
+                # If the bounty was already active and we have an existing message,
+                # edit it in-place rather than deleting and reposting.
+                existing_msg_id: int | None = None
+                if (
+                    prev is not None
+                    and prev[3] is None  # was already active (not pending)
+                    and prev[2] is not None
+                ):
+                    existing_msg_id = prev[2]
+
                 is_pending = pending_until_ts is not None and pending_until_ts > now_ts
 
                 funder_name = _cname(side)
@@ -447,6 +457,23 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                                 ping_parts.append(r.mention)
                 content = " ".join(ping_parts) if ping_parts else None
 
+                if existing_msg_id:
+                    try:
+                        partial = channel.get_partial_message(existing_msg_id)
+                        await partial.edit(content=content, embed=embed)
+                        self._known[known_key] = (rate, total, existing_msg_id, pending_until_ts)
+                        logger.info(
+                            "bounty_poll: edited bounty message %s for battle %s [%s] — rate %.2f → %.2f CC",
+                            existing_msg_id, battle_id, side_key, prev[0], rate,
+                        )
+                        continue
+                    except Exception as exc:
+                        logger.warning(
+                            "bounty_poll: failed to edit message for battle %s [%s], sending new: %s",
+                            battle_id, side_key, exc,
+                        )
+                        # Fall through to send a fresh message
+
                 try:
                     msg = await channel.send(content=content, embed=embed)
                     self._known[known_key] = (rate, total, msg.id, pending_until_ts)
@@ -458,6 +485,96 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                         exc,
                     )
                     self._known[known_key] = (rate, total, None, pending_until_ts)
+
+        await self._cleanup_orphaned_messages(channel, battles)
+
+    async def _cleanup_orphaned_messages(
+        self,
+        channel: discord.TextChannel,
+        battles: list[dict],
+    ) -> None:
+        """Scan the channel for bot bounty messages that are no longer backed by an
+        active bounty in the API, and delete them.
+
+        This acts as a safety net for messages whose bounty was withdrawn while the
+        battle is still active, or messages that slipped through the normal cleanup.
+        """
+        # Build a lookup: battle_id -> {side_key: (rate, pool)} for currently active bounties
+        valid: dict[str, dict[str, tuple[float, float]]] = {}
+        for b in battles:
+            bid = str(b.get("_id") or "")
+            if not bid:
+                continue
+            for side_key, side in (("atk", b.get("attacker") or {}), ("dfn", b.get("defender") or {})):
+                bdata = _extract_bounty(side)
+                if bdata and bdata[0] >= 0.1 and bdata[1] > 0:
+                    valid.setdefault(bid, {})[side_key] = bdata
+
+        _battle_url_re = re.compile(
+            r"https?://(?:app\.)?warera\.io/battle/([A-Za-z0-9_-]+)",
+            re.IGNORECASE,
+        )
+        _funder_re = re.compile(r"\*\*Aangeboden door:\*\*\s*(.+)")
+        _title_re = re.compile(
+            r"(?:Bounty|Aankomende bounty):\s*(.+?)\s+vs\s+(.+)",
+            re.IGNORECASE,
+        )
+
+        try:
+            async for msg in channel.history(limit=100):
+                if msg.author != self.bot.user or not msg.embeds:
+                    continue
+                embed = msg.embeds[0]
+                url = embed.url or ""
+                m = _battle_url_re.search(url)
+                if not m:
+                    continue
+                battle_id = m.group(1)
+
+                battle_valid_sides = valid.get(battle_id, {})
+
+                if not battle_valid_sides:
+                    # Battle has no active bounties at all — delete
+                    try:
+                        await msg.delete()
+                        logger.info(
+                            "bounty_poll: deleted orphaned message %s (battle %s no longer has any bounty)",
+                            msg.id, battle_id,
+                        )
+                    except Exception as exc:
+                        logger.debug("bounty_poll: could not delete orphaned message %s: %s", msg.id, exc)
+                    continue
+
+                # Determine which side this message is for by matching the funder name
+                desc = embed.description or ""
+                funder_m = _funder_re.search(desc)
+                title_m = _title_re.search(embed.title or "")
+                if not funder_m or not title_m:
+                    continue
+
+                funder = funder_m.group(1).strip()
+                att_name = title_m.group(1).strip()
+                def_name = title_m.group(2).strip()
+
+                if funder == att_name:
+                    side_key = "atk"
+                elif funder == def_name:
+                    side_key = "dfn"
+                else:
+                    continue  # can't determine side; leave it alone
+
+                if side_key not in battle_valid_sides:
+                    # Bounty for this side is gone
+                    try:
+                        await msg.delete()
+                        logger.info(
+                            "bounty_poll: deleted orphaned message %s (bounty for %s in battle %s is gone)",
+                            msg.id, side_key, battle_id,
+                        )
+                    except Exception as exc:
+                        logger.debug("bounty_poll: could not delete orphaned message %s: %s", msg.id, exc)
+        except Exception:
+            logger.exception("bounty_poll: _cleanup_orphaned_messages failed")
 
 
 async def setup(bot) -> None:
