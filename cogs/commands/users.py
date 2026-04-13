@@ -144,6 +144,8 @@ class Users(CommandCogBase, name="users"):
             "already_had_role": 0,
             "to_assign": 0,
             "assigned": 0,
+            "to_remove": 0,
+            "removed": 0,
             "member_not_found": 0,
             "errors": 0,
         }
@@ -158,6 +160,9 @@ class Users(CommandCogBase, name="users"):
             return stats
 
         citizen_mus = await db.get_citizen_mus()
+        in_game_to_current_mu = {
+            in_game_id: mu_id for in_game_id, mu_id in citizen_mus if in_game_id
+        }
         citizens_with_known_mu = [
             (in_game_id, mu_id)
             for in_game_id, mu_id in citizen_mus
@@ -167,50 +172,74 @@ class Users(CommandCogBase, name="users"):
         if not citizens_with_known_mu:
             return stats
 
-        in_game_ids = list({in_game_id for in_game_id, _ in citizens_with_known_mu})
+        in_game_ids = list(in_game_to_current_mu.keys())
         in_game_to_discord = await db.get_discord_ids_by_ingame_user_ids(
             guild_id=guild_id,
             in_game_user_ids=in_game_ids,
         )
-        stats["mapped_discord_users"] = len(in_game_to_discord)
+        expected_role_by_member: dict[int, int | None] = {}
+        for in_game_id, discord_id in in_game_to_discord.items():
+            if not discord_id:
+                continue
+            try:
+                member_id = int(discord_id)
+            except (TypeError, ValueError):
+                continue
+
+            mu_id = in_game_to_current_mu.get(in_game_id)
+            expected_role_id = mu_to_role_id.get(str(mu_id)) if mu_id else None
+            if member_id not in expected_role_by_member:
+                expected_role_by_member[member_id] = expected_role_id
+            elif expected_role_by_member[member_id] is None and expected_role_id is not None:
+                expected_role_by_member[member_id] = expected_role_id
+
+        stats["mapped_discord_users"] = len(expected_role_by_member)
         if not in_game_to_discord:
             return stats
 
-        work_items: list[tuple[discord.Member, discord.Role]] = []
+        mu_role_ids = {int(role_id) for role_id in mu_to_role_id.values()}
+        work_items_add: list[tuple[discord.Member, discord.Role]] = []
+        work_items_remove: list[tuple[discord.Member, discord.Role]] = []
         seen_assignments: set[tuple[int, int]] = set()
-        for in_game_id, mu_id in citizens_with_known_mu:
-            discord_id = in_game_to_discord.get(in_game_id)
-            if not discord_id:
-                continue
+        seen_removals: set[tuple[int, int]] = set()
 
-            role_id = mu_to_role_id.get(str(mu_id))
-            if not role_id:
-                continue
-            role = guild.get_role(role_id)
-            if role is None:
-                stats["roles_missing_in_guild"] += 1
-                continue
-
-            member = guild.get_member(int(discord_id))
+        for member_id, expected_role_id in expected_role_by_member.items():
+            member = guild.get_member(member_id)
             if member is None:
                 stats["member_not_found"] += 1
                 continue
             stats["members_found"] += 1
 
-            if role in member.roles:
-                stats["already_had_role"] += 1
-                continue
-            assignment_key = (member.id, role.id)
-            if assignment_key in seen_assignments:
-                continue
-            seen_assignments.add(assignment_key)
-            stats["to_assign"] += 1
-            work_items.append((member, role))
+            current_mu_roles = [role for role in member.roles if role.id in mu_role_ids]
+
+            expected_role: discord.Role | None = None
+            if expected_role_id:
+                expected_role = guild.get_role(expected_role_id)
+                if expected_role is None:
+                    stats["roles_missing_in_guild"] += 1
+                elif expected_role in member.roles:
+                    stats["already_had_role"] += 1
+                else:
+                    assignment_key = (member.id, expected_role.id)
+                    if assignment_key not in seen_assignments:
+                        seen_assignments.add(assignment_key)
+                        stats["to_assign"] += 1
+                        work_items_add.append((member, expected_role))
+
+            for role in current_mu_roles:
+                if expected_role is not None and role.id == expected_role.id:
+                    continue
+                removal_key = (member.id, role.id)
+                if removal_key in seen_removals:
+                    continue
+                seen_removals.add(removal_key)
+                stats["to_remove"] += 1
+                work_items_remove.append((member, role))
 
         if dry_run:
             return stats
 
-        for member, role in work_items:
+        for member, role in work_items_add:
             try:
                 await member.add_roles(role, reason="MU role sync from citizen MU membership")
                 stats["assigned"] += 1
@@ -218,6 +247,23 @@ class Users(CommandCogBase, name="users"):
                 stats["errors"] += 1
                 logger.warning(
                     "sync_mu_roles: failed to add role %s to %s (%s): %s",
+                    role.id,
+                    member.display_name,
+                    member.id,
+                    exc,
+                )
+
+        for member, role in work_items_remove:
+            try:
+                await member.remove_roles(
+                    role,
+                    reason="MU role sync: user no longer in this MU",
+                )
+                stats["removed"] += 1
+            except discord.HTTPException as exc:
+                stats["errors"] += 1
+                logger.warning(
+                    "sync_mu_roles: failed to remove role %s from %s (%s): %s",
                     role.id,
                     member.display_name,
                     member.id,
@@ -1350,6 +1396,16 @@ class Users(CommandCogBase, name="users"):
         embed.add_field(
             name="Toegewezen",
             value=str(stats["assigned"]),
+            inline=True,
+        )
+        embed.add_field(
+            name="Te verwijderen",
+            value=str(stats["to_remove"]),
+            inline=True,
+        )
+        embed.add_field(
+            name="Verwijderd",
+            value=str(stats["removed"]),
             inline=True,
         )
         embed.add_field(
