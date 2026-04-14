@@ -1225,7 +1225,9 @@ class Users(CommandCogBase, name="users"):
         for rr in result_rows:
             vals = []
             for key in ("discord_id", "in_game_id", "status", "action", "note"):
-                vals.append(f'"{str(rr.get(key, "")).replace('"', '""')}"')
+                # vals.append(f'"{str(rr.get(key, "")).replace('"', '""')}"')
+                raw = str(rr.get(key, "")).replace('"', '""')
+                vals.append(f'"{raw}"')
             out_csv.write(",".join(vals) + "\n")
 
         embed = discord.Embed(
