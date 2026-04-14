@@ -748,8 +748,12 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
 
         # SP currently invested in the three self-work skills
         cur_eco_sp = _CUMUL_COST[ent_lvl] + _CUMUL_COST[energy_lvl] + _CUMUL_COST[prod_lvl]
-        # SP in war skills (or elsewhere) that can be redeployed into eco skills
-        war_sp = free_sp - cur_eco_sp
+        # SP not in eco skills — may be unspent, in war skills, or a mix
+        extra_sp = free_sp - cur_eco_sp
+        avail_sp = int(leveling.get("availableSkillPoints", 0) or 0)
+        # Unspent SP contributes to the gap first; the remainder is in war skills
+        war_sp = max(0, extra_sp - avail_sp)
+        unspent_sp = max(0, min(extra_sp, avail_sp))
 
         # ── Current daily production ──────────────────────────────────────
         cur_ent_pp = _daily_works_float(ent_val) * prod_val * best_ent_prod_mult
@@ -780,6 +784,8 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
         cur_table = _skill_table(cur_rows, current_total)
         if war_sp > 0:
             cur_table += f"\n⚠️ {war_sp} SP in oorlogsskills — herbesteedbaar aan eco"
+        if unspent_sp > 0:
+            cur_table += f"\n💡 {unspent_sp} SP onbesteed — kan worden ingezet in eco"
         embed.add_field(
             name="\U0001f4ca Huidige eco skills",
             value=cur_table,

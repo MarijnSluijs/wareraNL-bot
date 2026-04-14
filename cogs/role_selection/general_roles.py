@@ -114,11 +114,12 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
 
         # Post the Company bonus check (bedrijven bonus check) button
         bw_embed = discord.Embed(
-            title="Bedrijven bonus check",
+            title="🏭 Bedrijven bonus check",
             description=(
                 "Wil je een melding ontvangen als een van je bedrijven **0% productiebonus** heeft?\n\n"
                 "Klik op de knop hieronder om je aan te melden. "
                 "Je in-game gebruikersnaam wordt gevraagd via een popup.\n\n"
+                "📬 De bot stuurt je een **DM** zodra een bedrijf met 0% productiebonus gedetecteerd wordt.\n\n"
                 "Klik nogmaals op de knop om je weer af te melden."
             ),
             colour=discord.Colour.blue(),

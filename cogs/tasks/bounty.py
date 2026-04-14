@@ -22,7 +22,7 @@ logger = logging.getLogger("discord_bot")
 _BATTLE_URL = "https://app.warera.io/battle/{battle_id}"
 
 # Thresholds for which Discord roles exist (must match role names exactly, e.g. "0.2bounty")
-_BOUNTY_THRESHOLDS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+_BOUNTY_THRESHOLDS = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
 
 def _extract_bounty(side: dict) -> tuple[float, float] | None:
