@@ -5,6 +5,27 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "wareranl-bot"
 version = "0.1.0"
+dependencies = [
+    "aiohttp",
+    "aiosqlite",
+    "discord.py",
+    "python-dotenv",
+    "pytz",
+    "requests",
+    "feedparser",
+    "httpx",
+    "curl_cffi",
+    "openai",
+]
+
+[project.optional-dependencies]
+website = [
+    "fastapi",
+    "uvicorn",
+    "itsdangerous",
+    "authlib",
+    "jinja2",
+]
 
 [tool.setuptools.packages.find]
 include = ["cogs*", "services*", "database*", "config*", "utils*"]
@@ -31,3 +52,7 @@ ignore-paths = ["^\\.venv/.*$"]
 
 [tool.pylint.format]
 max-line-length = 150
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+

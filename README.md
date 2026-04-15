@@ -8,7 +8,7 @@ WareraNL is a Discord bot implemented in Python using cogs for modular features.
 - `config.json` — main runtime configuration with `roles`, `channels`, colors and message templates.
 - `testing_config.json` — example/template config for a testing server (fill with IDs for your test guild).
 - `bot.py` — main entrypoint. Supports `--testing` and config/token overrides.
-- `requirements.txt` — Python dependencies.
+- `pyproject.toml` — Python project metadata and dependencies. Core deps under `[project]`, website extras under `[project.optional-dependencies] website`.
 
 - `cogs/` — Discord cogs (feature modules) loaded by the bot. See below for details.
 - `templates/` — JSON/MD templates used by the `standard_messages` cogs.
@@ -49,7 +49,10 @@ Secrets / tokens
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+# Core bot dependencies only:
+pip install -e .
+# Or include website/API-explorer dependencies too:
+pip install -e ".[website]"
 ```
 
 **2. Create your environment file**
@@ -85,6 +88,67 @@ Add your War Era API key to `_api_keys.json`. Create this file in the project ro
 **4. Configure `config.json` / `testing_config.json`**
 
 Fill in the `roles` and `channels` sections with the numeric Discord IDs from your server.
+
+## Running with Docker Compose
+
+All services are built from the same `Dockerfile`. The compose setup is split into two files:
+
+| File | Purpose | Tracked in git |
+|------|---------|----------------|
+| `docker-compose.yml` | Production — bot only | ✅ yes |
+| `docker-compose.testing.yml` | Testing — bot only (`--testing` flag) | ❌ no |
+| `docker-compose.websites.yml` | Testing — website + API explorer | ❌ no |
+
+The website compose files are gitignored because they reference local `.env_test` secrets.
+
+### Production (bot only)
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+### Testing — bot only
+
+```bash
+docker compose -f docker-compose.testing.yml build
+docker compose -f docker-compose.testing.yml up -d
+```
+
+### Testing — Dashboard website + API explorer website
+
+```bash
+docker compose -f docker-compose.websites.yml build
+docker compose -f docker-compose.websites.yml up -d
+```
+
+Services restart automatically (`restart: unless-stopped`).
+
+### View logs
+
+```bash
+# Test bot only
+docker compose -f docker-compose.testing.yml logs -f discord-bot
+
+# Full testing stack
+docker compose -f docker-compose.testing.yml -f docker-compose.websites.yml logs -f
+
+# Individual website services
+docker compose -f docker-compose.websites.yml logs -f website
+docker compose -f docker-compose.websites.yml logs -f api-explorer
+```
+
+### Stop services
+
+```bash
+# Test bot only
+docker compose -f docker-compose.testing.yml down
+
+# Full testing stack
+docker compose -f docker-compose.testing.yml -f docker-compose.websites.yml down
+```
+
+---
 
 ## Running the bot
 

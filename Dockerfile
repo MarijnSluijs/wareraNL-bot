@@ -1,8 +1,12 @@
 FROM python:3.12.9-slim-bookworm
 
 WORKDIR /bot
-COPY . /bot
 
-RUN python -m pip install -r requirements.txt
+# Install dependencies first (cached layer)
+COPY pyproject.toml .
+RUN pip install --no-cache-dir ".[website]"
 
-ENTRYPOINT [ "python", "bot.py" ]
+COPY . .
+
+# CMD instead of ENTRYPOINT so docker-compose can override per service
+CMD ["python", "bot.py"]
