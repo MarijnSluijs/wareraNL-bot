@@ -29,6 +29,7 @@ Usage::
 
 from .article_tips import ArticleTipsMixin
 from .base import DatabaseBase
+from .discord_allies import DiscordAlliesMixin
 from .battle_drops import BattleDropsMixin
 from .battle_rankings import BattleRankingsMixin
 from .citizens import CitizensMixin
@@ -45,6 +46,7 @@ from .state import StateMixin
 
 
 class Database(
+    DiscordAlliesMixin,
     StateMixin,
     ProductionMixin,
     CitizensMixin,

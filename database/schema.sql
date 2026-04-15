@@ -349,6 +349,16 @@ CREATE TABLE IF NOT EXISTS company_bonus_alerts (
     PRIMARY KEY (discord_user_id, company_id)
 );
 
+-- discord_allies: manually maintained list of countries that are allied via Discord
+--   (not necessarily reflected in the game API).  Used by the bounty poller to
+--   suppress alerts for battles these countries are engaged in.
+CREATE TABLE IF NOT EXISTS discord_allies (
+    country_id   TEXT PRIMARY KEY,
+    country_name TEXT,          -- optional display label (e.g. "België")
+    added_by     TEXT NOT NULL,  -- Discord user ID who added the entry
+    added_at     TEXT NOT NULL   -- ISO timestamp
+);
+
 -- player_tx_cache: cached transaction aggregates per player for /transacties.
 --   On each command invocation only *new* transactions (createdAt > newest_tx_at)
 --   are fetched, then merged into the stored aggregates.

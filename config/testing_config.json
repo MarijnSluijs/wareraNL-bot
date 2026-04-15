@@ -2,7 +2,7 @@
     "test": true,
     "roles": {
         "bezoeker": 1468223393458425858,
-        "nederlander": 1456281070722093058,
+        "nederlander": 1480598235683749888,
         "foreigner": 1467976572517482517,
         "border_control": 1468230751274401843,
         "minister_foreign_affairs": 1451180288515506258,
@@ -10,10 +10,12 @@
         "vice_president": 1401531414553428139,
         "government": 1458527742646816892,
         "ambassadeur": 1451180288515506258,
-        "commandant": 1458427087189835776,
+        "commandant": 1493266443595288626,
         "tester": 1474452549456105507,
         "wachtlijst": 1475473494627192873,
-        "samenvatting_allowed": [1475489952346407106]
+        "samenvatting_allowed": [
+            1475489952346407106
+        ]
     },
     "channels": {
         "testing-area": 1474452856584011929,
@@ -47,5 +49,8 @@
     "api_base_url": "https://api2.warera.io/trpc",
     "articles_db_path": "database/articles.testing.db",
     "articles_startup_count": 1,
-    "nl_country_id": "6813b6d446e731854c7ac7a0"
+    "nl_country_id": "6813b6d446e731854c7ac7a0",
+    "testing_commanders": [
+        "695579c03f0cff6efb694b3a"
+    ]
 }

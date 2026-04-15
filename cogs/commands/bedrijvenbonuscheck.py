@@ -1,12 +1,11 @@
 """Bedrijven bonus check: production-bonus monitor — button UI + owner commands.
 
-A persistent button is posted in the roles channel via ``!bedrijven_bonus_check_post``.
+A persistent button is posted in the roles channel via ``/generalroles``.
 Clicking it:
   - If not yet subscribed: opens a Modal asking for the in-game username.
   - If already subscribed: unsubscribes immediately (ephemeral confirmation).
 
 Owner-only prefix commands:
-  !bedrijven_bonus_check_post   — post (or update) the button message in the roles channel
   !bedrijven_bonus_check_check  — run the bonus scan immediately
   !bedrijven_bonus_check_lijst  — list all active subscriptions
 """
@@ -188,49 +187,6 @@ class BedrijvenBonusCheckCog(CommandCogBase, name="bedrijven_bonus_check"):
         bot.add_view(BedrijvenBonusCheckView())
 
     # ── Owner prefix commands ─────────────────────────────────────────────────
-
-    @commands.command(
-        name="bedrijven_bonus_check_post",
-        description="Post (of update) de Bedrijven bonus check-knop in het rollen-kanaal.",
-        hidden=True,
-    )
-    @commands.is_owner()
-    async def bedrijven_bonus_check_post(self, context: Context) -> None:
-        """Owner-only: post or edit the persistent bedrijven bonus check button message."""
-        roles_ch_id = self.bot.config.get("channels", {}).get("roles")
-        channel = (
-            self.bot.get_channel(int(roles_ch_id)) if roles_ch_id else None
-        ) or context.channel
-
-        embed = discord.Embed(
-            title="🏭 Bedrijven bonus check",
-            description=(
-                "Wil je een melding ontvangen als een van je bedrijven **0% productiebonus** heeft?\n\n"
-                "Klik op de knop hieronder om je aan te melden. "
-                "Je in-game gebruikersnaam wordt gevraagd via een popup.\n\n"
-                "Klik nogmaals op de knop om je weer af te melden."
-            ),
-            colour=discord.Colour.blue(),
-        )
-
-        view = BedrijvenBonusCheckView()
-        state = _load_state(self.bot.testing)
-        msg_id = state.get("button_message_id")
-        msg = None
-
-        if msg_id:
-            try:
-                msg = await channel.fetch_message(int(msg_id))
-                await msg.edit(embed=embed, view=view)
-            except (discord.NotFound, discord.HTTPException):
-                msg = None
-
-        if msg is None:
-            msg = await channel.send(embed=embed, view=view)
-
-        state["button_message_id"] = msg.id
-        _save_state(state, self.bot.testing)
-        await context.send(f"✅ Bedrijven bonus check-bericht geplaatst in {channel.mention}.", delete_after=10)
 
     @commands.command(
         name="bedrijven_bonus_check_check",
