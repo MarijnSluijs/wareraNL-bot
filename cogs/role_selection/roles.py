@@ -169,16 +169,16 @@ class RoleToggleButton(discord.ui.Button):
             return
 
         try:
-            # Collect primary roles defined on this view
-            primary_roles: list[discord.Role] = []
-            for child in getattr(self.view, "children", []):
-                if isinstance(child, RoleToggleButton):
-                    r = guild.get_role(child.role_id)
-                    if r:
-                        primary_roles.append(r)
+            # Collect role IDs for all buttons in this view (avoids stale guild cache).
+            # member.roles is always fresh from the interaction payload.
+            primary_role_ids: set[int] = {
+                child.role_id
+                for child in getattr(self.view, "children", [])
+                if isinstance(child, RoleToggleButton)
+            }
 
-            # Which primary roles the member currently has
-            member_primary_roles = [r for r in primary_roles if r in member.roles]
+            # Which of the member's current roles belong to this exclusive group
+            member_primary_roles = [r for r in member.roles if r.id in primary_role_ids]
 
             # If user clicked a primary they already have -> remove that primary only
             if role in member.roles:

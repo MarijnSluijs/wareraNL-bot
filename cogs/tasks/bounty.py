@@ -366,7 +366,7 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                 b = _extract_bounty(side)
 
                 # No bounty, rate below threshold, or pool exhausted (paid out) — delete any previously posted message.
-                if b is None or b[0] < 0.1 or b[1] < 100:
+                if b is None or b[0] < 0.2 or b[1] < 100:
                     prev = self._known.pop(known_key, None)
                     if prev and prev[2]:
                         try:
