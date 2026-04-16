@@ -178,7 +178,9 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                 if not mu_data:
                     continue
                 stats["mus_checked"] += 1
-                commanders = mu_data.get("roles", {}).get("commanders", [])
+                commanders: list[str] = mu_data.get("roles", {}).get("commanders", [])
+                # get managers (owner) and append
+                commanders.extend(mu_data.get("roles", {}).get("managers", []))
                 current_commanders.update(str(c) for c in commanders if c)
             except Exception:
                 logger.exception(

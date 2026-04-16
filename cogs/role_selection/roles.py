@@ -282,9 +282,9 @@ class Roles(commands.Cog, name="roles"):
     async def ambassadeurs(
         self, interaction: discord.Interaction, user: discord.Member
     ) -> None:
-        # check if command is used by minister van buitenlandse zaken
+        # check if command is used by minister
         if not any(
-            role.id == self.bot.config["roles"]["minister_foreign_affairs"]
+            role.id == self.bot.config["roles"]["government"]
             for role in interaction.user.roles
         ):
             await interaction.response.send_message(
