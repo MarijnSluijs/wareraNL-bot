@@ -2,10 +2,13 @@ belgium_bot.py
 _api_keys.json
 .env_test
 logs/
+docker-compose.testing.yml
+docker-compose.websites.yml
 pyrightconfig.json
 database/database.db.backup.*
 data/reddit_state.json
 website/
+api_explorer/
 api_dump.json
 scripts/
 TODO.md

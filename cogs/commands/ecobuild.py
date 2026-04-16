@@ -647,6 +647,76 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
         return out
 
     # ------------------------------------------------------------------
+    # Generic (level-based) calculation
+    # ------------------------------------------------------------------
+
+    async def _ecobuild_generic(
+        self,
+        interaction: discord.Interaction,
+        player_level: int,
+        n_companies: int,
+    ) -> None:
+        """Compute and display optimal eco build for a given level and company count."""
+        player_level = max(1, player_level)
+        n_companies = max(0, min(n_companies, 12))
+
+        # 4 SP per level (verified from damage_calc.py)
+        total_sp = player_level * 4
+
+        # Companies skill: minimum level needed to run n_companies companies
+        if n_companies == 0:
+            comp_lvl = 0
+        else:
+            comp_lvl = next(
+                (lvl for lvl in range(11) if _SKILL_VALUES["companies"][lvl] >= n_companies),
+                10,
+            )
+
+        # Assume no workers (management) skill for generic calculation
+        workers_lvl = 0
+        fixed_sp = _CUMUL_COST[comp_lvl] + _CUMUL_COST[workers_lvl]
+        free_sp = max(0, total_sp - fixed_sp)
+
+        # No real companies — assume AE level 1 for every company slot
+        engine_daily_total = n_companies * _engine_cycle_daily(1)
+
+        best_build = _optimize_eco_skills(free_sp, engine_daily_total)
+
+        color = self._embed_colour()
+        embed = discord.Embed(
+            title="Eco Build (generiek)",
+            description=f"Level {player_level}  •  {n_companies} {'bedrijven' if n_companies != 1 else 'bedrijf'}",
+            color=color,
+        )
+
+        if best_build is None:
+            embed.description = (embed.description or "") + "\n\n_Niet genoeg SP voor een zinvolle verdeling._"
+        else:
+            b_ent, b_en, b_prod, b_daily = best_build
+            b_ent_v = _SKILL_VALUES["entrepreneurship"][b_ent]
+            b_en_v  = _SKILL_VALUES["energy"][b_en]
+            b_prod_v = _SKILL_VALUES["production"][b_prod]
+            b_ent_pp = _daily_works_float(b_ent_v) * b_prod_v
+            b_en_pp  = _daily_works_float(b_en_v) * b_prod_v
+            opt_rows: list[tuple[str, str, str]] = [
+                (f"Entrepreneurship ({b_ent_v})", str(b_ent), f"{b_ent_pp:.0f}"),
+                (f"Energy ({b_en_v})",            str(b_en),  f"{b_en_pp:.0f}"),
+                (f"Production ({b_prod_v})",      str(b_prod), "\u2014"),
+                (f"Bedrijven ({n_companies})",    str(comp_lvl), f"{engine_daily_total:.0f}"),
+                ("Medewerkers",                   str(workers_lvl), "\u2014"),
+            ]
+            sp_used = _CUMUL_COST[b_ent] + _CUMUL_COST[b_en] + _CUMUL_COST[b_prod] + fixed_sp
+            sp_info = f"SP gebruikt: {sp_used}/{total_sp}"
+            embed.add_field(
+                name="\u2699\ufe0f Optimale verdeling",
+                value=_skill_table(opt_rows, b_daily, sp_info)[:1024],
+                inline=False,
+            )
+
+        embed.set_footer(text="SP = skill points  |  PP/dag = productie punten per dag  |  AE op niveau 1 per bedrijf")
+        await interaction.followup.send(embed=embed)
+
+    # ------------------------------------------------------------------
     # Command
     # ------------------------------------------------------------------
 
@@ -656,17 +726,41 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
     )
     @app_commands.describe(
         speler="WarEra username (leave empty for yourself)",
+        level="Player level (use instead of a username for a generic calculation)",
+        bedrijven="Number of companies (used together with level for a generic calculation)",
     )
     @app_commands.autocomplete(speler=citizen_autocomplete)
     async def ecobuild(
         self,
         interaction: discord.Interaction,
         speler: Optional[str] = None,
+        level: Optional[int] = None,
+        bedrijven: Optional[int] = None,
     ) -> None:
         await interaction.response.defer(thinking=True)
 
         if not self._client:
             await self._send_api_offline(interaction)
+            return
+
+        # ── Generic mode: level and/or bedrijven provided ────────────────
+        if level is not None or bedrijven is not None:
+            gen_level = level
+            gen_bedrijven = bedrijven
+
+            # If one value is missing, fill it from the invoking player's profile
+            if gen_level is None or gen_bedrijven is None:
+                query = speler or interaction.user.display_name
+                _, profile = await self._resolve_user(query)
+                if profile is not None:
+                    leveling_g: dict = profile.get("leveling") or {}
+                    if gen_level is None:
+                        gen_level = int(leveling_g.get("level") or 1)
+                    if gen_bedrijven is None:
+                        comp_lvl_g, _ = _extract_skill(profile, "companies")
+                        gen_bedrijven = _SKILL_VALUES["companies"][comp_lvl_g]
+
+            await self._ecobuild_generic(interaction, gen_level or 1, gen_bedrijven or 0)
             return
 
         query = speler or interaction.user.display_name

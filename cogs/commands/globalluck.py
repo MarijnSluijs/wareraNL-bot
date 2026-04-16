@@ -516,9 +516,11 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         ind = _luck_indicator_overall(luck_score)
 
         # Compute live elite luck score if available (for combined display)
+        # Minimum 10 elite cases required to include elite score in combined ranking.
+        _MIN_ELITE_COMBINED = 10
         elite_opens = sum(elite_counts.values()) if elite_counts else 0
         live_elite_luck: float | None = None
-        if elite_opens > 0:
+        if elite_opens >= _MIN_ELITE_COMBINED:
             live_elite_luck = _calc_elite_luck_score(elite_counts, elite_opens)
 
         def _combined_score_local() -> float:
@@ -530,9 +532,12 @@ class GlobalLuck(commands.Cog, name="globalluck"):
             title=f"🌍 Worldwide luck — {username}",
             color=discord.Color.gold(),
         )
+        cscore_top = _combined_score_local()
+        csign_top = "+" if cscore_top >= 0 else ""
+        ind_top = _luck_indicator_overall(cscore_top)
         embed.add_field(
             name="Score",
-            value=f"**{sign}{luck_score:.1f}%** {ind}",
+            value=f"**{csign_top}{cscore_top:.1f}%** {ind_top}",
             inline=True,
         )
         embed.add_field(
@@ -574,7 +579,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
 
         # ── Worldwide leaderboard ──
         _MIN_NORMAL = 20
-        _MIN_ELITE = 5
+        _MIN_ELITE = 10
         try:
             def _row_lb(rn: int, entry: dict, score_val: float, highlight: bool = False) -> str:
                 name = (entry.get("citizen_name") or "?")[:13]
@@ -684,7 +689,12 @@ class GlobalLuck(commands.Cog, name="globalluck"):
 
                     bot_lines = ["    • • •", lb_header, lb_sep]
                     for i, entry in enumerate(reversed(bot5_comb), start=0):
-                        score = entry.get("combined_score") if entry.get("combined_score") is not None else _comb_score(entry)
+                        if entry["user_id"] == user_id:
+                            score = _combined_score_local()
+                        elif entry.get("combined_score") is not None:
+                            score = entry["combined_score"]
+                        else:
+                            score = _comb_score(entry)
                         bot_lines.append(_row_lb(total_ranked - i, entry, score, highlight=(entry["user_id"] == user_id)))
 
                     lb_block = "```\n" + "\n".join(top_lines + player_lines + bot_lines) + "\n```"
