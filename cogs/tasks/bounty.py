@@ -78,6 +78,19 @@ def _extract_bounty(side: dict) -> tuple[float, float] | None:
     return None
 
 
+async def _unping_and_delete(msg: discord.PartialMessage | discord.Message) -> None:
+    """Edit content to None (clearing the role ping) then delete the message.
+
+    Editing before deleting causes Discord to remove the unread-mention badge
+    for users who haven't opened the channel yet.
+    """
+    try:
+        await msg.edit(content=None)
+    except Exception:
+        pass  # best-effort; proceed to delete regardless
+    await msg.delete()
+
+
 class BountyTasks(TaskCogBase, name="bounty_tasks"):
     def __init__(self, bot) -> None:
         self.bot = bot
@@ -305,7 +318,7 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
         for stale_val in stale.values():
             if stale_val[2]:
                 try:
-                    await channel.get_partial_message(stale_val[2]).delete()
+                    await _unping_and_delete(channel.get_partial_message(stale_val[2]))
                 except Exception:
                     pass
         self._known = {k: v for k, v in self._known.items() if k.split(":")[0] in active_ids}
@@ -370,7 +383,7 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                     prev = self._known.pop(known_key, None)
                     if prev and prev[2]:
                         try:
-                            await channel.get_partial_message(prev[2]).delete()
+                            await _unping_and_delete(channel.get_partial_message(prev[2]))
                         except Exception:
                             pass
                     continue
@@ -541,7 +554,7 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                 if not battle_valid_sides:
                     # Battle has no active bounties at all — delete
                     try:
-                        await msg.delete()
+                        await _unping_and_delete(msg)
                         logger.info(
                             "bounty_poll: deleted orphaned message %s (battle %s no longer has any bounty)",
                             msg.id, battle_id,
@@ -571,7 +584,7 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                 if side_key not in battle_valid_sides:
                     # Bounty for this side is gone
                     try:
-                        await msg.delete()
+                        await _unping_and_delete(msg)
                         logger.info(
                             "bounty_poll: deleted orphaned message %s (bounty for %s in battle %s is gone)",
                             msg.id, side_key, battle_id,

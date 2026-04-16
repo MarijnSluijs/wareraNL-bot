@@ -18,6 +18,26 @@ logger = logging.getLogger("discord_bot")
 
 GEM_EMOJI = "💎"
 
+# Role ID that may run gem commands on the production server.
+_COMMUNITY_ROLE_ID = 1492814531502805032
+
+
+def _can_manage_gems():
+    """Custom check: requires the community role on production; always passes in testing."""
+    async def predicate(interaction: discord.Interaction) -> bool:
+        bot = interaction.client
+        if getattr(bot, "testing", False):
+            return True
+        member = interaction.user
+        if not isinstance(member, discord.Member):
+            return False
+        if any(r.id == _COMMUNITY_ROLE_ID for r in member.roles):
+            return True
+        raise app_commands.CheckFailure(
+            "Je hebt de Community-rol nodig om dit commando te gebruiken."
+        )
+    return app_commands.check(predicate)
+
 
 def _fmt(n: int) -> str:
     """Format an integer with dots as thousands separators (Dutch convention)."""
@@ -68,7 +88,7 @@ class GemsCog(commands.Cog, name="Gems"):
         hoeveelheid="Aantal toe te voegen gems (minimaal 1)",
     )
     @app_commands.autocomplete(speler=_member_autocomplete)
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @_can_manage_gems()
     async def gems_add(
         self,
         interaction: discord.Interaction,
@@ -121,7 +141,7 @@ class GemsCog(commands.Cog, name="Gems"):
         hoeveelheid="Aantal te verwijderen gems (minimaal 1)",
     )
     @app_commands.autocomplete(speler=_member_autocomplete)
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @_can_manage_gems()
     async def gems_remove(
         self,
         interaction: discord.Interaction,
@@ -169,7 +189,7 @@ class GemsCog(commands.Cog, name="Gems"):
     # ── /gems lijst ──────────────────────────────────────────────────────────
 
     @gems.command(name="lijst", description="Toon alle spelers met openstaande gems")
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @_can_manage_gems()
     async def gems_list(self, interaction: discord.Interaction) -> None:
         db = self._db
         if db is None:
@@ -209,11 +229,9 @@ class GemsCog(commands.Cog, name="Gems"):
         interaction: discord.Interaction,
         error: app_commands.AppCommandError,
     ) -> None:
-        if isinstance(error, app_commands.MissingPermissions):
-            await interaction.response.send_message(
-                "❌ Je hebt geen rechten om dit commando te gebruiken.",
-                ephemeral=True,
-            )
+        if isinstance(error, (app_commands.MissingPermissions, app_commands.CheckFailure)):
+            msg = str(error) if str(error) else "Je hebt geen rechten om dit commando te gebruiken."
+            await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
         else:
             logger.exception("Unhandled error in gems command: %s", error)
             if not interaction.response.is_done():
