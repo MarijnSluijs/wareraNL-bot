@@ -2,7 +2,9 @@
 
 A persistent button is posted in the roles channel via ``/generalroles``.
 Clicking it:
-  - If not yet subscribed: opens a Modal asking for the in-game username.
+  - If not yet subscribed:
+      * If the user has a verified identity link → auto-subscribes them.
+      * Otherwise → opens a Modal asking for the in-game username.
   - If already subscribed: unsubscribes immediately (ephemeral confirmation).
 
 Owner-only prefix commands:
@@ -165,8 +167,40 @@ class BedrijvenBonusCheckButton(discord.ui.Button):
                 ephemeral=True,
             )
             logger.info("bedrijven_bonus_check: %s unsubscribed", interaction.user)
+            return
+
+        # Not yet subscribed → check identity_links first
+        identity = await db.get_identity_link_by_discord(discord_user_id)
+        if identity and identity.get("in_game_user_id"):
+            game_user_id = identity["in_game_user_id"]
+            guild_id = str(interaction.guild_id or "")
+            now_iso = datetime.now(timezone.utc).isoformat()
+            await db.add_company_bonus_watcher(
+                discord_user_id=discord_user_id,
+                discord_username=str(interaction.user),
+                game_username="",
+                guild_id=guild_id,
+                added_at=now_iso,
+                game_user_id=game_user_id,
+            )
+            embed = discord.Embed(
+                title="✅ Aangemeld voor Bedrijven bonus check",
+                description=(
+                    "Je WarEra-account is automatisch gekoppeld via je geverifieerde identiteit.\n\n"
+                    "Je ontvangt voortaan een DM als een van je bedrijven "
+                    "**0% productiebonus** heeft.\n\n"
+                    "Klik opnieuw op de knop om je af te melden."
+                ),
+                colour=discord.Colour.green(),
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            logger.info(
+                "bedrijven_bonus_check: %s auto-subscribed via identity_links (game_id=%s)",
+                interaction.user,
+                game_user_id,
+            )
         else:
-            # Not yet subscribed → show modal to collect in-game name
+            # No verified identity → show modal to collect in-game name
             await interaction.response.send_modal(SpelernaamModal())
 
 
