@@ -7,6 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from cogs.commands.bedrijvenbonuscheck import BedrijvenBonusCheckView, _load_state, _save_state
+from cogs.commands.pillreminder import PillReminderView, _load_state as _pill_load_state, _save_state as _pill_save_state
 from utils.checks import has_privileged_role
 
 from .roles import RoleToggleView, general_roles_path, load_roles_template
@@ -33,6 +34,10 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
                 self.bot.add_view(RoleToggleView(template["buttons"], exclusive=False))
         except Exception:
             pass
+
+        # Re-register persistent views for special buttons
+        self.bot.add_view(BedrijvenBonusCheckView())
+        self.bot.add_view(PillReminderView())
 
     @app_commands.command(
         name="generalroles", description="Post de rol-knoppen in het rollen-kanaal."
@@ -114,11 +119,11 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
 
         # Post the Company bonus check (bedrijven bonus check) button
         bw_embed = discord.Embed(
-            title="Bedrijven bonus check",
+            title="🏭 Bedrijven bonus check",
             description=(
                 "Wil je een melding ontvangen als een van je bedrijven **0% productiebonus** heeft?\n\n"
-                "Klik op de knop hieronder om je aan te melden. "
-                "Je in-game gebruikersnaam wordt gevraagd via een popup.\n\n"
+                "Klik op de knop hieronder om je aan te melden.\n\n"
+                "📬 De bot stuurt je een **DM** zodra een bedrijf met 0% productiebonus gedetecteerd wordt.\n\n"
                 "Klik nogmaals op de knop om je weer af te melden."
             ),
             colour=discord.Colour.blue(),
@@ -127,6 +132,23 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
         state = _load_state(self.bot.testing)
         state["button_message_id"] = bw_msg.id
         _save_state(state, self.bot.testing)
+
+        # Post the Pill buff reminder button
+        pill_embed = discord.Embed(
+            title="💊 Pill buff herinnering",
+            description=(
+                "Wil je een DM ontvangen als je **pill buff** bijna verloopt?\n\n"
+                "Klik op de knop hieronder om je aan te melden. "
+                "De bot stuurt je een DM "
+                "op het moment dat er nog precies **10 minuten** over zijn.\n\n"
+                "Klik nogmaals op de knop om je af te melden."
+            ),
+            colour=discord.Colour.green(),
+        )
+        pill_msg = await target_channel.send(embed=pill_embed, view=PillReminderView())
+        pill_state = _pill_load_state(self.bot.testing)
+        pill_state["button_message_id"] = pill_msg.id
+        _pill_save_state(pill_state, self.bot.testing)
 
         await interaction.followup.send(
             f"✅ Rol-knoppen gepost in {target_channel.mention}.", ephemeral=True

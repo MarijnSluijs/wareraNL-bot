@@ -69,6 +69,10 @@ class DatabaseBase:
             ("global_citizen_luck", "elite_rarity_json TEXT"),
             # company_bonus_watchers — game_user_id cached at runtime
             ("company_bonus_watchers", "game_user_id TEXT"),
+            # discord_allies — display label added post-launch
+            ("discord_allies", "country_name TEXT"),
+            # pill_reminders — in_game_user_id added post-launch; expires_at made nullable
+            ("pill_reminders", "in_game_user_id TEXT NOT NULL DEFAULT ''"),
         ]
         for table, column_def in migrations:
             try:

@@ -684,16 +684,6 @@ class CitizensMixin:
                 best_ratio = ratio
                 best = (uid, name)
         return best
-
-
-    async def get_citizen_mus(self) -> list[tuple[str, Optional[str]]]:
-        """Return [(user_id, mu_id)] for all citizens."""
-        sql = "SELECT user_id, mu_id FROM citizen_levels ORDER BY user_id"
-        rows: list[tuple[str, Optional[str]]] = []
-        async with self._conn.execute(sql) as cur:
-            async for row in cur:
-                rows.append((str(row[0]), str(row[1]) if row[1] is not None else None))
-        return rows
     
     # ── Eco donations ──────────────────────────────────────────────────
 
@@ -705,7 +695,68 @@ class CitizensMixin:
             if row and row[0]:
                 return row[0]
         return None
-    
+
+    async def get_citizen_mus(self) -> list[tuple[str, str]]:
+        """Return [(user_id, mu_id)] for all citizens with a non-null mu_id."""
+        rows: list[tuple[str, str]] = []
+        async with self._conn.execute(
+            "SELECT user_id, mu_id FROM citizen_levels WHERE mu_id IS NOT NULL"
+        ) as cur:
+            async for row in cur:
+                rows.append((str(row[0]), str(row[1])))
+        return rows
+
+    async def get_distinct_mu_ids_for_country(
+        self, country_id: str
+    ) -> list[tuple[str, str]]:
+        """Return [(mu_id, mu_name)] for distinct non-null MUs of citizens in *country_id*."""
+        rows: list[tuple[str, str]] = []
+        async with self._conn.execute(
+            "SELECT DISTINCT mu_id, mu_name FROM citizen_levels "
+            "WHERE country_id = ? AND mu_id IS NOT NULL",
+            (country_id,),
+        ) as cur:
+            async for row in cur:
+                rows.append((str(row[0]), str(row[1] or "")))
+        return rows
+
+    async def get_citizen_names_by_ids(
+        self, user_ids: list[str]
+    ) -> dict[str, str]:
+        """Return {user_id: citizen_name} for each user_id found in citizen_levels."""
+        if not user_ids:
+            return {}
+        placeholders = ",".join("?" for _ in user_ids)
+        result: dict[str, str] = {}
+        async with self._conn.execute(
+            f"SELECT user_id, citizen_name FROM citizen_levels"
+            f" WHERE user_id IN ({placeholders}) AND citizen_name IS NOT NULL",
+            user_ids,
+        ) as cur:
+            async for row in cur:
+                result[str(row[0])] = str(row[1])
+        return result
+
+    async def get_citizen_details_by_ids(
+        self, user_ids: list[str]
+    ) -> dict[str, dict]:
+        """Return {user_id: {country_id, citizen_name, last_login_at}} for each id."""
+        if not user_ids:
+            return {}
+        placeholders = ",".join("?" for _ in user_ids)
+        result: dict[str, dict] = {}
+        async with self._conn.execute(
+            f"SELECT user_id, country_id, citizen_name, last_login_at"
+            f" FROM citizen_levels WHERE user_id IN ({placeholders})",
+            user_ids,
+        ) as cur:
+            async for row in cur:
+                result[str(row[0])] = {
+                    "country_id": row[1],
+                    "citizen_name": row[2],
+                    "last_login_at": row[3],
+                }
+        return result
 
     # ── Weekly damage ──────────────────────────────────────────────────
 

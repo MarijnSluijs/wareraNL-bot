@@ -657,7 +657,7 @@ class Geluk(commands.Cog, name="geluk"):
                                     rank_total_off = len(ranking_off)
                                 rank_total_off = min(rank_total_off, len(ranking_off))
                                 _MIN_NORMAL_OFF = 20
-                                _MIN_ELITE_OFF = 5
+                                _MIN_ELITE_OFF = 10
                                 _e_uid = entry.get("user_id")
                                 _e_name = entry.get("citizen_name") or ""
                                 updated_at_r = (ranking_off[0].get("updated_at") or "")[:16].replace("T", " ")
@@ -857,7 +857,7 @@ class Geluk(commands.Cog, name="geluk"):
                         _rarity_json,
                         _now,
                         elite_luck_score=_elite_luck,
-                        elite_opens_count=_elite_tc if _elite_tc >= 5 else None,
+                        elite_opens_count=_elite_tc if _elite_tc >= 10 else None,
                         elite_rarity_json=_elite_rarity_json,
                     )
                     await _db.flush_luck_scores()
@@ -873,7 +873,7 @@ class Geluk(commands.Cog, name="geluk"):
                     )
 
         _MIN_NORMAL = 20
-        _MIN_ELITE = 5
+        _MIN_ELITE = 10
 
         # -- Gelukranking section (only for NL citizens) --
         try:

@@ -22,7 +22,7 @@ logger = logging.getLogger("discord_bot")
 _BATTLE_URL = "https://app.warera.io/battle/{battle_id}"
 
 # Thresholds for which Discord roles exist (must match role names exactly, e.g. "0.2bounty")
-_BOUNTY_THRESHOLDS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+_BOUNTY_THRESHOLDS = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
 
 def _extract_bounty(side: dict) -> tuple[float, float] | None:
@@ -76,6 +76,19 @@ def _extract_bounty(side: dict) -> tuple[float, float] | None:
     if rate > 0 or total > 0:
         return rate, total
     return None
+
+
+async def _unping_and_delete(msg: discord.PartialMessage | discord.Message) -> None:
+    """Edit content to None (clearing the role ping) then delete the message.
+
+    Editing before deleting causes Discord to remove the unread-mention badge
+    for users who haven't opened the channel yet.
+    """
+    try:
+        await msg.edit(content=None)
+    except Exception:
+        pass  # best-effort; proceed to delete regardless
+    await msg.delete()
 
 
 class BountyTasks(TaskCogBase, name="bounty_tasks"):
@@ -283,6 +296,15 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                     self._enemy_ids = {str(e) for e in raw_enemies if e}
             except Exception:
                 pass  # keep previous protected set on error
+
+        # Merge Discord-only allies (manually maintained via /ally-add)
+        if self._db:
+            try:
+                discord_ally_ids = await self._db.get_discord_allies()
+                protected.update(discord_ally_ids)
+            except Exception:
+                logger.debug("bounty_poll: could not load discord allies from DB")
+
         self._protected_ids = protected
 
         channel = self.bot.get_channel(int(channel_id))
@@ -296,7 +318,7 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
         for stale_val in stale.values():
             if stale_val[2]:
                 try:
-                    await channel.get_partial_message(stale_val[2]).delete()
+                    await _unping_and_delete(channel.get_partial_message(stale_val[2]))
                 except Exception:
                     pass
         self._known = {k: v for k, v in self._known.items() if k.split(":")[0] in active_ids}
@@ -357,11 +379,11 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                 b = _extract_bounty(side)
 
                 # No bounty, rate below threshold, or pool exhausted (paid out) — delete any previously posted message.
-                if b is None or b[0] < 0.1 or b[1] <= 0:
+                if b is None or b[0] < 0.2 or b[1] < 100:
                     prev = self._known.pop(known_key, None)
                     if prev and prev[2]:
                         try:
-                            await channel.get_partial_message(prev[2]).delete()
+                            await _unping_and_delete(channel.get_partial_message(prev[2]))
                         except Exception:
                             pass
                     continue
@@ -390,12 +412,8 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                                 skip = True  # same rate, still pending → nothing new
                             pending_until_ts = prev_pending_until
                         else:
-                            # Was pending, now active — delete pending message and re-post with pings
-                            if _prev_msg:
-                                try:
-                                    await channel.get_partial_message(_prev_msg).delete()
-                                except Exception:
-                                    pass
+                            # Was pending, now active — edit the existing message in-place
+                            # (do NOT delete + re-send; that would cause a second ping)
                             pending_until_ts = None  # now active
                     else:
                         # Was already active
@@ -405,12 +423,12 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                 if skip:
                     continue
 
-                # If the bounty was already active and we have an existing message,
-                # edit it in-place rather than deleting and reposting.
+                # If the bounty was already active, or just transitioned from pending → active,
+                # edit the existing message in-place rather than deleting and reposting.
                 existing_msg_id: int | None = None
                 if (
                     prev is not None
-                    and prev[3] is None  # was already active (not pending)
+                    and pending_until_ts is None  # now active (was active or just became active)
                     and prev[2] is not None
                 ):
                     existing_msg_id = prev[2]
@@ -536,7 +554,7 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                 if not battle_valid_sides:
                     # Battle has no active bounties at all — delete
                     try:
-                        await msg.delete()
+                        await _unping_and_delete(msg)
                         logger.info(
                             "bounty_poll: deleted orphaned message %s (battle %s no longer has any bounty)",
                             msg.id, battle_id,
@@ -566,7 +584,7 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                 if side_key not in battle_valid_sides:
                     # Bounty for this side is gone
                     try:
-                        await msg.delete()
+                        await _unping_and_delete(msg)
                         logger.info(
                             "bounty_poll: deleted orphaned message %s (bounty for %s in battle %s is gone)",
                             msg.id, side_key, battle_id,

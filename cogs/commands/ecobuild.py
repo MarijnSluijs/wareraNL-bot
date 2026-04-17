@@ -532,15 +532,17 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
     async def _get_ae_bonuses(self, companies: list[dict]) -> dict[str, float]:
         """Return {company _id → total production bonus %} via region + country APIs.
 
-        Strategy (most reliable, avoids the dynamic recommended-region list):
-        1. Call region.getById for each unique region → deposit bonus + countryId.
-        2. Call country.getCountryById for each unique country →
-           rankings.countryProductionBonus.value  (= SR + ethics combined, stable).
-        3. total bonus = depositBonus + countryProductionBonus.
+        Strategy (mirrors bedrijfswinst.py for accuracy):
+        1. region.getById → deposit bonus (filtered by item type) + countryId.
+        2. company.getRecommendedRegionIdsByItemCode → strategicBonus +
+           ethicSpecializationBonus for the company's exact region (primary).
+        3. Fallback: country.getCountryById →
+           strategicResources.bonuses.productionPercent (SR)
+           + max(0, countryProductionBonus.value − SR)  (ethics).
 
-        The recommended-region list is intentionally NOT used as primary source because
-        it only returns the top-N regions and changes dynamically as territory control
-        shifts — a company's region can appear and disappear between two API calls.
+        Note: rankings.countryProductionBonus alone is always 0 in practice;
+        the ethics bonus must be derived via the recommended-region list or
+        inferred from the SR/total split in the country data.
         """
         if not self._client:
             return {}
@@ -575,7 +577,6 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
                 deposit = data.get("deposit") or {}
                 deposit_type = deposit.get("type", "")
                 deposit_pct = float(deposit.get("bonusPercent") or 0)
-                # Only count deposit if it matches the company's item type
                 if deposit_type and item_code and deposit_type != item_code:
                     deposit_pct = 0.0
                 raw_country = data.get("country")
@@ -593,9 +594,42 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
             for rid in region_cids
         ])
 
-        # Fetch unique countries
-        country_prod_bonus: dict[str, float] = {}
-        unique_country_ids = {cid for _, cid in region_info.values() if cid}
+        # For each unique (item_code, region_id) try the recommended-region list
+        # to get strategicBonus + ethicSpecializationBonus (the authoritative values).
+        # region_id → (sr_pct, ethics_pct, found)
+        region_bonus: dict[str, tuple[float, float, bool]] = {}
+
+        async def _fetch_recommended(region_id: str, item_code: str) -> None:
+            if not item_code:
+                region_bonus[region_id] = (0.0, 0.0, False)
+                return
+            try:
+                raw = await self._client.get(  # type: ignore[union-attr]
+                    "/company.getRecommendedRegionIdsByItemCode",
+                    params={"input": json.dumps({"itemCode": item_code, "count": 100})},
+                )
+                for entry in (_unwrap_region_list(raw)):
+                    if entry.get("regionId") == region_id:
+                        sr = float(entry.get("strategicBonus") or 0)
+                        ethics = float(entry.get("ethicSpecializationBonus") or 0)
+                        region_bonus[region_id] = (sr, ethics, True)
+                        return
+            except Exception:
+                pass
+            region_bonus[region_id] = (0.0, 0.0, False)
+
+        await asyncio.gather(*[
+            _fetch_recommended(rid, region_item[rid])
+            for rid in region_cids
+        ])
+
+        # Fallback: country.getCountryById for regions not found in recommended list
+        country_bonus: dict[str, tuple[float, float]] = {}  # country_id → (sr_pct, ethics_pct)
+        missing_country_ids = {
+            country_id
+            for rid, (_, country_id) in region_info.items()
+            if country_id and not region_bonus.get(rid, (0, 0, False))[2]
+        }
 
         async def _fetch_country(country_id: str) -> None:
             try:
@@ -606,22 +640,33 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
                 data = _unwrap(raw)
                 if not isinstance(data, dict):
                     return
+                sr_pct = float(
+                    ((data.get("strategicResources") or {}).get("bonuses") or {}).get(
+                        "productionPercent", 0
+                    ) or 0
+                )
                 rb = (data.get("rankings") or {}).get("countryProductionBonus")
-                if isinstance(rb, dict):
-                    val = float(rb.get("value") or 0)
-                    country_prod_bonus[country_id] = val
-                elif isinstance(rb, (int, float)):
-                    country_prod_bonus[country_id] = float(rb)
+                total = float(rb.get("value") or 0) if isinstance(rb, dict) else 0.0
+                ethics_pct = max(0.0, total - sr_pct)
+                country_bonus[country_id] = (sr_pct, ethics_pct)
             except Exception:
                 logger.warning("ecobuild: country.getCountryById failed for %s", country_id)
 
-        await asyncio.gather(*[_fetch_country(cid) for cid in unique_country_ids])
+        await asyncio.gather(*[_fetch_country(cid) for cid in missing_country_ids])
 
-        # Combine: deposit + country production bonus per company
+        # Combine per region
         for region_id, cids in region_cids.items():
             deposit_pct, country_id = region_info.get(region_id, (0.0, ""))
-            country_pct = country_prod_bonus.get(country_id, 0.0)
-            total = deposit_pct + country_pct
+            sr_pct, ethics_pct, found = region_bonus.get(region_id, (0.0, 0.0, False))
+            if found:
+                # Recommended list gives authoritative deposit+SR+ethics split;
+                # deposit is already baked into sr_pct via depositBonus field.
+                # We use deposit_pct from region.getById as the deposit component
+                # and sr_pct + ethics_pct from the recommended list.
+                total = deposit_pct + sr_pct + ethics_pct
+            else:
+                fb_sr, fb_ethics = country_bonus.get(country_id, (0.0, 0.0))
+                total = deposit_pct + fb_sr + fb_ethics
             for cid in cids:
                 bonus_map[cid] = total
 
@@ -647,6 +692,80 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
         return out
 
     # ------------------------------------------------------------------
+    # Generic (level-based) calculation
+    # ------------------------------------------------------------------
+
+    async def _ecobuild_generic(
+        self,
+        interaction: discord.Interaction,
+        player_level: int,
+        n_companies: int,
+        ae_level: int = 1,
+        prod_bonus_pct: float = 0.0,
+    ) -> None:
+        """Compute and display optimal eco build for a given level and company count."""
+        player_level = max(1, player_level)
+        n_companies = max(0, min(n_companies, 12))
+
+        # 4 SP per level (verified from damage_calc.py)
+        total_sp = player_level * 4
+
+        # Companies skill: minimum level needed to run n_companies companies
+        if n_companies == 0:
+            comp_lvl = 0
+        else:
+            comp_lvl = next(
+                (lvl for lvl in range(11) if _SKILL_VALUES["companies"][lvl] >= n_companies),
+                10,
+            )
+
+        # Assume no workers (management) skill for generic calculation
+        workers_lvl = 0
+        fixed_sp = _CUMUL_COST[comp_lvl] + _CUMUL_COST[workers_lvl]
+        free_sp = max(0, total_sp - fixed_sp)
+
+        # Use the provided AE level and best production bonus for every company slot
+        ae_base_daily = _engine_cycle_daily(ae_level)
+        ae_daily_with_bonus = round(ae_base_daily * (1 + prod_bonus_pct / 100))
+        engine_daily_total = n_companies * ae_daily_with_bonus
+
+        best_build = _optimize_eco_skills(free_sp, engine_daily_total)
+
+        color = self._embed_colour()
+        embed = discord.Embed(
+            title="Eco Build (generiek)",
+            description=f"Level {player_level}  \u2022  {n_companies} {'bedrijven' if n_companies != 1 else 'bedrijf'}  \u2022  AE niveau {ae_level}" + (f"  \u2022  +{prod_bonus_pct:.0f}% productiebonus" if prod_bonus_pct > 0 else ""),
+            color=color,
+        )
+
+        if best_build is None:
+            embed.description = (embed.description or "") + "\n\n_Niet genoeg SP voor een zinvolle verdeling._"
+        else:
+            b_ent, b_en, b_prod, b_daily = best_build
+            b_ent_v = _SKILL_VALUES["entrepreneurship"][b_ent]
+            b_en_v  = _SKILL_VALUES["energy"][b_en]
+            b_prod_v = _SKILL_VALUES["production"][b_prod]
+            b_ent_pp = _daily_works_float(b_ent_v) * b_prod_v
+            b_en_pp  = _daily_works_float(b_en_v) * b_prod_v
+            opt_rows: list[tuple[str, str, str]] = [
+                (f"Entrepreneurship ({b_ent_v})", str(b_ent), f"{b_ent_pp:.0f}"),
+                (f"Energy ({b_en_v})",            str(b_en),  f"{b_en_pp:.0f}"),
+                (f"Production ({b_prod_v})",      str(b_prod), "\u2014"),
+                (f"Bedrijven ({n_companies})",    str(comp_lvl), f"{engine_daily_total:.0f}"),
+                ("Medewerkers",                   str(workers_lvl), "\u2014"),
+            ]
+            sp_used = _CUMUL_COST[b_ent] + _CUMUL_COST[b_en] + _CUMUL_COST[b_prod] + fixed_sp
+            sp_info = f"SP gebruikt: {sp_used}/{total_sp}"
+            embed.add_field(
+                name="\u2699\ufe0f Optimale verdeling",
+                value=_skill_table(opt_rows, b_daily, sp_info)[:1024],
+                inline=False,
+            )
+
+        embed.set_footer(text=f"SP = skill points  |  PP/dag = productie punten per dag  |  AE op niveau {ae_level} per bedrijf" + (f" (+{prod_bonus_pct:.0f}% productiebonus)" if prod_bonus_pct > 0 else ""))
+        await interaction.followup.send(embed=embed)
+
+    # ------------------------------------------------------------------
     # Command
     # ------------------------------------------------------------------
 
@@ -656,17 +775,64 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
     )
     @app_commands.describe(
         speler="WarEra username (leave empty for yourself)",
+        level="Player level (use instead of a username for a generic calculation)",
+        bedrijven="Number of companies (used together with level for a generic calculation)",
     )
     @app_commands.autocomplete(speler=citizen_autocomplete)
     async def ecobuild(
         self,
         interaction: discord.Interaction,
         speler: Optional[str] = None,
+        level: Optional[int] = None,
+        bedrijven: Optional[int] = None,
     ) -> None:
         await interaction.response.defer(thinking=True)
 
         if not self._client:
             await self._send_api_offline(interaction)
+            return
+
+        # ── Generic mode: level and/or bedrijven provided ────────────────
+        if level is not None or bedrijven is not None:
+            gen_level = level
+            gen_bedrijven = bedrijven
+            gen_ae_lvl = 1  # default: AE level 1
+
+            # Always resolve player profile to fill missing values and get AE data
+            query = speler or interaction.user.display_name
+            gen_user_id, gen_profile = await self._resolve_user(query)
+            if gen_profile is not None:
+                leveling_g: dict = gen_profile.get("leveling") or {}
+                if gen_level is None:
+                    gen_level = int(leveling_g.get("level") or 1)
+
+            # Fetch company data to find the most common AE level, total count and best bonus
+            gen_best_bonus_pct: float = 0.0
+            if gen_user_id is not None:
+                gen_company_ids = await self._get_company_ids(gen_user_id)
+                if gen_company_ids:
+                    gen_details = await self._get_company_details(gen_company_ids)
+                    gen_valid = [c for c in gen_details if c is not None]
+                    ae_lvls = [
+                        max(1, int((c.get("activeUpgradeLevels") or {}).get("automatedEngine") or 0))
+                        for c in gen_valid
+                    ]
+                    if ae_lvls:
+                        gen_ae_lvl = max(set(ae_lvls), key=ae_lvls.count)
+                    # Use total owned companies (active + inactive) when bedrijven was not given
+                    if gen_bedrijven is None:
+                        gen_bedrijven = len(gen_company_ids)
+                    # Fetch production bonuses and take the highest
+                    gen_ae_bonuses = await self._get_ae_bonuses(gen_valid)
+                    if gen_ae_bonuses:
+                        gen_best_bonus_pct = max(gen_ae_bonuses.values())
+
+            # Fall back to companies skill value if still None (player could not be resolved)
+            if gen_bedrijven is None and gen_profile is not None:
+                comp_lvl_g, _ = _extract_skill(gen_profile, "companies")
+                gen_bedrijven = _SKILL_VALUES["companies"][comp_lvl_g]
+
+            await self._ecobuild_generic(interaction, gen_level or 1, gen_bedrijven or 0, gen_ae_lvl, gen_best_bonus_pct)
             return
 
         query = speler or interaction.user.display_name
@@ -748,16 +914,34 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
 
         # SP currently invested in the three self-work skills
         cur_eco_sp = _CUMUL_COST[ent_lvl] + _CUMUL_COST[energy_lvl] + _CUMUL_COST[prod_lvl]
-        # SP in war skills (or elsewhere) that can be redeployed into eco skills
-        war_sp = free_sp - cur_eco_sp
+        # SP not in eco skills — may be unspent, in war skills, or a mix
+        extra_sp = free_sp - cur_eco_sp
+        avail_sp = int(leveling.get("availableSkillPoints", 0) or 0)
+        # Unspent SP contributes to the gap first; the remainder is in war skills
+        war_sp = max(0, extra_sp - avail_sp)
+        unspent_sp = max(0, min(extra_sp, avail_sp))
 
         # ── Current daily production ──────────────────────────────────────
         cur_ent_pp = _daily_works_float(ent_val) * prod_val * best_ent_prod_mult
         cur_en_pp = _daily_works_float(energy_val) * prod_val
         current_total = cur_ent_pp + cur_en_pp + engine_daily_total
 
-        # ── Run optimizer (ent/energy/prod only — companies + workers fixed) ─
-        best_build = _optimize_eco_skills(free_sp, engine_daily_total, best_ent_prod_mult)
+        # ── Run optimizer for optimal build using all owned companies ──────
+        # Advise using all owned companies (active + inactive); find the minimum
+        # companies skill level needed to accommodate all of them.
+        opt_n_companies = len(companies)
+        if opt_n_companies > 0:
+            opt_comp_lvl = next(
+                (lvl for lvl in range(11) if _SKILL_VALUES["companies"][lvl] >= opt_n_companies),
+                10,
+            )
+        else:
+            opt_comp_lvl = comp_lvl
+        opt_fixed_sp = _CUMUL_COST[opt_comp_lvl] + _CUMUL_COST[workers_lvl]
+        opt_free_sp = max(0, total_sp - opt_fixed_sp)
+        # Sum AE output of all owned companies (sorted best-first)
+        opt_engine_daily = sum(x[3] for x in engine_info_by_daily)
+        best_build = _optimize_eco_skills(opt_free_sp, opt_engine_daily, best_ent_prod_mult)
 
         # ── Build embed ───────────────────────────────────────────────────
         color = self._embed_colour()
@@ -780,6 +964,8 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
         cur_table = _skill_table(cur_rows, current_total)
         if war_sp > 0:
             cur_table += f"\n⚠️ {war_sp} SP in oorlogsskills — herbesteedbaar aan eco"
+        if unspent_sp > 0:
+            cur_table += f"\n💡 {unspent_sp} SP onbesteed — kan worden ingezet in eco"
         embed.add_field(
             name="\U0001f4ca Huidige eco skills",
             value=cur_table,
@@ -802,7 +988,7 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
                 (f"Entrepreneurship ({b_ent_v})", str(b_ent), f"{b_ent_pp:.0f}"),
                 (f"Energy ({b_en_v})",            str(b_en),  f"{b_en_pp:.0f}"),
                 (f"Production ({b_prod_v})",      str(b_prod), "\u2014"),
-                (f"Bedrijven ({n_active})",       str(comp_lvl), f"{engine_daily_total:.0f}"),
+                (f"Bedrijven ({opt_n_companies})", str(opt_comp_lvl), f"{opt_engine_daily:.0f}"),
                 ("Medewerkers",                   str(workers_lvl), "\u2014"),
             ]
             embed.add_field(

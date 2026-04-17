@@ -17,6 +17,7 @@ Mixin                Tables
 :mod:`.battle_rankings` ``battle_hits``, ``processed_battles``
 :mod:`.article_tips`    ``article_tips``
 :mod:`.company_bonus`   ``company_bonus_watchers``, ``company_bonus_alerts``
+:mod:`.gems`            ``event_gems``
 :mod:`.tx_cache`        ``player_tx_cache``
 ===================  ========================================
 Usage::
@@ -29,10 +30,13 @@ Usage::
 
 from .article_tips import ArticleTipsMixin
 from .base import DatabaseBase
+from .gems import GemsMixin
+from .discord_allies import DiscordAlliesMixin
 from .battle_drops import BattleDropsMixin
 from .battle_rankings import BattleRankingsMixin
 from .citizens import CitizensMixin
 from .company_bonus import CompanyBonusMixin
+from .pill_reminders import PillRemindersMixin
 from .tx_cache import TxCacheMixin
 from .events import EventsMixin
 from .giveaways_db import GiveawaysMixin
@@ -45,6 +49,8 @@ from .state import StateMixin
 
 
 class Database(
+    GemsMixin,
+    DiscordAlliesMixin,
     StateMixin,
     ProductionMixin,
     CitizensMixin,
@@ -58,6 +64,7 @@ class Database(
     BattleRankingsMixin,
     ArticleTipsMixin,
     CompanyBonusMixin,
+    PillRemindersMixin,
     TxCacheMixin,
     DatabaseBase,
 ):

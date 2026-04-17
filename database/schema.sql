@@ -349,6 +349,44 @@ CREATE TABLE IF NOT EXISTS company_bonus_alerts (
     PRIMARY KEY (discord_user_id, company_id)
 );
 
+-- discord_allies: manually maintained list of countries that are allied via Discord
+--   (not necessarily reflected in the game API).  Used by the bounty poller to
+--   suppress alerts for battles these countries are engaged in.
+CREATE TABLE IF NOT EXISTS discord_allies (
+    country_id   TEXT PRIMARY KEY,
+    country_name TEXT,          -- optional display label (e.g. "België")
+    added_by     TEXT NOT NULL,  -- Discord user ID who added the entry
+    added_at     TEXT NOT NULL   -- ISO timestamp
+);
+
+-- ── Pill buff reminders ───────────────────────────────────────────────────────
+
+-- pill_reminders: one row per Discord user subscribed to pill buff reminders.
+--   in_game_user_id links to their WarEra account.
+--   expires_at is a Unix timestamp (seconds UTC) set by the hourly API scan;
+--   NULL means no active pill buff detected yet.
+--   reminded is set to 1 once the 10-minute DM has been sent.
+CREATE TABLE IF NOT EXISTS pill_reminders (
+    discord_user_id TEXT PRIMARY KEY,
+    in_game_user_id TEXT NOT NULL DEFAULT '',
+    expires_at      INTEGER,
+    reminded        INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_pill_reminders_expires ON pill_reminders(expires_at);
+
+-- ── Event gems ────────────────────────────────────────────────────────────────
+
+-- event_gems: gem balance per Discord user, awarded via Discord events.
+--   Gems are gifted in-game once a threshold is reached; this table tracks
+--   the pending balance.
+CREATE TABLE IF NOT EXISTS event_gems (
+    discord_user_id  TEXT PRIMARY KEY,
+    discord_username TEXT NOT NULL,
+    guild_id         TEXT NOT NULL,
+    gems             INTEGER NOT NULL DEFAULT 0,
+    updated_at       TEXT NOT NULL
+);
+
 -- player_tx_cache: cached transaction aggregates per player for /transacties.
 --   On each command invocation only *new* transactions (createdAt > newest_tx_at)
 --   are fetched, then merged into the stored aggregates.

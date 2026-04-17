@@ -169,16 +169,16 @@ class RoleToggleButton(discord.ui.Button):
             return
 
         try:
-            # Collect primary roles defined on this view
-            primary_roles: list[discord.Role] = []
-            for child in getattr(self.view, "children", []):
-                if isinstance(child, RoleToggleButton):
-                    r = guild.get_role(child.role_id)
-                    if r:
-                        primary_roles.append(r)
+            # Collect role IDs for all buttons in this view (avoids stale guild cache).
+            # member.roles is always fresh from the interaction payload.
+            primary_role_ids: set[int] = {
+                child.role_id
+                for child in getattr(self.view, "children", [])
+                if isinstance(child, RoleToggleButton)
+            }
 
-            # Which primary roles the member currently has
-            member_primary_roles = [r for r in primary_roles if r in member.roles]
+            # Which of the member's current roles belong to this exclusive group
+            member_primary_roles = [r for r in member.roles if r.id in primary_role_ids]
 
             # If user clicked a primary they already have -> remove that primary only
             if role in member.roles:
@@ -279,19 +279,10 @@ class Roles(commands.Cog, name="roles"):
     @app_commands.describe(
         user="De gebruiker aan wie je de ambassadeur rol wilt geven."
     )
+    @has_privileged_role()
     async def ambassadeurs(
         self, interaction: discord.Interaction, user: discord.Member
     ) -> None:
-        # check if command is used by minister van buitenlandse zaken
-        if not any(
-            role.id == self.bot.config["roles"]["minister_foreign_affairs"]
-            for role in interaction.user.roles
-        ):
-            await interaction.response.send_message(
-                "❌ You don't have permission to use this command.", ephemeral=True
-            )
-            return
-
         guild = interaction.guild
         if not guild:
             await interaction.response.send_message(
@@ -324,6 +315,21 @@ class Roles(commands.Cog, name="roles"):
             await interaction.response.send_message(
                 "❌ An error occurred while assigning the role.", ephemeral=True
             )
+
+    async def cog_app_command_error(
+        self,
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError,
+    ) -> None:
+        if isinstance(error, (app_commands.MissingPermissions, app_commands.CheckFailure)):
+            await interaction.response.send_message(
+                "❌ Je hebt geen rechten om dit commando te gebruiken.", ephemeral=True
+            )
+        else:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "❌ Er is een onverwachte fout opgetreden.", ephemeral=True
+                )
 
 
 async def setup(bot) -> None:
