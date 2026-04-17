@@ -279,19 +279,10 @@ class Roles(commands.Cog, name="roles"):
     @app_commands.describe(
         user="De gebruiker aan wie je de ambassadeur rol wilt geven."
     )
+    @has_privileged_role()
     async def ambassadeurs(
         self, interaction: discord.Interaction, user: discord.Member
     ) -> None:
-        # check if command is used by minister
-        if not any(
-            role.id == self.bot.config["roles"]["government"]
-            for role in interaction.user.roles
-        ):
-            await interaction.response.send_message(
-                "❌ You don't have permission to use this command.", ephemeral=True
-            )
-            return
-
         guild = interaction.guild
         if not guild:
             await interaction.response.send_message(
@@ -324,6 +315,21 @@ class Roles(commands.Cog, name="roles"):
             await interaction.response.send_message(
                 "❌ An error occurred while assigning the role.", ephemeral=True
             )
+
+    async def cog_app_command_error(
+        self,
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError,
+    ) -> None:
+        if isinstance(error, (app_commands.MissingPermissions, app_commands.CheckFailure)):
+            await interaction.response.send_message(
+                "❌ Je hebt geen rechten om dit commando te gebruiken.", ephemeral=True
+            )
+        else:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "❌ Er is een onverwachte fout opgetreden.", ephemeral=True
+                )
 
 
 async def setup(bot) -> None:
