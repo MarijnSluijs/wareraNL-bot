@@ -1,42 +1,59 @@
-name: Test and Deploy Bot
+name: CI / Deploy
 
 on:
   push:
-    branches:
-      - main
+    branches: [main, staging]
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Deploy naar productie (main branch)?'
+        required: true
+        default: 'ja'
 
 jobs:
-  test:
+  syntax-check:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Create venv
-        run: python -m venv .venv
+      - name: Create venv & install
+        run: |
+          python -m venv .venv
+          ./.venv/bin/pip install -r requirements.txt
 
-      - name: Install dependencies
-        run: ./.venv/bin/pip install -r requirements.txt
+      - name: Syntax check (alle .py bestanden)
+        run: |
+          find . -name "*.py" -not -path "./.venv/*" \
+            | xargs ./.venv/bin/python -m py_compile
 
-      - name: Basic import check
-        run: ./.venv/bin/python -m py_compile bot.py
-
-  deploy:
-    needs: test
+  deploy-staging:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    needs: syntax-check
     runs-on: ubuntu-latest
-
+    environment: staging
     steps:
-      - name: Deploy over SSH
+      - name: Deploy naar staging via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            /root/warera/wareraNL-bot/deploy.sh
+          script: /home/warera/staging/wareraNL-bot/deploy-staging.sh
+
+  deploy-production:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: syntax-check
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy naar productie via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: /home/warera/live/wareraNL-bot/deploy.sh
