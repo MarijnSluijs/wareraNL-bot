@@ -349,6 +349,31 @@ CREATE TABLE IF NOT EXISTS company_bonus_alerts (
     PRIMARY KEY (discord_user_id, company_id)
 );
 
+-- ── Company move advisor ─────────────────────────────────────────────────────
+
+-- company_move_advice_watchers: Discord users who want to be notified when one of
+--   their companies could profitably move to a region with a higher production bonus.
+CREATE TABLE IF NOT EXISTS company_move_advice_watchers (
+    discord_user_id  TEXT PRIMARY KEY,
+    discord_username TEXT NOT NULL,
+    game_username    TEXT NOT NULL,
+    game_user_id     TEXT,               -- resolved in-game ID (cached)
+    guild_id         TEXT NOT NULL,
+    added_at         TEXT NOT NULL
+);
+
+-- company_move_advice_alerts: tracks which (user, company, source_region → target_region)
+--   combinations have already been advised, so we don't spam.  Cleared when the company
+--   moves to a new region or when the subscription is removed.
+CREATE TABLE IF NOT EXISTS company_move_advice_alerts (
+    discord_user_id    TEXT NOT NULL,
+    company_id         TEXT NOT NULL,
+    source_region_id   TEXT NOT NULL,   -- company's region when advice was given
+    target_region_id   TEXT NOT NULL,   -- advised target region
+    alerted_at         TEXT NOT NULL,
+    PRIMARY KEY (discord_user_id, company_id)
+);
+
 -- discord_allies: manually maintained list of countries that are allied via Discord
 --   (not necessarily reflected in the game API).  Used by the bounty poller to
 --   suppress alerts for battles these countries are engaged in.

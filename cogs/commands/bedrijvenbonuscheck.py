@@ -122,7 +122,7 @@ class SpelernaamModal(discord.ui.Modal, title="Aanmelden voor Bedrijven bonus ch
             )
 
         embed = discord.Embed(
-            title="✅ Aangemeld voor Bedrijven bonus check",
+            title="✅ Aangemeld voor 0% bonus check",
             description=(
                 f"Je ontvangt voortaan een DM als een van je bedrijven "
                 f"**0% productiebonus** heeft.\n\n"
@@ -140,7 +140,7 @@ class SpelernaamModal(discord.ui.Modal, title="Aanmelden voor Bedrijven bonus ch
 class BedrijvenBonusCheckButton(discord.ui.Button):
     def __init__(self) -> None:
         super().__init__(
-            label="Bedrijven bonus check",
+            label="📊 0% bonus check",
             style=discord.ButtonStyle.primary,
             custom_id=BUTTON_CUSTOM_ID,
         )
@@ -184,7 +184,7 @@ class BedrijvenBonusCheckButton(discord.ui.Button):
                 game_user_id=game_user_id,
             )
             embed = discord.Embed(
-                title="✅ Aangemeld voor Bedrijven bonus check",
+                title="✅ Aangemeld voor 0% bonus check",
                 description=(
                     "Je WarEra-account is automatisch gekoppeld via je geverifieerde identiteit.\n\n"
                     "Je ontvangt voortaan een DM als een van je bedrijven "
@@ -204,10 +204,155 @@ class BedrijvenBonusCheckButton(discord.ui.Button):
             await interaction.response.send_modal(SpelernaamModal())
 
 
+# ── Move advice button & modal ────────────────────────────────────────────────
+
+MOVE_ADVICE_BUTTON_CUSTOM_ID = "company_move_advice:toggle"
+
+
+class CompanyMoveAdviceModal(discord.ui.Modal, title="Aanmelden voor Verhuisadvies"):
+    spelersnaam = discord.ui.TextInput(
+        label="In-game gebruikersnaam",
+        placeholder="Jouw WarEra gebruikersnaam",
+        min_length=1,
+        max_length=64,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        bot = interaction.client
+        db = getattr(bot, "_ext_db", None)
+        api_client = getattr(bot, "_ext_client", None)
+
+        if db is None:
+            await interaction.followup.send(
+                "❌ Database is momenteel niet beschikbaar. Probeer het later opnieuw.",
+                ephemeral=True,
+            )
+            return
+
+        discord_user_id = str(interaction.user.id)
+        discord_username = str(interaction.user)
+        guild_id = str(interaction.guild_id or "")
+        spelersnaam = self.spelersnaam.value.strip()
+
+        game_user_id: str | None = None
+        if api_client:
+            try:
+                raw = await api_client.get(
+                    "/search.searchAnything",
+                    params={"input": json.dumps({"searchText": spelersnaam})},
+                )
+                data = _unwrap(raw)
+                if isinstance(data, dict):
+                    ids = data.get("userIds") or []
+                    if ids:
+                        game_user_id = str(ids[0])
+            except Exception as exc:
+                logger.debug("company_move_advice modal: search failed for %r: %s", spelersnaam, exc)
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        await db.add_company_move_advice_watcher(
+            discord_user_id=discord_user_id,
+            discord_username=discord_username,
+            game_username=spelersnaam,
+            guild_id=guild_id,
+            added_at=now_iso,
+            game_user_id=game_user_id,
+        )
+
+        resolved_note = ""
+        if game_user_id is None:
+            resolved_note = (
+                "\n⚠️ De spelernaam kon niet worden opgezocht in de API. "
+                "Dit zal opnieuw worden geprobeerd bij de volgende scan."
+            )
+
+        embed = discord.Embed(
+            title="✅ Aangemeld voor Verhuisadvies",
+            description=(
+                f"Je ontvangt voortaan een DM als een van je bedrijven winstgevend "
+                f"naar een regio met een hogere productiebonus kan verhuizen.\n\n"
+                f"**In-game naam:** {spelersnaam}{resolved_note}"
+            ),
+            colour=discord.Colour.green(),
+        )
+        embed.set_footer(text="Klik opnieuw op de knop om je af te melden.")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        logger.info("company_move_advice: %s subscribed as %r", discord_username, spelersnaam)
+
+
+class CompanyMoveAdviceButton(discord.ui.Button):
+    def __init__(self) -> None:
+        super().__init__(
+            label="📍 Verhuisadvies",
+            style=discord.ButtonStyle.primary,
+            custom_id=MOVE_ADVICE_BUTTON_CUSTOM_ID,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        bot = interaction.client
+        db = getattr(bot, "_ext_db", None)
+
+        if db is None:
+            await interaction.response.send_message(
+                "❌ Database is momenteel niet beschikbaar. Probeer het later opnieuw.",
+                ephemeral=True,
+            )
+            return
+
+        discord_user_id = str(interaction.user.id)
+
+        if await db.is_company_move_advice_watcher(discord_user_id):
+            await db.remove_company_move_advice_watcher(discord_user_id)
+            await db.delete_all_move_advice_alerts_for_user(discord_user_id)
+            await interaction.response.send_message(
+                "✅ Je bent afgemeld van Verhuisadvies-meldingen.",
+                ephemeral=True,
+            )
+            logger.info("company_move_advice: %s unsubscribed", interaction.user)
+            return
+
+        # Not yet subscribed — try to auto-link via identity_links
+        identity = await db.get_identity_link_by_discord(discord_user_id)
+        if identity and identity.get("in_game_user_id"):
+            game_user_id = identity["in_game_user_id"]
+            guild_id = str(interaction.guild_id or "")
+            now_iso = datetime.now(timezone.utc).isoformat()
+            await db.add_company_move_advice_watcher(
+                discord_user_id=discord_user_id,
+                discord_username=str(interaction.user),
+                game_username="",
+                guild_id=guild_id,
+                added_at=now_iso,
+                game_user_id=game_user_id,
+            )
+            embed = discord.Embed(
+                title="✅ Aangemeld voor Verhuisadvies",
+                description=(
+                    "Je WarEra-account is automatisch gekoppeld via je geverifieerde identiteit.\n\n"
+                    "Je ontvangt voortaan een DM als een van je bedrijven winstgevend "
+                    "naar een regio met een hogere productiebonus kan verhuizen.\n\n"
+                    "Klik opnieuw op de knop om je af te melden."
+                ),
+                colour=discord.Colour.green(),
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            logger.info(
+                "company_move_advice: %s auto-subscribed via identity_links (game_id=%s)",
+                interaction.user, game_user_id,
+            )
+        else:
+            await interaction.response.send_modal(CompanyMoveAdviceModal())
+
+
+# ── Combined persistent view ──────────────────────────────────────────────────
+
 class BedrijvenBonusCheckView(discord.ui.View):
     def __init__(self) -> None:
         super().__init__(timeout=None)
         self.add_item(BedrijvenBonusCheckButton())
+        self.add_item(CompanyMoveAdviceButton())
 
 
 # ── Cog ──────────────────────────────────────────────────────────────────────
@@ -236,7 +381,7 @@ class BedrijvenBonusCheckCog(CommandCogBase, name="bedrijven_bonus_check"):
             return
         await context.send("⏳ Bedrijven bonus check-scan wordt uitgevoerd...")
         try:
-            await task_cog._run_scan()
+            await task_cog._run_scan(force=True)
             await context.send("✅ Scan voltooid.")
         except Exception as exc:
             logger.exception("bedrijven_bonus_check_check: scan mislukt")

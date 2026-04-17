@@ -99,12 +99,17 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
                     template_dirty = True
 
             exclusive = bool(embed_data.get("exclusive", False))
+            embed_color_raw = embed_data.get("color")
+            if embed_color_raw:
+                embed_color = int(embed_color_raw, 16) if isinstance(embed_color_raw, str) else int(embed_color_raw)
+            else:
+                embed_color = color
             embed = discord.Embed(
                 title=embed_data.get("title", "Kies je rollen"),
                 description=embed_data.get(
                     "description", "Klik op een knop om rollen te toggelen."
                 ),
-                color=color,
+                color=embed_color,
             )
             await target_channel.send(
                 embed=embed, view=RoleToggleView(buttons, exclusive=exclusive)
@@ -119,12 +124,13 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
 
         # Post the Company bonus check (bedrijven bonus check) button
         bw_embed = discord.Embed(
-            title="🏭 Bedrijven bonus check",
+            title="🏭 Bedrijven notificaties",
             description=(
-                "Wil je een melding ontvangen als een van je bedrijven **0% productiebonus** heeft?\n\n"
-                "Klik op de knop hieronder om je aan te melden.\n\n"
-                "📬 De bot stuurt je een **DM** zodra een bedrijf met 0% productiebonus gedetecteerd wordt.\n\n"
-                "Klik nogmaals op de knop om je weer af te melden."
+                "**📊 0% bonus check**\n"
+                "Ontvang een DM zodra een van je bedrijven **0% productiebonus** heeft.\n\n"
+                "**📍 Verhuisadvies**\n"
+                "Ontvang een DM als je een bedrijf winstgevend naar een regio met hogere bonus kunt verplaatsen.\n\n"
+                "Klik op de gewenste knop om je aan te melden. Klik opnieuw om je af te melden."
             ),
             colour=discord.Colour.blue(),
         )

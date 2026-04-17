@@ -2,6 +2,7 @@
   "embeds": [
     {
       "title": "🏛️ Overheid meldingen",
+      "color": "0x154273",
       "description": "Kies voor welke overheidsberichten je gepingd wilt worden.\n\n**Overheid**: Officiële mededelingen vanuit de overheid.\n**Oorlog updates**: Updates over orders, prioriteiten en overige niet kritieke militaire mededelingen.\n**Dagelijkse update**: Dagelijkse updates vanuit de overheid en het kabinet.\n**Congres update**: Updates namens het congres.\n**Referendum**: Pings bij referendums en polls vanuit congres of kabinet.",
       "buttons": [
         {
@@ -38,90 +39,94 @@
     },
     {
       "title": "⚔️ WarEra meldingen",
+      "color": "0xe74c3c",
       "description": "Kies voor welke WarEra-gebeurtenissen je gepingd wilt worden.\n\n**Oorlog**: Pings als er direct damage nodig is of als Nederland aangevallen wordt.\n**WarEra Aankondigingen**: Pings over updates, patches en nieuwe ontwikkelingen in WarEra.\n**Economie**: Pings bij economische updates, zoals verandering in production bonusses.",
       "buttons": [
         {
           "label": "Oorlog",
           "role_id": 1490767273517125733,
-          "style": "primary",
+          "style": "danger",
           "row": 0
         },
         {
           "label": "WarEra Aankondigingen",
           "role_id": 1475489955731083388,
-          "style": "primary",
+          "style": "danger",
           "row": 0
         },
         {
           "label": "Economie",
           "role_id": 1475489949875703949,
-          "style": "primary",
+          "style": "danger",
           "row": 0
         }
       ]
     },
     {
       "title": "🤝 Community meldingen",
+      "color": "0x2ecc71",
       "description": "Kies voor welke community-activiteiten je gepingd wilt worden.\n\n**Discord Server**: Pings bij wijzigingen aan de Discord server.\n**Giveaways**: Pings bij winacties en weggeefacties.\n**Community**: Pings voor community zaken zoals de Wikipedia.\n**Promotie Team**: Word gepingd om mee te helpen met Reddit- of social media posts.\n**Journalist**: Pings voor roddels.",
       "buttons": [
         {
           "label": "Discord Server",
           "role_id": 1490767276746608791,
-          "style": "primary",
+          "style": "success",
           "row": 0
         },
         {
           "label": "Giveaways",
           "role_id": 1490767277732397198,
-          "style": "primary",
+          "style": "success",
           "row": 0
         },
         {
           "label": "Community",
           "role_id": 1490767278818726110,
-          "style": "primary",
+          "style": "success",
           "row": 0
         },
         {
           "label": "Promotie Team",
           "role_id": 1490767279548399820,
-          "style": "primary",
+          "style": "success",
           "row": 0
         },
         {
           "label": "Journalist",
           "role_id": 1475489948609020000,
-          "style": "primary",
+          "style": "success",
           "row": 0
         }
       ]
     },
     {
       "title": "🗳️ Verkiezingen",
+      "color": "0x9b59b6",
       "description": "Kies met onderstaande knoppen je toegang tot de campagnekanalen.\n\n**Kandidaat-President**: Voor deelname aan de presidentsverkiezingen.\n**Kandidaat-Congreslid**: Voor deelname aan de congresverkiezingen.\n**Verkiezingen**: Pings bij verkiezingen en gerelateerde aankondigingen.",
       "buttons": [
         {
           "label": "Kandidaat-President",
           "role_id": 1475489961880064083,
-          "style": "primary",
+          "style": "secondary",
           "row": 0
         },
         {
           "label": "Kandidaat-Congreslid",
           "role_id": 1475489962605547632,
-          "style": "primary",
+          "style": "secondary",
           "row": 0
         },
         {
           "label": "Verkiezingen",
           "role_id": 1490767271369638008,
-          "style": "primary",
+          "style": "secondary",
           "row": 0
         }
       ]
     },
     {
       "title": "💰 Bounty meldingen",
+      "color": "0xf1c40f",
       "description": "Kies met onderstaande knoppen je drempelwaarde voor bounty meldingen.\n\nDe bot pingt je zodra er een bounty verschijnt die gelijk is aan of hoger dan jouw gekozen waarde.\n\nJe kunt slechts één drempelwaarde tegelijk hebben.",
       "exclusive": true,
       "buttons": [
