@@ -29,6 +29,11 @@ _INACTIVITY_DAYS = 30  # days without login → flagged in audit
 
 # Marijn's Discord user ID (receives the weekly audit DM)
 _MARIJN_DISCORD_ID = 565626197048819731
+# captainwyvern's Discord user ID (also receives the weekly audit DM)
+_CAPTAINWYVERN_DISCORD_ID = 296971354807205888
+
+# All recipients of the citizenship audit DM
+_AUDIT_DM_RECIPIENTS: list[int] = [_MARIJN_DISCORD_ID, _CAPTAINWYVERN_DISCORD_ID]
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -418,13 +423,18 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
         if current:
             chunks.append(current)
 
-        try:
-            marijn = await self.bot.fetch_user(_MARIJN_DISCORD_ID)
-            for chunk in chunks:
-                await marijn.send(chunk)
-            logger.info("citizenship_audit: DM sent to marijn (%d sections)", len(chunks))
-        except Exception:
-            logger.exception("citizenship_audit: failed to DM marijn")
+        for recipient_id in _AUDIT_DM_RECIPIENTS:
+            try:
+                user = await self.bot.fetch_user(recipient_id)
+                for chunk in chunks:
+                    await user.send(chunk)
+                logger.info(
+                    "citizenship_audit: DM sent to %s (%d sections)", user, len(chunks)
+                )
+            except Exception:
+                logger.exception(
+                    "citizenship_audit: failed to DM user %d", recipient_id
+                )
 
     # ════════════════════════════════════════════════════════════════════════
     # Slash commands — manual triggers

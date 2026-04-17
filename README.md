@@ -108,7 +108,7 @@ docker compose build
 docker compose up -d
 ```
 
-### Testing — bot only
+### Testing — bot
 
 ```bash
 docker compose -f docker-compose.testing.yml build
