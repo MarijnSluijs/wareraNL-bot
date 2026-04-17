@@ -1,5 +1,8 @@
 # WareraNL Bot
 
+Staging: [![CI / Deploy](https://github.com/breakerh/wareraNL-bot/actions/workflows/deploy.yml/badge.svg?branch=staging)](https://github.com/breakerh/wareraNL-bot/actions/workflows/deploy.yml)    
+Live: [![CI / Deploy](https://github.com/breakerh/wareraNL-bot/actions/workflows/deploy.yml/badge.svg?branch=main)](https://github.com/breakerh/wareraNL-bot/actions/workflows/deploy.yml)
+
 WareraNL is a Discord bot implemented in Python using cogs for modular features. This README explains the repository layout, purpose of the main folders and cogs, and how to run the bot in both production and testing modes.
 
 ## Repository layout
