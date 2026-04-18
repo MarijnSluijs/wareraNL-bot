@@ -378,8 +378,8 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
 
                 b = _extract_bounty(side)
 
-                # No bounty, rate below threshold, or pool exhausted (paid out) — delete any previously posted message.
-                if b is None or b[0] < 0.2 or b[1] < 100:
+                # No bounty or rate below threshold — delete any existing posted message.
+                if b is None or b[0] < 0.2:
                     prev = self._known.pop(known_key, None)
                     if prev and prev[2]:
                         try:
@@ -389,6 +389,23 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                     continue
 
                 rate, total = b
+
+                # Pool < 100: don't post new bounties that start with an insufficient pool.
+                # But if the bounty was already posted (pool started higher and drained during
+                # combat), keep it until the pool hits zero.
+                is_known = known_key in self._known
+                if total < 100:
+                    if not is_known:
+                        continue  # never post a bounty whose initial pool is under 100
+                    elif total <= 0:
+                        prev = self._known.pop(known_key, None)
+                        if prev and prev[2]:
+                            try:
+                                await _unping_and_delete(channel.get_partial_message(prev[2]))
+                            except Exception:
+                                pass
+                        continue
+                    # pool dropped below 100 but still > 0 and already posted → keep it
 
                 now_ts = datetime.now(timezone.utc).timestamp()
                 prev = self._known.get(known_key)
