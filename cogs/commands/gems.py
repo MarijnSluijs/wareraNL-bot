@@ -189,7 +189,6 @@ class GemsCog(commands.Cog, name="Gems"):
     # ── /gems lijst ──────────────────────────────────────────────────────────
 
     @gems.command(name="lijst", description="Toon alle spelers met openstaande gems")
-    @_can_manage_gems()
     async def gems_list(self, interaction: discord.Interaction) -> None:
         db = self._db
         if db is None:
