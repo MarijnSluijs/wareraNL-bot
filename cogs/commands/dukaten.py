@@ -1,9 +1,9 @@
-"""Event gems: slash commands to track gem rewards for Discord event winners.
+"""Event dukaten: slash commands to track dukaten rewards for Discord event winners.
 
 Commands (all require Manage Server permission):
-  /gems toevoegen speler:@user hoeveelheid:int  — add gems; shows new total
-  /gems verwijderen speler:@user hoeveelheid:int — remove gems; shows new total
-  /gems lijst                                    — list all players with gems > 0
+  /dukaten toevoegen speler:@user hoeveelheid:int  — add dukaten; shows new total
+  /dukaten verwijderen speler:@user hoeveelheid:int — remove dukaten; shows new total
+  /dukaten lijst                                    — list all players with dukaten > 0
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ GEM_EMOJI = "💎"
 _COMMUNITY_ROLE_ID = 1492814531502805032
 
 
-def _can_manage_gems():
+def _can_manage_dukaten():
     """Custom check: requires the community role on production; always passes in testing."""
     async def predicate(interaction: discord.Interaction) -> bool:
         bot = interaction.client
@@ -63,8 +63,8 @@ async def _member_autocomplete(
     return results
 
 
-class GemsCog(commands.Cog, name="Gems"):
-    """Slash commands for managing Discord event gem rewards."""
+class DukatenCog(commands.Cog, name="Dukaten"):
+    """Slash commands for managing Discord event dukaten rewards."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -75,21 +75,21 @@ class GemsCog(commands.Cog, name="Gems"):
 
     # ── Command group ────────────────────────────────────────────────────────
 
-    gems = app_commands.Group(
-        name="gems",
-        description="Beheer gem-beloningen voor Discord event-winnaars",
+    dukaten = app_commands.Group(
+        name="dukaten",
+        description="Beheer dukaten-beloningen voor Discord event-winnaars",
     )
 
-    # ── /gems toevoegen ──────────────────────────────────────────────────────
+    # ── /dukaten toevoegen ───────────────────────────────────────────────────
 
-    @gems.command(name="toevoegen", description="Voeg gems toe aan een speler")
+    @dukaten.command(name="toevoegen", description="Voeg dukaten toe aan een speler")
     @app_commands.describe(
-        speler="De Discord-gebruiker die gems krijgt (type een naam om te zoeken)",
-        hoeveelheid="Aantal toe te voegen gems (minimaal 1)",
+        speler="De Discord-gebruiker die dukaten krijgt (type een naam om te zoeken)",
+        hoeveelheid="Aantal toe te voegen dukaten (minimaal 1)",
     )
     @app_commands.autocomplete(speler=_member_autocomplete)
-    @_can_manage_gems()
-    async def gems_add(
+    @_can_manage_dukaten()
+    async def dukaten_add(
         self,
         interaction: discord.Interaction,
         speler: str,
@@ -117,7 +117,7 @@ class GemsCog(commands.Cog, name="Gems"):
         )
 
         embed = discord.Embed(
-            title=f"{GEM_EMOJI} Gems toegevoegd",
+            title=f"{GEM_EMOJI} Dukaten toegevoegd",
             colour=discord.Colour.blue(),
         )
         embed.add_field(name="Speler", value=member.mention, inline=True)
@@ -126,23 +126,23 @@ class GemsCog(commands.Cog, name="Gems"):
 
         await interaction.response.send_message(embed=embed)
         logger.info(
-            "gems: %s added %d gems to %s (new total: %d)",
+            "dukaten: %s added %d dukaten to %s (new total: %d)",
             interaction.user,
             hoeveelheid,
             member,
             new_total,
         )
 
-    # ── /gems verwijderen ────────────────────────────────────────────────────
+    # ── /dukaten verwijderen ─────────────────────────────────────────────────
 
-    @gems.command(name="verwijderen", description="Verwijder gems van een speler")
+    @dukaten.command(name="verwijderen", description="Verwijder dukaten van een speler")
     @app_commands.describe(
-        speler="De Discord-gebruiker van wie gems worden verwijderd (type een naam om te zoeken)",
-        hoeveelheid="Aantal te verwijderen gems (minimaal 1)",
+        speler="De Discord-gebruiker van wie dukaten worden verwijderd (type een naam om te zoeken)",
+        hoeveelheid="Aantal te verwijderen dukaten (minimaal 1)",
     )
     @app_commands.autocomplete(speler=_member_autocomplete)
-    @_can_manage_gems()
-    async def gems_remove(
+    @_can_manage_dukaten()
+    async def dukaten_remove(
         self,
         interaction: discord.Interaction,
         speler: str,
@@ -170,7 +170,7 @@ class GemsCog(commands.Cog, name="Gems"):
         )
 
         embed = discord.Embed(
-            title=f"{GEM_EMOJI} Gems verwijderd",
+            title=f"{GEM_EMOJI} Dukaten verwijderd",
             colour=discord.Colour.orange(),
         )
         embed.add_field(name="Speler", value=member.mention, inline=True)
@@ -179,18 +179,17 @@ class GemsCog(commands.Cog, name="Gems"):
 
         await interaction.response.send_message(embed=embed)
         logger.info(
-            "gems: %s removed %d gems from %s (new total: %d)",
+            "dukaten: %s removed %d dukaten from %s (new total: %d)",
             interaction.user,
             hoeveelheid,
             member,
             new_total,
         )
 
-    # ── /gems lijst ──────────────────────────────────────────────────────────
+    # ── /dukaten lijst ───────────────────────────────────────────────────────
 
-    @gems.command(name="lijst", description="Toon alle spelers met openstaande gems")
-    @_can_manage_gems()
-    async def gems_list(self, interaction: discord.Interaction) -> None:
+    @dukaten.command(name="lijst", description="Toon alle spelers met openstaande dukaten")
+    async def dukaten_list(self, interaction: discord.Interaction) -> None:
         db = self._db
         if db is None:
             await interaction.response.send_message(
@@ -202,7 +201,7 @@ class GemsCog(commands.Cog, name="Gems"):
 
         if not rows:
             await interaction.response.send_message(
-                f"Er zijn momenteel geen spelers met openstaande {GEM_EMOJI} gems.",
+                f"Er zijn momenteel geen spelers met openstaande {GEM_EMOJI} dukaten.",
                 ephemeral=True,
             )
             return
@@ -214,11 +213,11 @@ class GemsCog(commands.Cog, name="Gems"):
             )
 
         embed = discord.Embed(
-            title=f"{GEM_EMOJI} Event gems overzicht",
+            title=f"{GEM_EMOJI} Event dukaten overzicht",
             description="\n".join(lines),
             colour=discord.Colour.gold(),
         )
-        embed.set_footer(text=f"{len(rows)} speler(s) met openstaande gems")
+        embed.set_footer(text=f"{len(rows)} speler(s) met openstaande dukaten")
 
         await interaction.response.send_message(embed=embed)
 
@@ -233,7 +232,7 @@ class GemsCog(commands.Cog, name="Gems"):
             msg = str(error) if str(error) else "Je hebt geen rechten om dit commando te gebruiken."
             await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
         else:
-            logger.exception("Unhandled error in gems command: %s", error)
+            logger.exception("Unhandled error in dukaten command: %s", error)
             if not interaction.response.is_done():
                 await interaction.response.send_message(
                     "❌ Er is een onverwachte fout opgetreden.", ephemeral=True
@@ -241,4 +240,4 @@ class GemsCog(commands.Cog, name="Gems"):
 
 
 async def setup(bot: commands.Bot) -> None:
-    await bot.add_cog(GemsCog(bot))
+    await bot.add_cog(DukatenCog(bot))

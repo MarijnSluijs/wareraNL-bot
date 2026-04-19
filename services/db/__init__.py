@@ -36,6 +36,7 @@ from .battle_drops import BattleDropsMixin
 from .battle_rankings import BattleRankingsMixin
 from .citizens import CitizensMixin
 from .company_bonus import CompanyBonusMixin
+from .company_move_advice import CompanyMoveAdviceMixin
 from .pill_reminders import PillRemindersMixin
 from .tx_cache import TxCacheMixin
 from .events import EventsMixin
@@ -64,6 +65,7 @@ class Database(
     BattleRankingsMixin,
     ArticleTipsMixin,
     CompanyBonusMixin,
+    CompanyMoveAdviceMixin,
     PillRemindersMixin,
     TxCacheMixin,
     DatabaseBase,

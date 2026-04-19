@@ -20,11 +20,11 @@ logger = logging.getLogger("discord_bot")
 
 # Production
 _PROD_CHANNEL_ID = 1489316733528576080
-_PROD_ROLE_ID    = 1458527742646816892
+_PROD_ROLE_ID    = 1494815320316055573
 
 # Testing
 _TEST_CHANNEL_ID = 1474452856584011929
-_TEST_ROLE_ID    = 1494431123391119531
+_TEST_ROLE_ID    = 1494815008909955257
 
 _MIN_HOURS = 8
 _MAX_HOURS = 14
@@ -37,6 +37,7 @@ class BunkersTasks(TaskCogBase, name="bunkers_tasks"):
         self.bot = bot
         self._task: asyncio.Task | None = None
         self._next_send_at: float | None = None  # Unix timestamp
+        self._paused: bool = False
 
     def cog_load(self) -> None:
         self._task = asyncio.get_event_loop().create_task(self._bunkers_loop())
@@ -57,6 +58,10 @@ class BunkersTasks(TaskCogBase, name="bunkers_tasks"):
             )
             await asyncio.sleep(delay_seconds)
             self._next_send_at = None
+
+            if self._paused:
+                logger.info("bunkers: ping skipped (paused)")
+                continue
 
             try:
                 await self._send_bunkers()
@@ -91,16 +96,45 @@ class BunkersTasks(TaskCogBase, name="bunkers_tasks"):
         description="Toon wanneer het volgende Bunkers-bericht wordt gestuurd",
     )
     async def volgende_bunkers(self, interaction: discord.Interaction) -> None:
+        if self._paused:
+            await interaction.response.send_message(
+                "🔕 De Bunkers-ping is momenteel **uitgeschakeld**.", ephemeral=True
+            )
+            return
         if self._next_send_at is None:
             await interaction.response.send_message(
                 "⏳ De volgende Bunkers-ping is nog niet gepland.", ephemeral=True
             )
             return
         ts = int(self._next_send_at)
+        testing: bool = getattr(self.bot, "testing", False)
+        role_id = _TEST_ROLE_ID if testing else _PROD_ROLE_ID
+        role = interaction.guild.get_role(role_id) if interaction.guild else None
+        role_mention = role.mention if role else f"<@&{role_id}>"
         await interaction.response.send_message(
-            f"🏛️ Volgende **Bunkers**-ping: <t:{ts}:F> (<t:{ts}:R>)",
+            f"🏛️ Volgende **Bunkers**-ping voor {role_mention}: <t:{ts}:F> (<t:{ts}:R>)",
             ephemeral=True,
         )
+
+    @app_commands.command(
+        name="bunkers_toggle",
+        description="Zet de automatische Bunkers-ping aan of uit (admin only)",
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def bunkers_toggle(self, interaction: discord.Interaction) -> None:
+        self._paused = not self._paused
+        if self._paused:
+            await interaction.response.send_message(
+                "🔕 Bunkers-ping is **uitgeschakeld**. Gebruik `/bunkers_toggle` opnieuw om te hervatten.",
+                ephemeral=True,
+            )
+            logger.info("bunkers: ping disabled by %s", interaction.user)
+        else:
+            await interaction.response.send_message(
+                "🔔 Bunkers-ping is **ingeschakeld**.",
+                ephemeral=True,
+            )
+            logger.info("bunkers: ping enabled by %s", interaction.user)
 
 
 async def setup(bot) -> None:
