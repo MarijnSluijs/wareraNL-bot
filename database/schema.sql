@@ -399,6 +399,24 @@ CREATE TABLE IF NOT EXISTS pill_reminders (
 );
 CREATE INDEX IF NOT EXISTS idx_pill_reminders_expires ON pill_reminders(expires_at);
 
+-- ── Citizen Wealth ────────────────────────────────────────────────────────────
+
+-- citizen_wealth: wealth per NL citizen (active + inactive company wealth)
+--   wealth_active:             personal wallet + wealth of active companies (from userWealth ranking)
+--   wealth_inactive_companies: sum of balance of disabled/inactive companies
+--   wealth_total:              wealth_active + wealth_inactive_companies
+CREATE TABLE IF NOT EXISTS citizen_wealth (
+    user_id                   TEXT PRIMARY KEY,
+    country_id                TEXT NOT NULL,
+    citizen_name              TEXT,
+    wealth_active             REAL NOT NULL DEFAULT 0,
+    wealth_inactive_companies REAL NOT NULL DEFAULT 0,
+    wealth_total              REAL NOT NULL DEFAULT 0,
+    updated_at                TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_citizen_wealth_country ON citizen_wealth(country_id);
+CREATE INDEX IF NOT EXISTS idx_citizen_wealth_total   ON citizen_wealth(wealth_total DESC);
+
 -- ── Event gems ────────────────────────────────────────────────────────────────
 
 -- event_gems: gem balance per Discord user, awarded via Discord events.

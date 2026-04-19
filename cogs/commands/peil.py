@@ -51,6 +51,7 @@ class PeilCog(CommandCogBase, name="peil"):
             app_commands.Choice(name="globalluck", value="globalluck"),
             app_commands.Choice(name="slagveld", value="slagveld"),
             app_commands.Choice(name="artikelen", value="artikelen"),
+            app_commands.Choice(name="wealth", value="wealth"),
             app_commands.Choice(name="backfill", value="backfill"),
             app_commands.Choice(name="alles", value="alles"),
         ]
@@ -97,6 +98,8 @@ class PeilCog(CommandCogBase, name="peil"):
             await self._peil_globalluck(ctx)
         if onderdeel in ("slagveld", "alles"):
             await self._peil_slagveld(ctx)
+        if onderdeel in ("wealth", "alles"):
+            await self._peil_wealth(ctx)
         if onderdeel == "artikelen":
             await self._peil_artikelen(ctx, land)
         if onderdeel == "backfill":
@@ -498,6 +501,42 @@ class PeilCog(CommandCogBase, name="peil"):
         except Exception as exc:
             logger.exception("peil backfill: error")
             await status_msg.edit(content=f"❌ Backfill mislukt: {exc}")
+
+    # ------------------------------------------------------------------ #
+    # Wealth subsystem                                                     #
+    # ------------------------------------------------------------------ #
+
+    async def _peil_wealth(self, ctx: Context) -> None:
+        wealth_cog = self.bot.get_cog("wealth_tasks")
+        if not wealth_cog:
+            await ctx.send("❌ Wealth task cog niet geladen.", ephemeral=True)
+            return
+        status_msg = await ctx.send(
+            "🔄 Wealth ranking ophalen… (dit kan een tijdje duren)", ephemeral=True
+        )
+        try:
+            result = await wealth_cog.run_wealth_refresh_once()
+            saved = result.get("saved", 0)
+            done_text = f"✅ Wealth ranking verversing klaar — {saved} spelers opgeslagen."
+            try:
+                await status_msg.edit(content=done_text)
+            except discord.HTTPException:
+                # Interaction token expired (>15 min); post to channel instead
+                logger.info("peil wealth: token expired, posting result to channel")
+                try:
+                    await ctx.channel.send(done_text)
+                except Exception:
+                    logger.warning("peil wealth: could not post result to channel either")
+        except Exception as exc:
+            logger.exception("peil wealth: error")
+            err_text = f"❌ Wealth ranking mislukt: {exc}"
+            try:
+                await status_msg.edit(content=err_text)
+            except discord.HTTPException:
+                try:
+                    await ctx.channel.send(err_text)
+                except Exception:
+                    logger.warning("peil wealth: could not post error to channel")
 
     # ------------------------------------------------------------------ #
     # Global luck subsystem                                                #
