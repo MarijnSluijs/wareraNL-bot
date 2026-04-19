@@ -11,6 +11,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from utils.checks import has_privileged_role
+
 if TYPE_CHECKING:
     from bot import DiscordBot
 
@@ -27,6 +29,7 @@ class Giveaways(commands.Cog, name="giveaways"):
         id="De WarEra ID van de gebruiker aan wie je de gems wilt geven.",
         amount="Het aantal gems dat je wilt geven.",
     )
+    @has_privileged_role()
     async def reward(
         self, interaction: discord.Interaction, id: str, amount: int
     ) -> None:

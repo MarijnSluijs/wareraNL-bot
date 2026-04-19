@@ -19,6 +19,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from utils.checks import has_privileged_role
+
 logger = logging.getLogger("discord_bot")
 
 _MARIJN_DISCORD_ID = 565626197048819731
@@ -145,6 +147,7 @@ class AlliesCog(commands.Cog, name="allies"):
     )
     @app_commands.describe(country="Naam van het land (kies uit de lijst)")
     @app_commands.autocomplete(country=_country_autocomplete)
+    @has_privileged_role()
     async def cmd_bondgenoot_add(
         self,
         interaction: discord.Interaction,
@@ -226,6 +229,7 @@ class AlliesCog(commands.Cog, name="allies"):
     )
     @app_commands.describe(country="Land om te verwijderen (kies uit de lijst)")
     @app_commands.autocomplete(country=_ally_id_autocomplete)
+    @has_privileged_role()
     async def cmd_bondgenoot_remove(
         self,
         interaction: discord.Interaction,
