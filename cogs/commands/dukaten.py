@@ -16,7 +16,7 @@ from discord.ext import commands
 
 logger = logging.getLogger("discord_bot")
 
-GEM_EMOJI = "💎"
+GEM_EMOJI = "🪙"
 
 # Role ID that may run gem commands on the production server.
 _COMMUNITY_ROLE_ID = 1492814531502805032

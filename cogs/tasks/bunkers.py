@@ -16,6 +16,7 @@ from discord import app_commands
 from discord.ext import tasks
 
 from cogs.tasks._base import TaskCogBase
+from utils.checks import has_privileged_role
 
 logger = logging.getLogger("discord_bot")
 
@@ -104,6 +105,7 @@ class BunkersTasks(TaskCogBase, name="bunkers_tasks"):
         name="volgende_bunkers",
         description="Toon wanneer het volgende Bunkers-bericht wordt gestuurd",
     )
+    @has_privileged_role()
     async def volgende_bunkers(self, interaction: discord.Interaction) -> None:
         if self._paused:
             await interaction.response.send_message(
@@ -130,6 +132,7 @@ class BunkersTasks(TaskCogBase, name="bunkers_tasks"):
         description="Zet de automatische Bunkers-ping aan of uit (admin only)",
     )
     @app_commands.default_permissions(administrator=True)
+    @has_privileged_role()
     async def bunkers_toggle(self, interaction: discord.Interaction) -> None:
         self._paused = not self._paused
         if self._paused:
