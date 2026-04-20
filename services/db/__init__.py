@@ -47,6 +47,7 @@ from .mus_registry import MusRegistryMixin
 from .production import ProductionMixin
 from .resistance import ResistanceMixin
 from .state import StateMixin
+from .wealth import WealthMixin
 
 
 class Database(
@@ -68,6 +69,7 @@ class Database(
     CompanyMoveAdviceMixin,
     PillRemindersMixin,
     TxCacheMixin,
+    WealthMixin,
     DatabaseBase,
 ):
     """Async SQLite database for the WarEra Discord bot.

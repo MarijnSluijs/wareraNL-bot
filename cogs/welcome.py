@@ -20,6 +20,7 @@ import traceback
 import discord
 from discord import app_commands
 from discord.ext import commands
+from utils.checks import has_privileged_role
 
 logger = logging.getLogger("discord_bot")
 
@@ -890,6 +891,7 @@ class Welcome(commands.Cog, name="welcome"):
         reason="Interne reden voor goedkeuring (niet zichtbaar voor de gebruiker)",
         nickname="[Optioneel]: Gebruikersnaam van de speler",
     )
+    @has_privileged_role()
     async def approve(
         self,
         interaction: discord.Interaction,
@@ -1204,6 +1206,7 @@ class Welcome(commands.Cog, name="welcome"):
     @app_commands.describe(
         reason="Interne reden voor afwijzing (niet zichtbaar voor de gebruiker)"
     )
+    @has_privileged_role()
     async def deny(
         self, interaction: discord.Interaction, reason: str = "Geen reden opgegeven"
     ):
@@ -1332,6 +1335,7 @@ class Welcome(commands.Cog, name="welcome"):
         country="Land van het ambassadeverzoek",
         in_game_id="In-game ID of profiel-URL (https://app.warera.io/user/{id})",
     )
+    @has_privileged_role()
     async def embassy_approve(
         self,
         interaction: discord.Interaction,
