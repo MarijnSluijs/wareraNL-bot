@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 
+import discord
 from discord.ext import commands
 
 
@@ -36,6 +37,13 @@ class TaskCogBase(commands.Cog):
     @property
     def config(self) -> dict:
         return getattr(self.bot, "config", {})
+
+    def _embed_colour(self, key: str = "primary") -> discord.Colour:
+        raw = (self.config.get("colors") or {}).get(key, "0xffb612")
+        try:
+            return discord.Colour(int(str(raw), 16))
+        except Exception:
+            return discord.Colour.gold()
 
     async def _wait_for_services(self) -> None:
         """Block until the coordinator has finished initializing all services.

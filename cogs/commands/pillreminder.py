@@ -203,5 +203,15 @@ class PillReminderCog(commands.Cog, name="pill_reminder"):
 
 async def setup(bot) -> None:
     """Add the PillReminderCog to the bot."""
+    from services.subscription_registry import register
+
+    register(
+        name="pill",
+        emoji="💊",
+        label="Pill Reminder",
+        get_fn=lambda db, uid: db.get_pill_subscriber(uid),
+        remove_fn=lambda db, uid: db.remove_pill_reminder(uid),
+        detail_fn=lambda row: f"In-game gebruiker: **{row['in_game_user_id']}**",
+    )
     await bot.add_cog(PillReminderCog(bot))
 

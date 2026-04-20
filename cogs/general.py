@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import discord
 import discord.utils
 import pytz
+from datetime import datetime
 from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
@@ -464,7 +465,7 @@ class General(commands.Cog, name="general"):
                                 f"**Reden:** {reason}"
                             ),
                             color=discord.Color.red(),
-                            timestamp=discord.datetime.now(
+                            timestamp=datetime.now(
                                 pytz.timezone("Europe/Amsterdam")
                             ),
                         )
@@ -481,7 +482,7 @@ class General(commands.Cog, name="general"):
                             f"({member.name if member else 'Unknown'}) heeft de "
                             f"server verlaten**\n",
                             color=discord.Color.red(),
-                            timestamp=discord.datetime.now(
+                            timestamp=datetime.now(
                                 pytz.timezone("Europe/Amsterdam")
                             ),
                         )
@@ -526,7 +527,7 @@ class General(commands.Cog, name="general"):
             title="Gebruiker verbannen",
             description=description,
             color=discord.Color.dark_red(),
-            timestamp=discord.datetime.now(pytz.timezone("Europe/Amsterdam")),
+            timestamp=datetime.now(pytz.timezone("Europe/Amsterdam")),
         )
         try:
             await log_channel.send(embed=embed)
@@ -565,7 +566,7 @@ class General(commands.Cog, name="general"):
             title="Gebruiker unbanned",
             description=description,
             color=discord.Color.green(),
-            timestamp=discord.datetime.now(pytz.timezone("Europe/Amsterdam")),
+            timestamp=datetime.now(pytz.timezone("Europe/Amsterdam")),
         )
         try:
             await log_channel.send(embed=embed)
@@ -606,7 +607,7 @@ class General(commands.Cog, name="general"):
                         description=f"**:writing_hand: {before.mention if before else 'Unknown'} is bijgewerkt.** \n"
                         f"**Rollen:**\n{chr(10).join(role_changes) if role_changes else 'Geen veranderingen in rollen.'}",
                         color=discord.Color.orange(),
-                        timestamp=discord.datetime.now(
+                        timestamp=datetime.now(
                             pytz.timezone("Europe/Amsterdam")
                         ),
                     )

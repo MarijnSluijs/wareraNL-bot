@@ -9,6 +9,7 @@ import asyncio
 import logging
 import random
 import time
+from datetime import datetime, timezone
 
 import discord
 from discord import app_commands
@@ -85,8 +86,16 @@ class BunkersTasks(TaskCogBase, name="bunkers_tasks"):
             logger.warning("bunkers: role %d not found in guild %s", role_id, guild.id)
             return
 
+        embed = discord.Embed(
+            title="🏛️ Bunkers",
+            description="Ministers worden gevraagd de bunkers te controleren en bij te vullen.",
+            colour=self._embed_colour("primary"),
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.set_footer(text="WareraNL Bot")
         await channel.send(
-            f"{role.mention} Bunkers",
+            content=role.mention,
+            embed=embed,
             allowed_mentions=discord.AllowedMentions(roles=True),
         )
         logger.info("bunkers: sent ping to %s in #%s", role.name, channel.name)

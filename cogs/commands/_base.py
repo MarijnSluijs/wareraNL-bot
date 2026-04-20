@@ -78,8 +78,8 @@ class CommandCogBase(commands.Cog):
     def config(self) -> dict:
         return getattr(self.bot, "config", {})
 
-    def _embed_colour(self) -> discord.Colour:
-        raw = (self.config.get("colors") or {}).get("primary", "0xffb612")
+    def _embed_colour(self, key: str = "primary") -> discord.Colour:
+        raw = (self.config.get("colors") or {}).get(key, "0xffb612")
         try:
             return discord.Colour(int(str(raw), 16))
         except Exception:
@@ -93,11 +93,13 @@ class CommandCogBase(commands.Cog):
         )
         if note:
             desc += f"\n\n{note}"
-        return discord.Embed(
+        embed = discord.Embed(
             title="🔌 API Offline",
             description=desc,
-            colour=discord.Colour.orange(),
+            colour=self._embed_colour("warning"),
         )
+        embed.set_footer(text="WareraNL Bot")
+        return embed
 
     async def _send_api_offline(
         self,
