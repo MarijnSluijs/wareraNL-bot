@@ -727,9 +727,10 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
                 f"**0% productiebonus** in de regio waar het zich bevindt.\n\n"
                 "Overweeg je bedrijf te verplaatsen naar een regio met een bonus."
             ),
-            colour=discord.Colour.orange(),
+            colour=self._embed_colour("warning"),
             timestamp=datetime.now(timezone.utc),
         )
+        embed.set_footer(text="WareraNL Bot")
 
         try:
             await user.send(embed=embed)

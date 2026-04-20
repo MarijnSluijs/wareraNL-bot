@@ -20,6 +20,7 @@ from discord.ext.commands import Context
 from cogs.commands._base import CommandCogBase, country_autocomplete
 from services.country_utils import country_id as cid_of
 from services.country_utils import find_country
+from utils.checks import has_privileged_role
 
 logger = logging.getLogger("discord_bot")
 
@@ -44,6 +45,7 @@ class MonitorCog(CommandCogBase, name="monitor"):
     )
     @app_commands.autocomplete(land=country_autocomplete)
     @app_commands.choices(stop=[app_commands.Choice(name="Ja", value="ja")])
+    @has_privileged_role()
     async def monitor(
         self,
         ctx: Context,

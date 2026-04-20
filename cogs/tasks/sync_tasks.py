@@ -19,6 +19,7 @@ from discord import app_commands
 from discord.ext import tasks
 
 from cogs.tasks._base import TaskCogBase
+from utils.checks import has_privileged_role
 
 logger = logging.getLogger("discord_bot")
 
@@ -459,6 +460,7 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
         name="commandant-check",
         description="Sync de commandant rol op basis van MU API data.",
     )
+    @has_privileged_role()
     async def cmd_commandant_check(self, interaction: discord.Interaction) -> None:
         if not self._is_privileged(interaction):
             await interaction.response.send_message(
@@ -490,6 +492,7 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
         name="burgerschap-audit",
         description="Wekelijkse burgerschap audit — stuurt een DM rapport naar marijn.",
     )
+    @has_privileged_role()
     async def cmd_burgerschap_audit(self, interaction: discord.Interaction) -> None:
         if not self._is_privileged(interaction):
             await interaction.response.send_message(

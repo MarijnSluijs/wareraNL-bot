@@ -9,12 +9,14 @@ import asyncio
 import logging
 import random
 import time
+from datetime import datetime, timezone
 
 import discord
 from discord import app_commands
 from discord.ext import tasks
 
 from cogs.tasks._base import TaskCogBase
+from utils.checks import has_privileged_role
 
 logger = logging.getLogger("discord_bot")
 
@@ -85,8 +87,16 @@ class BunkersTasks(TaskCogBase, name="bunkers_tasks"):
             logger.warning("bunkers: role %d not found in guild %s", role_id, guild.id)
             return
 
+        embed = discord.Embed(
+            title="🏛️ Bunkers",
+            description="Ministers worden gevraagd de bunkers te controleren en bij te vullen.",
+            colour=self._embed_colour("primary"),
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.set_footer(text="WareraNL Bot")
         await channel.send(
-            f"{role.mention} Bunkers",
+            content=role.mention,
+            embed=embed,
             allowed_mentions=discord.AllowedMentions(roles=True),
         )
         logger.info("bunkers: sent ping to %s in #%s", role.name, channel.name)
@@ -95,6 +105,7 @@ class BunkersTasks(TaskCogBase, name="bunkers_tasks"):
         name="volgende_bunkers",
         description="Toon wanneer het volgende Bunkers-bericht wordt gestuurd",
     )
+    @has_privileged_role()
     async def volgende_bunkers(self, interaction: discord.Interaction) -> None:
         if self._paused:
             await interaction.response.send_message(
@@ -121,6 +132,7 @@ class BunkersTasks(TaskCogBase, name="bunkers_tasks"):
         description="Zet de automatische Bunkers-ping aan of uit (admin only)",
     )
     @app_commands.default_permissions(administrator=True)
+    @has_privileged_role()
     async def bunkers_toggle(self, interaction: discord.Interaction) -> None:
         self._paused = not self._paused
         if self._paused:

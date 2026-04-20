@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import discord
 import discord.utils
 import pytz
+from datetime import datetime
 from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
@@ -141,10 +142,58 @@ class General(commands.Cog, name="general"):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    # Emoji per cog name (lowercase) for the help embed headers.
+    _COG_EMOJI: dict[str, str] = {
+        "general": "ℹ️",
+        "owner": "👑",
+        "allies": "🤝",
+        "welcome": "👋",
+        "giveaways": "🎁",
+        "embeds": "🖼️",
+        "generate_embeds": "🖼️",
+        "bonuscog": "🏭",
+        "bedrijfswinstcog": "💰",
+        "bedrijvenbonuscheck": "💰",
+        "ecobuildcog": "🌱",
+        "geluk": "🍀",
+        "globalluck": "🌍",
+        "gevechten": "⚔️",
+        "gevechten cog": "⚔️",
+        "leaderboardcog": "🏆",
+        "monitorcog": "👁️",
+        "mu": "🪖",
+        "murequest": "🪖",
+        "mu_roles": "🪖",
+        "mudmgcog": "💥",
+        "niveauverdelingcog": "📊",
+        "paraatheadcog": "🛡️",
+        "peilcog": "🔄",
+        "pillenfabriekencog": "💊",
+        "pill_reminder": "💊",
+        "proxycog": "🔀",
+        "samenvattingcog": "📝",
+        "schadecog": "⚔️",
+        "scrapvaluecog": "♻️",
+        "spelerinactiviteitcog": "💤",
+        "transactiescog": "💳",
+        "users": "👥",
+        "weeklydmgcog": "📅",
+        "dukaten": "🪙",
+        "battles": "⚔️",
+        "general_role_selection": "🎭",
+        "roles": "🎭",
+        "article_scanner": "📰",
+        "reddit": "📰",
+        "service_coordinator": "⚙️",
+    }
+
     @commands.hybrid_command(
         name="help", description="Toon alle commands die de bot heeft geladen."
     )
-    async def help(self, context: Context) -> None:
+    @app_commands.describe(
+        privileged="Toon ook commands die speciale rechten vereisen (standaard verborgen)."
+    )
+    async def help(self, context: Context, privileged: bool = False) -> None:
         """Show all commands that the bot has loaded."""
         if context.interaction:
             await context.interaction.response.defer(ephemeral=False)
@@ -152,60 +201,94 @@ class General(commands.Cog, name="general"):
         fields: list[tuple[str, str]] = []
 
         for cog_name in self.bot.cogs:
-            if cog_name == "owner" and not await self.bot.is_owner(context.author):
-                continue
+            # Owner cog: only show to the bot owner, and only with privileged=True
+            if cog_name == "owner":
+                if not privileged or not await self.bot.is_owner(context.author):
+                    continue
 
             cog = self.bot.get_cog(cog_name.lower())
             if cog is None:
                 continue
 
-            cog_commands = cog.get_commands()
-            cog_commands.extend(cog.get_app_commands())
+            # Prefer the app_commands representation of hybrid commands (HybridAppCommand)
+            # so that checks set via @app_commands.check() / @has_privileged_role() are
+            # correctly detected. Deduplicate by name so hybrid commands don't appear twice.
+            seen: set[str] = set()
+            cog_commands: list = []
+            for cmd in cog.get_app_commands():
+                if cmd.name not in seen:
+                    cog_commands.append(cmd)
+                    seen.add(cmd.name)
+            for cmd in cog.get_commands():
+                if cmd.name not in seen:
+                    cog_commands.append(cmd)
+                    seen.add(cmd.name)
             data = []
             for command in cog_commands:
-                if not await self._is_visible_to_user(context, command):
+                is_priv = self._is_privileged(command)
+                # In privileged mode: show ONLY privileged commands.
+                # In normal mode: show ONLY non-privileged commands.
+                if is_priv != privileged:
                     continue
                 description = (command.description or "").partition("\n")[0]
-                data.append(f"{command.name} - {description}".strip(" -"))
+                name_str = f"`/{command.name}`"
+                line = f"{name_str} — {description}" if description else name_str
+                data.append(line)
 
             if data:
-                fields.append((cog_name.capitalize(), "```" + "\n".join(data) + "```"))
+                emoji = self._COG_EMOJI.get(cog_name.lower(), "▪️")
+                header = f"{emoji} {cog_name.capitalize()}"
+                fields.append((header, "\n".join(data)))
 
         if not fields:
             await context.send("Geen beschikbare commands gevonden.")
             return
 
+        testing: bool = getattr(self.bot, "testing", False)
+        rollen_channel_id = 1474454434368061513 if testing else 1456612515902390353
         # Discord limit: max 25 fields per embed
         for idx in range(0, len(fields), 25):
+            if privileged:
+                description = "Commando's die speciale rechten vereisen."
+            else:
+                description = (
+                    f"Bekijk <#{rollen_channel_id}> voor extra bot-functies zoals bounty pings.\n"
+                    "Gebruik `/help privileged:True` om uitsluitend beheercommands te tonen."
+                )
             embed = discord.Embed(
-                title="Help" if idx == 0 else "Help (vervolg)",
-                description="Lijst van beschikbare commands:",
+                title="🔒 Beheercommands" if privileged else "📖 Help",
+                description=description,
                 color=self.color,
             )
             for name, value in fields[idx : idx + 25]:
                 embed.add_field(name=name, value=value, inline=False)
             await context.send(embed=embed)
 
-    async def _is_visible_to_user(self, context: Context, command) -> bool:
-        """Check if a command is visible to the user in the given context."""
-        # Prefix / hybrid command objects
-        if isinstance(command, commands.Command):
-            try:
-                return await command.can_run(context)
-            except Exception:
-                return False
+    def _is_privileged(self, command) -> bool:
+        """Return True if the command requires special permissions.
 
-        # Slash / context-menu app commands
-        if isinstance(command, (app_commands.Command, app_commands.ContextMenu)):
-            interaction = context.interaction
-            if interaction is None:
-                # No interaction -> cannot reliably evaluate app_command checks
-                return True
-            try:
-                return await command._check_can_run(interaction)  # private API
-            except Exception:
-                return False
-
+        Checks (in order):
+        1. command.checks — populated by @app_commands.check() and @commands.check()
+        2. command.__discord_app_commands_checks__ — set by @app_commands.check() when
+           applied directly to a HybridCommand object (not the callback function)
+        3. callback.__commands_checks__ — set by @commands.check() on functions that
+           are wrapped as app_commands.Command (e.g. @has_mu_privilige on app commands)
+        4. callback.__discord_app_commands_checks__ — set by @app_commands.check() on
+           the raw callback before it was wrapped into a Command
+        5. default_member_permissions — set by @app_commands.default_permissions()
+        """
+        if getattr(command, "checks", None):
+            return True
+        # app_commands.check() applied to a HybridCommand stores here
+        if getattr(command, "__discord_app_commands_checks__", None):
+            return True
+        callback = getattr(command, "callback", None)
+        if callback and getattr(callback, "__commands_checks__", None):
+            return True
+        if callback and getattr(callback, "__discord_app_commands_checks__", None):
+            return True
+        if getattr(command, "default_member_permissions", None) is not None:
+            return True
         return False
 
     @commands.hybrid_command(
@@ -464,7 +547,7 @@ class General(commands.Cog, name="general"):
                                 f"**Reden:** {reason}"
                             ),
                             color=discord.Color.red(),
-                            timestamp=discord.datetime.now(
+                            timestamp=datetime.now(
                                 pytz.timezone("Europe/Amsterdam")
                             ),
                         )
@@ -481,7 +564,7 @@ class General(commands.Cog, name="general"):
                             f"({member.name if member else 'Unknown'}) heeft de "
                             f"server verlaten**\n",
                             color=discord.Color.red(),
-                            timestamp=discord.datetime.now(
+                            timestamp=datetime.now(
                                 pytz.timezone("Europe/Amsterdam")
                             ),
                         )
@@ -526,7 +609,7 @@ class General(commands.Cog, name="general"):
             title="Gebruiker verbannen",
             description=description,
             color=discord.Color.dark_red(),
-            timestamp=discord.datetime.now(pytz.timezone("Europe/Amsterdam")),
+            timestamp=datetime.now(pytz.timezone("Europe/Amsterdam")),
         )
         try:
             await log_channel.send(embed=embed)
@@ -565,7 +648,7 @@ class General(commands.Cog, name="general"):
             title="Gebruiker unbanned",
             description=description,
             color=discord.Color.green(),
-            timestamp=discord.datetime.now(pytz.timezone("Europe/Amsterdam")),
+            timestamp=datetime.now(pytz.timezone("Europe/Amsterdam")),
         )
         try:
             await log_channel.send(embed=embed)
@@ -606,7 +689,7 @@ class General(commands.Cog, name="general"):
                         description=f"**:writing_hand: {before.mention if before else 'Unknown'} is bijgewerkt.** \n"
                         f"**Rollen:**\n{chr(10).join(role_changes) if role_changes else 'Geen veranderingen in rollen.'}",
                         color=discord.Color.orange(),
-                        timestamp=discord.datetime.now(
+                        timestamp=datetime.now(
                             pytz.timezone("Europe/Amsterdam")
                         ),
                     )
