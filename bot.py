@@ -11,6 +11,7 @@ import platform
 import random
 import sys
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 
 import aiosqlite
@@ -370,6 +371,17 @@ class DiscordBot(commands.Bot):
         )
         if self.testing:
             asyncio.create_task(_run_terminal_loop(self))
+
+        guild_id: int = int(self.config.get("guild_id") or 0)
+        if guild_id:
+            guild = discord.Object(id=guild_id)
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+            self._last_sync_at = datetime.now(timezone.utc)
+            self._last_sync_scope = f"guild:{guild_id} (auto)"
+            self.logger.info("Slash commands synced to guild %d", guild_id)
+        else:
+            self.logger.warning("guild_id not set in config — skipping auto slash-command sync")
 
     async def on_disconnect(self) -> None:
         """
