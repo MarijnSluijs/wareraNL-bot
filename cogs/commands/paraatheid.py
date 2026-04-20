@@ -166,24 +166,34 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
 
         # ══ Mode 2: MU ═══════════════════════════════════════════════════
         if mu is not None:
-            try:
-                mu_name, players = await self._db.get_mu_readiness_players(
-                    mu, country_id=None
-                )
-            except Exception as exc:
-                await ctx.send(f"Databasefout: {exc}")
-                return
+            # Prefer live API (always has full current membership); fall back to DB cache.
+            mu_name: str | None = None
+            players: list[dict] = []
+            citizen_cache = getattr(self.bot, "_ext_citizen_cache", None)
+            if citizen_cache:
+                try:
+                    mu_name, players = await citizen_cache.fetch_mu_players_live(mu)
+                    if players:
+                        logger.info(
+                            "paraatheid mu: live fetch returned %d players for %r",
+                            len(players), mu_name,
+                        )
+                    else:
+                        logger.warning(
+                            "paraatheid mu: live fetch returned 0 players for %r, trying DB", mu
+                        )
+                except Exception:
+                    logger.exception("paraatheid mu: live fetch failed, falling back to DB")
 
-            # Fallback: live API fetch for MUs not in citizen_levels (e.g. foreign MUs)
             if mu_name is None or not players:
-                citizen_cache = getattr(self.bot, "_ext_citizen_cache", None)
-                if citizen_cache:
-                    try:
-                        mu_name, players = await citizen_cache.fetch_mu_players_live(mu)
-                    except Exception as exc:
-                        logger.exception("paraatheid mu: live fetch failed")
-                        await ctx.send(f"Databasefout: {exc}")
-                        return
+                logger.info("paraatheid mu: using DB fallback for %r", mu)
+                try:
+                    mu_name, players = await self._db.get_mu_readiness_players(
+                        mu, country_id=None
+                    )
+                except Exception as exc:
+                    await ctx.send(f"Databasefout: {exc}")
+                    return
 
             if mu_name is None or not players:
                 await ctx.send(f"Geen MU gevonden die overeenkomt met `{mu}`.")
