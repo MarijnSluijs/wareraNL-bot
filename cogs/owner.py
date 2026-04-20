@@ -15,6 +15,7 @@ Prefix commands (owner-only unless noted):
 
 import os
 import sys
+from datetime import datetime, timezone
 
 import discord
 from discord import app_commands
@@ -49,6 +50,8 @@ class Owner(commands.Cog, name="owner"):
 
         if scope == "global":
             await context.bot.tree.sync()
+            context.bot._last_sync_at = datetime.now(timezone.utc)
+            context.bot._last_sync_scope = "global (handmatig)"
             embed = discord.Embed(
                 description="Slash-commands zijn globaal gesynchroniseerd.",
                 color=self.color,
@@ -58,6 +61,8 @@ class Owner(commands.Cog, name="owner"):
         elif scope == "guild":
             context.bot.tree.copy_global_to(guild=context.guild)
             await context.bot.tree.sync(guild=context.guild)
+            context.bot._last_sync_at = datetime.now(timezone.utc)
+            context.bot._last_sync_scope = f"guild:{context.guild.id} (handmatig)"
             embed = discord.Embed(
                 description="Slash-commands zijn gesynchroniseerd in deze server.",
                 color=self.color,
@@ -68,6 +73,30 @@ class Owner(commands.Cog, name="owner"):
             description="De scope moet `global` of `guild` zijn.", color=self.color
         )
         await context.send(embed=embed)
+
+    @app_commands.command(
+        name="lastsync",
+        description="Toon wanneer de slash-commands voor het laatst gesynchroniseerd zijn.",
+    )
+    async def lastsync(self, interaction: discord.Interaction) -> None:
+        last_at: datetime | None = getattr(self.bot, "_last_sync_at", None)
+        last_scope: str = getattr(self.bot, "_last_sync_scope", "onbekend")
+
+        if last_at is None:
+            embed = discord.Embed(
+                description="De slash-commands zijn nog niet gesynchroniseerd in deze sessie.",
+                color=self.color,
+            )
+        else:
+            ts = int(last_at.timestamp())
+            embed = discord.Embed(
+                title="🔄 Laatste slash-command sync",
+                color=self.color,
+            )
+            embed.add_field(name="Tijdstip", value=f"<t:{ts}:F> (<t:{ts}:R>)", inline=False)
+            embed.add_field(name="Scope", value=last_scope, inline=False)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @commands.command(
         name="unsync",
