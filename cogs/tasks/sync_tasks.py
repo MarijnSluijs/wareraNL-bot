@@ -424,18 +424,31 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
         if current:
             chunks.append(current)
 
-        for recipient_id in _AUDIT_DM_RECIPIENTS:
-            try:
-                user = await self.bot.fetch_user(recipient_id)
-                for chunk in chunks:
-                    await user.send(chunk)
-                logger.info(
-                    "citizenship_audit: DM sent to %s (%d sections)", user, len(chunks)
+        # Send to the audit-log channel instead of DMs
+        channel_id = self.bot.config.get("channels", {}).get("audit_log")
+        if not channel_id:
+            # fallback to testing-area on test servers
+            channel_id = self.bot.config.get("channels", {}).get("testing-area")
+        if channel_id:
+            channel = self.bot.get_channel(int(channel_id))
+            if channel is not None:
+                try:
+                    for chunk in chunks:
+                        await channel.send(chunk)
+                    logger.info(
+                        "citizenship_audit: report sent to channel %d (%d sections)",
+                        int(channel_id), len(chunks),
+                    )
+                except Exception:
+                    logger.exception(
+                        "citizenship_audit: failed to send to channel %d", int(channel_id)
+                    )
+            else:
+                logger.warning(
+                    "citizenship_audit: audit_log channel %d not found", int(channel_id)
                 )
-            except Exception:
-                logger.exception(
-                    "citizenship_audit: failed to DM user %d", recipient_id
-                )
+        else:
+            logger.warning("citizenship_audit: no audit_log channel configured")
 
     # ════════════════════════════════════════════════════════════════════════
     # Slash commands — manual triggers
@@ -490,7 +503,7 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
 
     @app_commands.command(
         name="burgerschap-audit",
-        description="Wekelijkse burgerschap audit — stuurt een DM rapport naar marijn.",
+        description="Wekelijkse burgerschap audit — post rapport in #audit-log.",
     )
     @has_privileged_role()
     async def cmd_burgerschap_audit(self, interaction: discord.Interaction) -> None:
@@ -509,7 +522,7 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
             await interaction.followup.send(f"❌ Fout: {exc}", ephemeral=True)
             return
         await interaction.followup.send(
-            "✅ Burgerschap audit klaar — rapport verstuurd naar marijn.",
+            "✅ Burgerschap audit klaar — rapport gepost in #audit-log.",
             ephemeral=True,
         )
         if self._db:

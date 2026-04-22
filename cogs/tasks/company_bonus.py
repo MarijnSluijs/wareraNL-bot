@@ -758,7 +758,9 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
         self, discord_user_id: str, guild_id: str, embed: discord.Embed
     ) -> None:
         """Fallback: ping the user in the bot's configured notification channel."""
-        channel_id = self.config.get("channels", {}).get("bot_mededelingen")
+        channels = self.config.get("channels", {})
+        # Use bot_commands as fallback; fall back to testing-area on test servers
+        channel_id = channels.get("bot_commands") or channels.get("testing-area")
         if not channel_id:
             return
         channel = self.bot.get_channel(int(channel_id))
