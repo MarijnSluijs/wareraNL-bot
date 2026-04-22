@@ -20,6 +20,7 @@ import traceback
 import discord
 from discord import app_commands
 from discord.ext import commands
+from cogs.commands._base import country_autocomplete
 from utils.checks import has_privileged_role
 
 logger = logging.getLogger("discord_bot")
@@ -401,7 +402,7 @@ async def create_verification_channel(
     embed.add_field(
         name="Instructies voor Moderators",
         value=(
-            "Gebruik `/approve` om dit verzoek goed te keuren\n"
+            f"Gebruik `{'/approve' if not request_type=='embassy' else '/embassyapprove'}` om dit verzoek goed te keuren\n"
             "Gebruik `/deny` om dit verzoek af te wijzen"
         ),
         inline=False,
@@ -572,20 +573,30 @@ class Welcome(commands.Cog, name="welcome"):
 
         raw_ids: list[int] = []
 
-        # Backward-compatible primary key.
-        primary = channels_cfg.get("embassy_category")
-        if primary:
-            raw_ids.append(primary)
-
-        # Optional explicit list support.
+        # Prefer explicit ordered list when available.
         explicit_list = channels_cfg.get("embassy_categories")
-        if isinstance(explicit_list, list):
+        if isinstance(explicit_list, list) and explicit_list:
             raw_ids.extend(explicit_list)
+        else:
+            # Backward-compatible single key.
+            primary = channels_cfg.get("embassy_category")
+            if primary:
+                raw_ids.append(primary)
 
-        # Support numbered keys such as embassy_category_2, embassy_category_3, etc.
-        for key, value in channels_cfg.items():
-            if key.startswith("embassy_category_"):
-                raw_ids.append(value)
+            # Support numbered keys such as embassy_category_2, embassy_category_3, etc.
+            numbered: list[tuple[int, int]] = []
+            for key, value in channels_cfg.items():
+                if not key.startswith("embassy_category_"):
+                    continue
+                suffix = key.removeprefix("embassy_category_")
+                try:
+                    order = int(suffix)
+                    category_id = int(value)
+                except (TypeError, ValueError):
+                    continue
+                numbered.append((order, category_id))
+            numbered.sort(key=lambda item: item[0])
+            raw_ids.extend(category_id for _order, category_id in numbered)
 
         categories: list[discord.CategoryChannel] = []
         seen: set[int] = set()
@@ -603,6 +614,19 @@ class Welcome(commands.Cog, name="welcome"):
                 categories.append(category)
 
         return categories
+
+    @staticmethod
+    def _embassy_category_bucket_index(country: str) -> int:
+        """Map country to one of three buckets: A-I, J-R, S-Z."""
+        match = re.search(r"[a-z]", country.lower())
+        if not match:
+            return 2
+        first = match.group(0)
+        if first <= "i":
+            return 0
+        if first <= "r":
+            return 1
+        return 2
 
     @staticmethod
     def _normalize_ingame_id(in_game_id: str) -> str:
@@ -1335,6 +1359,7 @@ class Welcome(commands.Cog, name="welcome"):
         country="Land van het ambassadeverzoek",
         in_game_id="In-game ID of profiel-URL (https://app.warera.io/user/{id})",
     )
+    @app_commands.autocomplete(country=country_autocomplete)
     @has_privileged_role()
     async def embassy_approve(
         self,
@@ -1380,6 +1405,19 @@ class Welcome(commands.Cog, name="welcome"):
             vice_president_role = interaction.guild.get_role(
                 self.config["roles"]["vice_president"]
             )
+
+            if any(role is None for role in [minister_role, president_role, vice_president_role]):
+                await reply(
+                    "One or more required roles (government, president, vice president) are not configured correctly.",
+                    ephemeral=True,
+                )
+                self.bot.logger.error(
+                    "Required roles missing in config: government=%s, president=%s, vice_president=%s",
+                    minister_role,
+                    president_role,
+                    vice_president_role,
+                )
+                return
 
             # Check if the user has permission to moderate
             mod_roles = [
@@ -1450,6 +1488,14 @@ class Welcome(commands.Cog, name="welcome"):
                 interaction.guild.get_role(embassy_role_id) if embassy_role_id else None
             )
 
+            if not embassy_role:
+                await reply(
+                    "Embassy role not found in the server. Please check the bot configuration.",
+                    ephemeral=True,
+                )
+                self.bot.logger.error("Embassy role not found with ID: %s", embassy_role_id)
+                return
+
             try:
                 await member.add_roles(embassy_role)
             except discord.Forbidden:
@@ -1498,16 +1544,17 @@ class Welcome(commands.Cog, name="welcome"):
                         for name in self._embassy_channel_candidates(country)
                         if name.endswith("-embassy")
                     )
-                    # Choose an embassy category with available capacity.
+                    # Route by country alphabet bucket using configured order:
+                    # A-I => index 0, J-R => index 1, S-Z => index 2.
                     category = None
                     embassy_categories = self._resolve_embassy_categories(
                         interaction.guild
                     )
-                    for configured_category in embassy_categories:
-                        # Discord allows up to 50 channels in a category.
-                        if len(configured_category.channels) < 50:
-                            category = configured_category
-                            break
+                    if embassy_categories:
+                        target_index = self._embassy_category_bucket_index(country)
+                        category = embassy_categories[
+                            min(target_index, len(embassy_categories) - 1)
+                        ]
 
                     if category is None:
                         # Fallback to verification category for older configs.

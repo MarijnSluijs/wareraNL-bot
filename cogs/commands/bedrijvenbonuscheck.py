@@ -419,4 +419,30 @@ class BedrijvenBonusCheckCog(CommandCogBase, name="bedrijven_bonus_check"):
 
 
 async def setup(bot) -> None:
+    from services.subscription_registry import register
+
+    async def _remove_bonus(db, uid: str) -> None:
+        await db.remove_company_bonus_watcher(uid)
+        await db.delete_all_alerts_for_user(uid)
+
+    async def _remove_move_advice(db, uid: str) -> None:
+        await db.remove_company_move_advice_watcher(uid)
+        await db.delete_all_move_advice_alerts_for_user(uid)
+
+    register(
+        name="bonus",
+        emoji="⚠️",
+        label="Bedrijfsbonus Melding",
+        get_fn=lambda db, uid: db.get_company_bonus_watcher(uid),
+        remove_fn=_remove_bonus,
+        detail_fn=lambda row: f"In-game gebruiker: **{row['game_username'] or '—'}**",
+    )
+    register(
+        name="verhuisadvies",
+        emoji="📍",
+        label="Verhuisadvies",
+        get_fn=lambda db, uid: db.get_company_move_advice_watcher(uid),
+        remove_fn=_remove_move_advice,
+        detail_fn=lambda row: f"In-game gebruiker: **{row['game_username'] or '—'}**",
+    )
     await bot.add_cog(BedrijvenBonusCheckCog(bot))

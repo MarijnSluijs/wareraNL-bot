@@ -1,103 +1,111 @@
 {
   "title": "MU Lidmaatschap",
   "description": "Geef aan bij welke MU je zit. Als je niet in een Nederlandse MU zit, kies dan voor 'Overige MU'. Wil je in de toekomst een MU-lid worden? Kies dan voor 'Wachtlijst' zodat we je kunnen pinggen als er een plek vrijkomt!",
-  "buttons": [
+  "buttons": [],
+  "button_message_id": 1496028270091833425,
+  "embeds": [
     {
-      "label": "De Heeren XVII",
-      "role_id": 1475464742209327204,
-      "style": "primary",
-      "row": 0
-    },
-    {
-      "label": "Korps Commando's",
-      "role_id": 1475465823685443604,
-      "style": "primary",
-      "row": 0
-    },
-    {
-      "label": "Korps Mariniers",
-      "role_id": 1475465021491380298,
-      "style": "primary",
-      "row": 0
-    },
-    {
-      "label": "De Nederlandse Bank",
-      "role_id": 1475470788957175943,
-      "style": "primary",
-      "row": 0
-    },
-    {
-      "label": "Duytenberg",
-      "role_id": 1478029996764168324,
-      "style": "primary",
-      "row": 0
-    },
-    {
-      "label": "EBITDA Compagnie",
-      "role_id": 1478029998085374242,
-      "style": "primary",
-      "row": 1
-    },
-    {
-      "label": "Baronie Wachteenheid",
-      "role_id": 1480300807424442511,
-      "style": "primary",
-      "row": 1
-    },
-    {
-      "label": "MIVD",
-      "role_id": 1478037356442423336,
-      "style": "primary",
-      "row": 1
-    },
-    {
-      "label": "Oranje Huurlingen",
-      "role_id": 1478030000211886174,
-      "style": "primary",
-      "row": 1
-    },
-    {
-      "label": "Reg. Genietroepen",
-      "role_id": 1478030001541742715,
-      "style": "primary",
-      "row": 1
-    },
-    {
-      "label": "Regiment Huzaren",
-      "role_id": 1475471406186889236,
-      "style": "primary",
-      "row": 2
-    },
-    {
-      "label": "Regiment van Oranje",
-      "role_id": 1478030002107973909,
-      "style": "primary",
-      "row": 2
-    },
-    {
-      "label": "The Flying Dutchman",
-      "role_id": 1475466801730158707,
-      "style": "primary",
-      "row": 2
-    },
-    {
-      "label": "Van Speijk Eskader",
-      "role_id": 1480300332679692388,
-      "style": "primary",
-      "row": 2
-    },
-    {
-      "label": "Overige MU",
-      "role_id": 1475466532581539931,
-      "style": "secondary",
-      "row": 3
-    },
-    {
-      "label": "Wachtlijst",
-      "role_id": 1475473494627192873,
-      "style": "secondary",
-      "row": 3
+      "buttons": [
+        {
+          "label": "De Heeren XVII",
+          "role_id": 1475464742209327204,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Korps Commando's",
+          "role_id": 1475465823685443604,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Korps Mariniers",
+          "role_id": 1475465021491380298,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "De Munterij",
+          "role_id": 1478029998085374242,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "De Nederlandse Bank",
+          "role_id": 1475470788957175943,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Duytenberg",
+          "role_id": 1478029996764168324,
+          "style": "primary",
+          "row": 1
+        },
+        {
+          "label": "Baronie Wachteenheid",
+          "role_id": 1480300807424442511,
+          "style": "primary",
+          "row": 1
+        },
+        {
+          "label": "MIVD",
+          "role_id": 1478037356442423336,
+          "style": "primary",
+          "row": 1
+        },
+        {
+          "label": "Oranje Huurlingen",
+          "role_id": 1478030000211886174,
+          "style": "primary",
+          "row": 1
+        },
+        {
+          "label": "Reg. Genietroepen",
+          "role_id": 1478030001541742715,
+          "style": "primary",
+          "row": 1
+        },
+        {
+          "label": "Regiment Huzaren",
+          "role_id": 1475471406186889236,
+          "style": "primary",
+          "row": 2
+        },
+        {
+          "label": "Regiment van Oranje",
+          "role_id": 1478030002107973909,
+          "style": "primary",
+          "row": 2
+        },
+        {
+          "label": "The Flying Dutchman",
+          "role_id": 1475466801730158707,
+          "style": "primary",
+          "row": 2
+        },
+        {
+          "label": "Van Speijk Eskader",
+          "role_id": 1480300332679692388,
+          "style": "primary",
+          "row": 2
+        },
+        {
+          "label": "Overige MU",
+          "role_id": 1475466532581539931,
+          "style": "secondary",
+          "row": 2
+        },
+        {
+          "label": "Wachtlijst",
+          "role_id": 1475473494627192873,
+          "style": "secondary",
+          "row": 3
+        }
+      ]
     }
   ],
-  "button_message_id": 1486325829305634958
+  "button_message_ids": [
+    1496028270091833425
+  ]
 }

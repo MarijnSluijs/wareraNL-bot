@@ -3,7 +3,8 @@ set -e
 
 cd /home/warera/staging/wareraNL-bot
 
-git pull origin staging
+git fetch origin staging
+git reset --hard origin/staging
 ./.venv/bin/pip install -q -e .
 
 sudo systemctl restart wareranl-bot-staging
