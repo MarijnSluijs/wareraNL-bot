@@ -88,8 +88,8 @@ class General(commands.Cog, name="general"):
                 self.bot.logger.error(
                     f"Failed to add reaction to message {message.id}: {e}"
                 )
-        if "app.warera.io" not in content:
-            return
+        #if "app.warera.io" not in content:
+        #    return
         try:
             await message.edit(suppress=True)
             self.bot.logger.info(

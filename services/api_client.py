@@ -224,6 +224,9 @@ class APIClient:
                         # otherwise raise the status error
                         resp.raise_for_status()
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                # 4xx errors are definitive (not transient) — don't retry them
+                if isinstance(e, aiohttp.ClientResponseError) and 400 <= e.status < 500:
+                    raise
                 logger.warning(
                     "API request error %s - attempt %d/%d",
                     str(e),
