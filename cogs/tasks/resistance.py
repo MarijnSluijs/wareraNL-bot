@@ -123,16 +123,36 @@ class ResistanceCog(TaskCogBase, name="resistance"):
             color=discord.Color.orange(),
             timestamp=datetime.now(timezone.utc),
         )
-        for rid, rname, orig, res, maxr in current:
-            stored = await self._db.get_resistance_state(rid)
-            old_val: float | None = stored["resistance_value"] if stored else None
-            delta = (res - old_val) if old_val is not None else None
+
+        # Group regions by original-owner country, sorted by resistance % descending
+        # within each group.  Groups themselves sorted alphabetically by country name.
+        groups: dict[str, list[tuple]] = {}  # orig_name → [(rid, rname, orig, res, maxr)]
+        for row in current:
+            rid, rname, orig_name, res, maxr = row
+            groups.setdefault(orig_name, []).append(row)
+
+        for country_name_key in sorted(groups):
+            rows_in_group = sorted(
+                groups[country_name_key],
+                key=lambda r: (r[3] / r[4]) if r[4] else 0,
+                reverse=True,
+            )
+            # Header field for this country group
             embed.add_field(
-                name=f"{rname} ({orig})",
-                value=_region_field(res, maxr, delta),
+                name=f"🗺️ {country_name_key}",
+                value=f"*{len(rows_in_group)} regio('s)*",
                 inline=False,
             )
-            await self._db.upsert_resistance_state(rid, rname, orig, res, maxr, now_str)
+            for rid, rname, orig, res, maxr in rows_in_group:
+                stored = await self._db.get_resistance_state(rid)
+                old_val: float | None = stored["resistance_value"] if stored else None
+                delta = (res - old_val) if old_val is not None else None
+                embed.add_field(
+                    name=rname,
+                    value=_region_field(res, maxr, delta),
+                    inline=False,
+                )
+                await self._db.upsert_resistance_state(rid, rname, orig, res, maxr, now_str)
 
         embed.set_footer(text="WarEra — verzetspeiling")
         return embed
