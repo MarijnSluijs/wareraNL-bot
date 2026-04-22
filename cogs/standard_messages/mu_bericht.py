@@ -1,4 +1,4 @@
-"""Manage and post the Military Units list and MU role buttons."""
+"""Manage and post the Military Units list."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
 
-from cogs.role_selection.roles import RoleToggleView, load_roles_template, mu_roles_path
 from cogs.standard_messages.generate import GenerateEmbeds
 
 
@@ -80,7 +79,6 @@ class MUs(GenerateEmbeds, name="mus"):
         "Eco": discord.Color.from_rgb(46, 204, 113),
         "Standaard": discord.Color.from_rgb(52, 152, 219),
     }
-    _MAX_BUTTONS_PER_MESSAGE = 25
 
     def __init__(self, bot) -> None:
         super().__init__(bot)
@@ -139,22 +137,6 @@ class MUs(GenerateEmbeds, name="mus"):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self.json_data, f, indent=4, ensure_ascii=False)
 
-    def _chunk_buttons(self, buttons: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
-        """Split button definitions into Discord-safe message chunks and normalize row indexes per chunk."""
-        if not buttons:
-            return []
-
-        chunks: list[list[dict[str, Any]]] = []
-        for start in range(0, len(buttons), self._MAX_BUTTONS_PER_MESSAGE):
-            page = buttons[start : start + self._MAX_BUTTONS_PER_MESSAGE]
-            page_buttons: list[dict[str, Any]] = []
-            for idx, btn in enumerate(page):
-                item = dict(btn)
-                item["row"] = idx // 5
-                page_buttons.append(item)
-            chunks.append(page_buttons)
-        return chunks
-
     async def _mu_channel(self, fallback: discord.TextChannel) -> discord.TextChannel:
         """Return the configured military_unit channel, or fallback if not found."""
         ch_id = self.bot.config.get("channels", {}).get("military_unit")
@@ -204,7 +186,7 @@ class MUs(GenerateEmbeds, name="mus"):
             await context.send(embed=embed)
 
     async def _repost_mu_list(self, channel: discord.TextChannel) -> None:
-        """Delete previous MU posts, refresh MU info, and post embeds + dynamic buttons."""
+        """Delete previous MU posts, refresh MU info, and post embeds."""
         path = mus_path(getattr(self.bot, "testing", False))
 
         mu_tasks = self.bot.get_cog("mu_tasks")
@@ -278,153 +260,6 @@ class MUs(GenerateEmbeds, name="mus"):
                 new_ids.append(msg.id)
             except Exception as exc:
                 self.bot.logger.error("Error sending embed for MU %s: %s", mu_id, exc)
-
-        try:
-            roles_path = mu_roles_path(getattr(self.bot, "testing", False))
-            roles_data = load_roles_template(roles_path)
-            all_buttons = roles_data.get("buttons", [])
-
-            pinned_labels = {"Overige MU", "Wachtlijst"}
-            pinned_role_defs = [
-                {"label": "Overige MU", "style": "secondary"},
-                {"label": "Wachtlijst", "style": "secondary"},
-            ]
-
-            secondary_role_id = next(
-                (
-                    b.get("secondary_role_id")
-                    for b in all_buttons
-                    if b.get("secondary_role_id")
-                ),
-                None,
-            )
-
-            # Ensure pinned roles exist and have button entries
-            for pdef in pinned_role_defs:
-                existing_btn = next(
-                    (b for b in all_buttons if b.get("label") == pdef["label"]), None
-                )
-                role = None
-                if existing_btn and existing_btn.get("role_id"):
-                    role = channel.guild.get_role(int(existing_btn["role_id"]))
-
-                if role is None:
-                    role = discord.utils.get(channel.guild.roles, name=pdef["label"])
-                if role is None:
-                    try:
-                        role = await channel.guild.create_role(
-                            name=pdef["label"],
-                            color=discord.Color.orange(),
-                            mentionable=True,
-                            reason="Automatisch aangemaakt door bot (vaste MU-knop)",
-                        )
-                    except Exception as exc:
-                        self.bot.logger.error(
-                            "Failed to create pinned role %s: %s", pdef["label"], exc
-                        )
-                        continue
-
-                if existing_btn:
-                    existing_btn["role_id"] = role.id
-                else:
-                    item = {
-                        "label": pdef["label"],
-                        "role_id": role.id,
-                        "style": pdef["style"],
-                        "row": 0,
-                    }
-                    if secondary_role_id:
-                        item["secondary_role_id"] = secondary_role_id
-                    all_buttons.append(item)
-
-            mu_buttons: list[dict[str, Any]] = []
-            for entry in entries_sorted:
-                mu_id = entry["id"]
-                mu_name = str(entry.get("name") or f"MU {mu_id[:8]}")
-                role_id = int(entry.get("role_id") or 0)
-
-                role = channel.guild.get_role(role_id) if role_id else None
-                if role is None:
-                    role = discord.utils.get(channel.guild.roles, name=mu_name)
-                if role is None:
-                    try:
-                        role = await channel.guild.create_role(
-                            name=mu_name,
-                            color=discord.Color.orange(),
-                            mentionable=False,
-                            reason="Automatisch aangemaakt door MU synchronisatie",
-                        )
-                    except Exception as exc:
-                        self.bot.logger.error(
-                            "Failed to create role for MU %s (%s): %s",
-                            mu_name,
-                            mu_id,
-                            exc,
-                        )
-                        continue
-
-                if role.name != mu_name:
-                    try:
-                        await role.edit(
-                            name=mu_name, reason="MU naam gesynchroniseerd via API"
-                        )
-                    except Exception as exc:
-                        self.bot.logger.warning(
-                            "Failed to rename MU role %s to %s: %s",
-                            role.name,
-                            mu_name,
-                            exc,
-                        )
-
-                entry["role_id"] = role.id
-
-                button = {
-                    "label": mu_name,
-                    "role_id": role.id,
-                    "style": "primary",
-                }
-                if secondary_role_id:
-                    button["secondary_role_id"] = secondary_role_id
-                mu_buttons.append(button)
-
-            pinned_buttons = [b for b in all_buttons if b.get("label") in pinned_labels]
-            buttons = mu_buttons + [dict(b) for b in pinned_buttons]
-            button_chunks = self._chunk_buttons(buttons)
-
-            roles_data["buttons"] = []
-            roles_data["embeds"] = [{"buttons": chunk} for chunk in button_chunks]
-            with open(roles_path, "w", encoding="utf-8") as f:
-                json.dump(roles_data, f, indent=2, ensure_ascii=False)
-
-            color = int(
-                self.bot.config.get("colors", {}).get("primary", "0x154273"), 16
-            )
-            message_ids: list[int] = []
-            total_pages = len(button_chunks)
-            for page_idx, chunk in enumerate(button_chunks, start=1):
-                title = roles_data.get("title", "MU Lidmaatschap")
-                description = roles_data.get("description", "")
-                if page_idx > 1:
-                    title = f"{title} ({page_idx}/{total_pages})"
-                    description = "Vervolg van de MU-knoppen."
-
-                roles_embed = discord.Embed(
-                    title=title,
-                    description=description,
-                    color=color,
-                )
-                btn_msg = await channel.send(
-                    embed=roles_embed,
-                    view=RoleToggleView(chunk, exclusive=True),
-                )
-                message_ids.append(btn_msg.id)
-
-            roles_data["button_message_id"] = message_ids[0] if message_ids else None
-            roles_data["button_message_ids"] = message_ids
-            with open(roles_path, "w", encoding="utf-8") as f:
-                json.dump(roles_data, f, indent=2, ensure_ascii=False)
-        except Exception as exc:
-            self.bot.logger.error("Error sending role buttons: %s", exc)
 
         self.json_data = self.json_data or {}
         self.json_data["embeds"] = entries_sorted

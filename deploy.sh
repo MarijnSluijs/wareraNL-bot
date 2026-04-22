@@ -3,7 +3,8 @@ set -e
 
 cd /home/warera/live/wareraNL-bot
 
-git pull origin main
+git fetch origin main
+git reset --hard origin/main
 ./.venv/bin/pip install -e .
 
 sudo systemctl restart wareranl-bot

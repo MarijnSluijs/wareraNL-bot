@@ -156,9 +156,10 @@ class PillReminderTask(TaskCogBase, name="pill_reminder_task"):
                     f"(nog ~{minutes_left} minuten).\n\n"
                     "Zorg dat je klaar staat om op tijd te battlen!"
                 ),
-                colour=discord.Colour.orange(),
+                colour=self._embed_colour("warning"),
+                timestamp=datetime.now(timezone.utc),
             )
-            embed.set_footer(text="WarEra NL Bot — pill herinnering")
+            embed.set_footer(text="WareraNL Bot — pill herinnering")
 
             try:
                 await user.send(embed=embed)

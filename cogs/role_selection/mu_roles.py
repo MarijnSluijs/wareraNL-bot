@@ -16,7 +16,6 @@ from .roles import (
     RoleToggleView,
     load_roles_template,
     mu_roles_path,
-    post_or_edit_buttons,
 )
 
 
@@ -147,17 +146,17 @@ class MuRoles(commands.Cog, name="mu_roles"):
                 )
                 return
 
-        path = mu_roles_path(getattr(self.bot, "testing", False))
-        self.template = load_roles_template(path)
-        buttons = self.template.get("buttons", [])
-        if not buttons:
-            await interaction.followup.send(
-                "Geen knoppen geconfigureerd in de MU-template.", ephemeral=True
-            )
-            return
+        # path = mu_roles_path(getattr(self.bot, "testing", False))
+        # self.template = load_roles_template(path)
+        # buttons = self.template.get("buttons", [])
+        # if not buttons:
+        #     await interaction.followup.send(
+        #         "Geen knoppen geconfigureerd in de MU-template.", ephemeral=True
+        #     )
+        #     return
 
-        color = int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16)
-        await post_or_edit_buttons(target_channel, self.template, path, color)
+        # color = int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16)
+        # await post_or_edit_buttons(target_channel, self.template, path, color)
         await interaction.followup.send(
             f"✅ MU-rolknoppen gepost in {target_channel.mention}.", ephemeral=True
         )

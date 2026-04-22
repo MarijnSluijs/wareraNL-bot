@@ -196,16 +196,16 @@ class MonitorTask(TaskCogBase, name="monitor_tasks"):
             )
             return
 
-        now_str = datetime.now(timezone.utc).strftime("%d-%m-%Y %H:%M UTC")
         embed = discord.Embed(
             title=f"📊 Paraatheidsupdate — {country_name}",
             description="\n".join(change_lines),
-            colour=discord.Colour.gold(),
+            colour=self._embed_colour("primary"),
+            timestamp=datetime.now(timezone.utc),
         )
         embed.add_field(
             name="⚔️ Totaal paraat (lvl 21+)", value=overall_str, inline=False
         )
-        embed.set_footer(text=f"Alleen wijzigingen op niveau 21+  •  {now_str}")
+        embed.set_footer(text="Alleen wijzigingen op niveau 21+")
 
         try:
             await channel.send(embed=embed)
