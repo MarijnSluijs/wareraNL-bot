@@ -12,6 +12,7 @@ api_explorer/
 api_dump.json
 scripts/
 TODO.md
+map-timeline/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
