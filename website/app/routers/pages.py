@@ -114,19 +114,21 @@ async def automation_page(request: Request):
 
 
 @router.get("/system/logs")
-async def logs_page(request: Request, level: str = "ALL"):
+async def logs_page(request: Request, level: str = "ALL", van: str = "", tot: str = ""):
     user = get_session_user_or_redirect(request)
     if isinstance(user, RedirectResponse):
         return user
 
-    logs = await request.app.state.data_service.logs(level=level, limit=250)
+    logs = await request.app.state.data_service.logs(level=level, limit=250, van=van, tot=tot)
     await request.app.state.data_service.audit(
-        str(user["id"]), "page.view", {"page": "system.logs", "level": level}
+        str(user["id"]),
+        "page.view",
+        {"page": "system.logs", "level": level, "van": van, "tot": tot},
     )
     return request.app.state.templates.TemplateResponse(
         request,
         "logs.html",
-        _ctx(user, section="system", logs=logs, level=level),
+        _ctx(user, section="system", logs=logs, level=level, van=van, tot=tot),
     )
 
 

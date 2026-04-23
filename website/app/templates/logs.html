@@ -10,6 +10,8 @@
         <option value='{{ opt }}' {{ 'selected' if opt == level else '' }}>{{ opt }}</option>
         {% endfor %}
       </select>
+      <input type='datetime-local' name='van' value='{{ van }}' aria-label='Van' />
+      <input type='datetime-local' name='tot' value='{{ tot }}' aria-label='Tot' />
       <button class='btn' type='submit'>Filter</button>
     </form>
     <div class='table-wrap'>

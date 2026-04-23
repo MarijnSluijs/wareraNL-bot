@@ -36,6 +36,25 @@ class PanelDataService:
                 continue
         return None
 
+    @staticmethod
+    def _filter_dt(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        cleaned = value.strip()
+        for fmt in (
+            "%Y-%m-%dT%H:%M",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d %H:%M:%S",
+            "%d-%m-%Y %H:%M",
+            "%d-%m-%Y %H:%M:%S",
+        ):
+            try:
+                return datetime.strptime(cleaned, fmt).replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+        return None
+
     def _tail_lines(self, max_lines: int = 5000, chunk_size: int = 8192) -> list[str]:
         if not self.log_path.exists():
             return []
@@ -230,18 +249,34 @@ class PanelDataService:
 
     async def users(self, search: str = "", limit: int = 100) -> list[dict[str, Any]]:
         query = """
-                SELECT i.discord_user_id, i.in_game_user_id, i.nationality, i.updated_at,
-                       c.citizen_name, c.mu_name, c.last_login_at
-                FROM identity_links i
-                         LEFT JOIN citizen_levels c ON c.user_id = i.in_game_user_id
-                WHERE (? = '' OR i.discord_user_id LIKE ? OR c.citizen_name LIKE ? OR i.in_game_user_id LIKE ?)
-                ORDER BY i.updated_at DESC
+                SELECT i.discord_user_id,
+                       c.user_id AS in_game_user_id,
+                       i.nationality,
+                       COALESCE(i.updated_at, c.updated_at) AS updated_at,
+                       c.citizen_name,
+                       c.country_id,
+                       c.level,
+                       c.skill_mode,
+                       c.mu_name,
+                       c.last_login_at
+                FROM citizen_levels c
+                         LEFT JOIN identity_links i ON i.in_game_user_id = c.user_id
+                WHERE (
+                    ? = ''
+                    OR i.discord_user_id LIKE ?
+                    OR c.citizen_name LIKE ?
+                    OR c.user_id LIKE ?
+                    OR c.mu_name LIKE ?
+                )
+                ORDER BY c.updated_at DESC
                     LIMIT ? \
                 """
         like = f"%{search}%"
         conn = await self._connect()
         try:
-            rows = await (await conn.execute(query, (search, like, like, like, limit))).fetchall()
+            rows = await (
+                await conn.execute(query, (search, like, like, like, like, limit))
+            ).fetchall()
         finally:
             await conn.close()
         return [dict(row) for row in rows]
@@ -281,11 +316,32 @@ class PanelDataService:
             },
         }
 
-    async def logs(self, level: str = "ALL", limit: int = 200) -> list[dict[str, Any]]:
+    async def logs(
+        self,
+        level: str = "ALL",
+        limit: int = 200,
+        van: str | None = None,
+        tot: str | None = None,
+    ) -> list[dict[str, Any]]:
         level = level.upper()
-        records = self._parse_logs(max_lines=max(1000, limit * 20))
+        start_at = self._filter_dt(van)
+        end_at = self._filter_dt(tot)
+        max_lines = 100000 if start_at or end_at else max(1000, limit * 20)
+        records = self._parse_logs(max_lines=max_lines)
         if level != "ALL":
             records = [r for r in records if r["level"] == level]
+        if start_at or end_at:
+            filtered = []
+            for record in records:
+                timestamp = self._safe_dt(record["timestamp"])
+                if timestamp is None:
+                    continue
+                if start_at and timestamp < start_at:
+                    continue
+                if end_at and timestamp > end_at:
+                    continue
+                filtered.append(record)
+            records = filtered
         return records[-limit:][::-1]
 
     async def audit(self, actor_id: str, action: str, details: dict[str, Any]) -> None:

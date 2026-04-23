@@ -48,8 +48,17 @@ async def system_logs(
     request: Request,
     _: dict = Depends(require_role(PanelRole.analyst)),
     level: str = "ALL",
+    van: str = "",
+    tot: str = "",
 ):
-    return {"logs": await request.app.state.data_service.logs(level=level, limit=250)}
+    return {
+        "logs": await request.app.state.data_service.logs(
+            level=level,
+            limit=250,
+            van=van,
+            tot=tot,
+        )
+    }
 
 
 @router.get("/system/audit")
