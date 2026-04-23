@@ -58,8 +58,9 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     if exc.status_code == 403:
         user = request.session.get("user")
         return request.app.state.templates.TemplateResponse(
+            request,
             "forbidden.html",
-            {"request": request, "user": user, "section": "forbidden"},
+            {"user": user, "section": "forbidden"},
             status_code=403,
         )
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})

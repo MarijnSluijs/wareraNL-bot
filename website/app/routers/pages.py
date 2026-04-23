@@ -9,9 +9,8 @@ from ..permissions import PanelRole
 router = APIRouter(tags=["pages"])
 
 
-def _ctx(request: Request, user: dict, **extra):
+def _ctx(user: dict, **extra):
     return {
-        "request": request,
         "user": user,
         "section": extra.pop("section", "dashboard"),
         **extra,
@@ -29,9 +28,9 @@ async def dashboard_page(request: Request):
     economy = await request.app.state.data_service.economy_snapshot()
     await request.app.state.data_service.audit(str(user["id"]), "page.view", {"page": "dashboard"})
     return request.app.state.templates.TemplateResponse(
+        request,
         "dashboard.html",
         _ctx(
-            request,
             user,
             section="dashboard",
             overview=overview,
@@ -50,8 +49,9 @@ async def users_page(request: Request, q: str = ""):
     users = await request.app.state.data_service.users(search=q)
     await request.app.state.data_service.audit(str(user["id"]), "page.view", {"page": "community.users", "q": q})
     return request.app.state.templates.TemplateResponse(
+        request,
         "users.html",
-        _ctx(request, user, section="community", users=users, q=q),
+        _ctx(user, section="community", users=users, q=q),
     )
 
 
@@ -68,8 +68,9 @@ async def moderation_page(request: Request, status: str = "all"):
         {"page": "community.moderation", "status": status},
     )
     return request.app.state.templates.TemplateResponse(
+        request,
         "moderation.html",
-        _ctx(request, user, section="community", cases=cases, status=status),
+        _ctx(user, section="community", cases=cases, status=status),
     )
 
 
@@ -82,14 +83,18 @@ async def config_page(request: Request):
     role = PanelRole[user["panel_role"]]
     if role < PanelRole.admin:
         return request.app.state.templates.TemplateResponse(
-            "forbidden.html", _ctx(request, user, section="config"), status_code=403
+            request,
+            "forbidden.html",
+            _ctx(user, section="config"),
+            status_code=403,
         )
 
     config = await request.app.state.data_service.guild_config()
     await request.app.state.data_service.audit(str(user["id"]), "page.view", {"page": "config"})
     return request.app.state.templates.TemplateResponse(
+        request,
         "config.html",
-        _ctx(request, user, section="config", config=config),
+        _ctx(user, section="config", config=config),
     )
 
 
@@ -102,8 +107,9 @@ async def automation_page(request: Request):
     task_health = await request.app.state.data_service.task_health()
     await request.app.state.data_service.audit(str(user["id"]), "page.view", {"page": "automation"})
     return request.app.state.templates.TemplateResponse(
+        request,
         "automation.html",
-        _ctx(request, user, section="automation", task_health=task_health),
+        _ctx(user, section="automation", task_health=task_health),
     )
 
 
@@ -118,8 +124,9 @@ async def logs_page(request: Request, level: str = "ALL"):
         str(user["id"]), "page.view", {"page": "system.logs", "level": level}
     )
     return request.app.state.templates.TemplateResponse(
+        request,
         "logs.html",
-        _ctx(request, user, section="system", logs=logs, level=level),
+        _ctx(user, section="system", logs=logs, level=level),
     )
 
 
@@ -132,6 +139,7 @@ async def audit_page(request: Request):
     entries = await request.app.state.data_service.audit_entries(limit=300)
     await request.app.state.data_service.audit(str(user["id"]), "page.view", {"page": "system.audit"})
     return request.app.state.templates.TemplateResponse(
+        request,
         "audit.html",
-        _ctx(request, user, section="system", entries=entries),
+        _ctx(user, section="system", entries=entries),
     )
