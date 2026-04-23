@@ -143,5 +143,5 @@ async def audit_page(request: Request):
     return request.app.state.templates.TemplateResponse(
         request,
         "audit.html",
-        _ctx(user, section="system", entries=entries),
+        _ctx(user, section="audit", entries=entries),
     )
