@@ -88,6 +88,15 @@ class General(commands.Cog, name="general"):
                 self.bot.logger.error(
                     f"Failed to add reaction to message {message.id}: {e}"
                 )
+        words = content.lower().split()
+        if any(w in words for w in ("fish", "vis")):
+            fish_emoji = discord.utils.get(message.guild.emojis, name="fishSTEER") if message.guild else None
+            try:
+                await message.channel.send(str(fish_emoji) if fish_emoji else ":fish:")
+            except discord.HTTPException as e:
+                self.bot.logger.error(
+                    f"Failed to send fish message for message {message.id}: {e}"
+                )
         #if "app.warera.io" not in content:
         #    return
         try:
