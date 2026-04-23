@@ -196,6 +196,11 @@ def extract_country_list(api_response) -> list[dict]:
     return []
 
 
+_COUNTRY_ALIASES: dict[str, str] = {
+    "turkey": "turkiye",
+}
+
+
 def find_country(query: str, country_list: list[dict]) -> dict | None:
     """Find a country by code or name (case-insensitive).
 
@@ -204,7 +209,7 @@ def find_country(query: str, country_list: list[dict]) -> dict | None:
       2. Exact name match  (e.g. "Netherlands", "Switzerland")
       3. Name starts-with  (e.g. "switz" → Switzerland)
     """
-    q = query.strip().lower()
+    q = _COUNTRY_ALIASES.get(query.strip().lower(), query.strip().lower())
     hit = next((c for c in country_list if str(c.get("code", "")).lower() == q), None)
     if hit:
         return hit
