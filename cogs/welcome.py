@@ -180,11 +180,20 @@ class VerificationQuestionnaireModal(discord.ui.Modal):
                 "Additional info" if is_english else "Aanvullende info"
             ] = extra
 
-        await create_verification_channel(
-            interaction,
-            self.request_type,
-            questionnaire_answers=questionnaire_answers,
-        )
+        try:
+            await create_verification_channel(
+                interaction,
+                self.request_type,
+                questionnaire_answers=questionnaire_answers,
+            )
+        except Exception:
+            logger.exception(
+                "Unexpected error in create_verification_channel for %s (%s)",
+                interaction.user,
+                self.request_type,
+            )
+            msg = "Er is een onverwachte fout opgetreden. Probeer het opnieuw of neem contact op met een moderator."
+            await interaction.followup.send(msg, ephemeral=True)
 
 
 async def create_verification_channel(
@@ -214,6 +223,10 @@ async def create_verification_channel(
         guild.name,
     )
 
+    # Defer immediately — channel creation + message sends can exceed Discord's 3-second
+    # interaction response deadline, which shows "something went wrong" to the user.
+    await interaction.response.defer(ephemeral=True)
+
     # check if the user already has the requested role to prevent duplicate requests
     role_id = None
     if request_type == "citizen":
@@ -226,7 +239,7 @@ async def create_verification_channel(
     if role_id:
         role = guild.get_role(role_id)
         if role and role in user.roles:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"You already have the {role.name} role and cannot create a new request.",
                 ephemeral=True,
             )
@@ -235,9 +248,21 @@ async def create_verification_channel(
     # Also check actual existing channels (covers bot restarts and manual channel cleanup)
     channels_cfg = config.get("channels", {})
     verification_cat_id = channels_cfg.get("verification")
-    verification_category = (
+    _raw_verification_ch = (
         guild.get_channel(verification_cat_id) if verification_cat_id else None
     )
+    verification_category = (
+        _raw_verification_ch
+        if isinstance(_raw_verification_ch, discord.CategoryChannel)
+        else None
+    )
+    if _raw_verification_ch and not verification_category:
+        logger.warning(
+            "channels.verification (%s) is not a CategoryChannel (got %s); "
+            "falling back to scanning all guild text channels",
+            verification_cat_id,
+            type(_raw_verification_ch).__name__,
+        )
     channels_to_check = (
         verification_category.channels if verification_category else guild.text_channels
     )
@@ -256,7 +281,7 @@ async def create_verification_channel(
             break
 
     if existing_channel:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Je hebt al een open ticket: {existing_channel.mention}. "
             "Los dit eerst op voordat je een nieuw ticket aanmaakt.",
             ephemeral=True,
@@ -308,10 +333,8 @@ async def create_verification_channel(
     channel_name = channel_name.lower().replace(" ", "-")[:100]
 
     # Get the category to create the channel in (if configured)
-    category = None
-    verification_cat = channels_cfg.get("verification")
-    if verification_cat:
-        category = guild.get_channel(verification_cat)
+    # Re-use the already-resolved verification_category (guaranteed CategoryChannel or None)
+    category = verification_category
 
     # Set up channel permissions
     overwrites = {
@@ -344,7 +367,7 @@ async def create_verification_channel(
     if category:
         bot_permissions = category.permissions_for(guild.me)
         if not bot_permissions.manage_channels:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"Ik heb geen toestemming om kanalen aan te maken"
                 f" in de **{category.name}** categorie.\n\n"
                 "**Oplossing:** Ga naar kanaalinstellingen > Rechten > "
@@ -376,7 +399,7 @@ async def create_verification_channel(
                 "met 'Kanalen beheren' toestemming\n"
             )
         error_msg += f"\n**Fout:** {e}"
-        await interaction.response.send_message(error_msg, ephemeral=True)
+        await interaction.followup.send(error_msg, ephemeral=True)
         return
 
     # Build list of role mentions to ping
@@ -456,13 +479,13 @@ async def create_verification_channel(
 
     # Confirm to the user (only they can see this response)
     if request_type == "citizen":
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Je verificatiekanaal is aangemaakt: {channel.mention}\n"
             "Wacht op een moderator om je verzoek te beoordelen.",
             ephemeral=True,
         )
     else:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Your verification channel has been created: {channel.mention}\n"
             "Please wait for a moderator to review your request.",
             ephemeral=True,
