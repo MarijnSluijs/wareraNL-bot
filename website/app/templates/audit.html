@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% set heading = 'System - Audit Log' %}
+{% set subtitle = 'Panelacties met actor/timestamp/details' %}
+{% block content %}
+<section class='grid one'>
+  <article class='card glass'>
+    <div class='table-wrap'>
+      <table>
+        <thead><tr><th>Tijd</th><th>Actor</th><th>Actie</th><th>Details</th></tr></thead>
+        <tbody>
+          {% for e in entries %}
+          <tr>
+            <td>{{ e.timestamp }}</td>
+            <td>{{ e.actor_id }}</td>
+            <td>{{ e.action }}</td>
+            <td><code>{{ e.details }}</code></td>
+          </tr>
+          {% else %}
+          <tr><td colspan='4'>Nog geen audit entries.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

@@ -1,0 +1,86 @@
+{% extends 'base.html' %}
+{% set heading = 'Dashboard' %}
+{% set subtitle = 'Operatie-overzicht (fase 1, read-only actions)' %}
+{% block content %}
+<section class='grid kpis'>
+  {% for key, kpi in overview.kpis.items() %}
+  <article class='card glass kpi'>
+    <h3>{{ kpi.label }}</h3>
+    <p class='value'>{{ kpi.value }}</p>
+    {% if kpi.delta is not none %}<small>Δ {{ kpi.delta }}</small>{% endif %}
+  </article>
+  {% endfor %}
+</section>
+
+<section class='grid two'>
+  <article class='card glass'>
+    <h2>Incident Feed</h2>
+    <div class='table-wrap'>
+      <table>
+        <thead><tr><th>Tijd</th><th>Level</th><th>Bericht</th></tr></thead>
+        <tbody>
+          {% for it in overview.incidents %}
+          <tr>
+            <td>{{ it.timestamp }}</td>
+            <td><span class='pill {{ it.level|lower }}'>{{ it.level }}</span></td>
+            <td>{{ it.message }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan='3'>Geen incidenten gevonden.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class='card glass'>
+    <h2>Task Health Matrix</h2>
+    <div class='table-wrap'>
+      <table>
+        <thead><tr><th>Task</th><th>Laatste run</th><th>Status</th><th>Volgende run</th></tr></thead>
+        <tbody>
+          {% for task in task_health %}
+          <tr>
+            <td>{{ task.task }}</td>
+            <td>{{ task.last_run }}</td>
+            <td><span class='pill ok'>{{ task.status }}</span></td>
+            <td>{{ task.next_run }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan='4'>Nog geen task-data beschikbaar.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+
+<section class='grid three'>
+  <article class='card glass'>
+    <h2>API/Dependency status</h2>
+    <ul class='stats'>
+      <li>OK: <strong>{{ overview.dependency_status.ok }}</strong></li>
+      <li>Rate limited: <strong>{{ overview.dependency_status.rate_limited }}</strong></li>
+      <li>Error: <strong>{{ overview.dependency_status.error }}</strong></li>
+      <li>Closed: <strong>{{ overview.dependency_status.closed }}</strong></li>
+    </ul>
+  </article>
+  <article class='card glass'>
+    <h2>Live economy snapshot</h2>
+    <ul class='stats'>
+      <li>Wealth totaal: <strong>{{ '%.0f'|format(economy.wealth) }}</strong></li>
+      <li>Wealth rows: <strong>{{ economy.wealth_rows }}</strong></li>
+      <li>Transactievolume: <strong>{{ economy.transaction_volume }}</strong></li>
+      <li>Battle damage: <strong>{{ '%.0f'|format(economy.battle_damage_total) }}</strong></li>
+    </ul>
+  </article>
+  <article class='card glass'>
+    <h2>Mijn panel</h2>
+    <ul class='stats'>
+      <li>Pinned views: <strong>Roadmap</strong></li>
+      <li>Open acties: <strong>0</strong></li>
+      <li>Laatste wijziging: <strong>n/a</strong></li>
+    </ul>
+  </article>
+</section>
+{% endblock %}

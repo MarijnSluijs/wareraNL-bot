@@ -1,0 +1,1 @@
+"""WarEraNL admin panel application."""
