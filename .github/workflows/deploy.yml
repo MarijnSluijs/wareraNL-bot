@@ -66,6 +66,6 @@ jobs:
             {
               printf 'TOKEN=%s\n' "$DISCORD_BOT_TOKEN"
               printf 'INVITE_LINK=%s\n' "$DISCORD_BOT_INVITE_LINK"
-              printf 'PREFIX=%s\n' "/"
+              printf 'PREFIX=%s\n' "!"
             } > .env
             /home/warera/live/wareraNL-bot/deploy.sh
