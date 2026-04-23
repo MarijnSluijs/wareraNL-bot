@@ -54,7 +54,7 @@ python -m venv .venv
 source .venv/bin/activate
 # Core bot dependencies only:
 pip install -e .
-# Or include website/API-explorer dependencies too:
+# Or include website dependencies too:
 pip install -e ".[website]"
 ```
 
@@ -100,7 +100,7 @@ All services are built from the same `Dockerfile`. The compose setup is split in
 |------|---------|----------------|
 | `docker-compose.yml` | Production — bot only | ✅ yes |
 | `docker-compose.testing.yml` | Testing — bot only (`--testing` flag) | ❌ no |
-| `docker-compose.websites.yml` | Testing — website + API explorer | ❌ no |
+| `docker-compose.websites.yml` | Testing — websites | ❌ no |
 
 The website compose files are gitignored because they reference local `.env_test` secrets.
 
@@ -111,14 +111,14 @@ docker compose build
 docker compose up -d
 ```
 
-### Testing — bot
+### Testing — Bot
 
 ```bash
 docker compose -f docker-compose.testing.yml build
 docker compose -f docker-compose.testing.yml up -d
 ```
 
-### Testing — Dashboard website + API explorer website
+### Testing — Websites
 
 ```bash
 docker compose -f docker-compose.websites.yml build
@@ -138,7 +138,7 @@ docker compose -f docker-compose.testing.yml -f docker-compose.websites.yml logs
 
 # Individual website services
 docker compose -f docker-compose.websites.yml logs -f website
-docker compose -f docker-compose.websites.yml logs -f api-explorer
+docker compose -f docker-compose.websites.yml logs -f map-timeline
 ```
 
 ### Stop services

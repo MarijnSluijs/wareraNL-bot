@@ -13,6 +13,7 @@
         "commandant": 1493266443595288626,
         "tester": 1474452549456105507,
         "wachtlijst": 1475473494627192873,
+        "buitenlandse_diplomaat": 1483196429626380381,
         "samenvatting_allowed": [
             1475489952346407106
         ]
@@ -38,7 +39,8 @@
         "reddit": 1475450669413568665,
         "events": 1474452856584011929,
         "mu_aanmelden": 1474452856584011929,
-        "bounties": 1474452856584011929
+        "bounties": 1474452856584011929,
+        "embassy_categories": [1474454272228982955, 1496021477638672496, 1496021541669044319]
     },
     "welcome_message": "# Welcome to the Official Nederland War Era Server!\n\nGreetings, traveler! You have arrived at the gates of Nederland.\n\nPlease select your status below to proceed with verification:",
     "colors": {
@@ -55,5 +57,6 @@
     "testing_commanders": [
         "695579c03f0cff6efb694b3a"
     ],
-    "guild_id": 1474416241769844941
+    "guild_id": 1474416241769844941,
+    "owner_ids": [565626197048819731, 230386541690748929]
 }

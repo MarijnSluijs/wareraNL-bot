@@ -97,6 +97,7 @@ class BunkersCog(CommandCogBase, name="bunkers"):
 
         # 3. Fetch bunker upgrade status for each region
         async def _fetch_bunker(region_id: str, region_name: str) -> dict | None:
+            import aiohttp as _aiohttp
             try:
                 resp = await asyncio.wait_for(
                     self._client.post(
@@ -108,6 +109,12 @@ class BunkersCog(CommandCogBase, name="bunkers"):
                 data = _unwrap(resp)
                 logger.debug("bunkers raw [%s]: %s", region_name, data)
                 return data
+            except _aiohttp.ClientResponseError as exc:
+                if exc.status == 404:
+                    # 404 means no bunker exists for this region
+                    return {}
+                logger.warning("bunkers: failed to fetch bunker for %s: %s", region_id, exc)
+                return None
             except Exception as exc:
                 logger.warning("bunkers: failed to fetch bunker for %s: %s", region_id, exc)
                 return None
