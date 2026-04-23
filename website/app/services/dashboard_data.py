@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +30,7 @@ class PanelDataService:
             return None
         for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S"):
             try:
-                parsed = datetime.strptime(ts, fmt).replace(tzinfo=UTC)
+                parsed = datetime.strptime(ts, fmt).replace(tzinfo=timezone.utc)
                 return parsed
             except ValueError:
                 continue
@@ -77,7 +77,7 @@ class PanelDataService:
         return out
 
     async def dashboard_overview(self, days: int = 7) -> dict[str, Any]:
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         threshold = now - timedelta(days=days)
         status = "Offline"
         kpis: dict[str, dict[str, Any]] = {
@@ -96,12 +96,12 @@ class PanelDataService:
                     """
                     SELECT MAX(updated_at) AS updated_at
                     FROM (
-                        SELECT updated_at FROM citizen_levels
-                        UNION ALL
-                        SELECT updated_at FROM citizen_wealth
-                        UNION ALL
-                        SELECT updated_at FROM country_snapshots
-                    )
+                             SELECT updated_at FROM citizen_levels
+                             UNION ALL
+                             SELECT updated_at FROM citizen_wealth
+                             UNION ALL
+                             SELECT updated_at FROM country_snapshots
+                         )
                     """
                 )
             ).fetchone()
@@ -208,7 +208,7 @@ class PanelDataService:
                     FROM poll_state
                     WHERE key LIKE 'last_%' OR key LIKE '%_last_run%' OR key LIKE '%task%'
                     ORDER BY key
-                    LIMIT 200
+                        LIMIT 200
                     """
                 )
             ).fetchall()
@@ -230,14 +230,14 @@ class PanelDataService:
 
     async def users(self, search: str = "", limit: int = 100) -> list[dict[str, Any]]:
         query = """
-        SELECT i.discord_user_id, i.in_game_user_id, i.nationality, i.updated_at,
-               c.citizen_name, c.mu_name, c.last_login_at
-        FROM identity_links i
-        LEFT JOIN citizen_levels c ON c.user_id = i.in_game_user_id
-        WHERE (? = '' OR i.discord_user_id LIKE ? OR c.citizen_name LIKE ? OR i.in_game_user_id LIKE ?)
-        ORDER BY i.updated_at DESC
-        LIMIT ?
-        """
+                SELECT i.discord_user_id, i.in_game_user_id, i.nationality, i.updated_at,
+                       c.citizen_name, c.mu_name, c.last_login_at
+                FROM identity_links i
+                         LEFT JOIN citizen_levels c ON c.user_id = i.in_game_user_id
+                WHERE (? = '' OR i.discord_user_id LIKE ? OR c.citizen_name LIKE ? OR i.in_game_user_id LIKE ?)
+                ORDER BY i.updated_at DESC
+                    LIMIT ? \
+                """
         like = f"%{search}%"
         conn = await self._connect()
         try:
@@ -256,7 +256,7 @@ class PanelDataService:
                     SELECT id, user_id, server_id, moderator_id, reason, created_at
                     FROM warns
                     ORDER BY created_at DESC
-                    LIMIT ?
+                        LIMIT ?
                     """,
                     (limit,),
                 )
@@ -290,7 +290,7 @@ class PanelDataService:
 
     async def audit(self, actor_id: str, action: str, details: dict[str, Any]) -> None:
         entry = {
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "actor_id": actor_id,
             "action": action,
             "details": details,
