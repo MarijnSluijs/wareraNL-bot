@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% set heading = 'Automation' %}
+{% set subtitle = 'Tasks scheduler en monitor (read-only)' %}
+{% block content %}
+<section class='grid one'>
+  <article class='card glass'>
+    <h2>Tasks Scheduler</h2>
+    <div class='table-wrap'>
+      <table>
+        <thead><tr><th>Task</th><th>Laatste run</th><th>Status</th><th>Actie</th></tr></thead>
+        <tbody>
+          {% for task in task_health %}
+          <tr>
+            <td>{{ task.task }}</td>
+            <td>{{ task.last_run }}</td>
+            <td><span class='pill ok'>{{ task.status }}</span></td>
+            <td><button class='btn small disabled' disabled>Run now</button></td>
+          </tr>
+          {% else %}
+          <tr><td colspan='4'>Nog geen taakdata.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

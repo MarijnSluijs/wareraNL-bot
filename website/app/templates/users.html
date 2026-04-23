@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% set heading = 'Community - Users' %}
+{% set subtitle = 'Lookup op Discord ID, in-game ID of spelernaam' %}
+{% block content %}
+<section class='grid one'>
+  <article class='card glass'>
+    <form method='get' class='search-row'>
+      <input type='text' name='q' value='{{ q }}' placeholder='Zoek gebruiker...' />
+      <button class='btn' type='submit'>Zoek</button>
+    </form>
+    <div class='table-wrap'>
+      <table>
+        <thead><tr><th>Discord</th><th>In-game</th><th>Naam</th><th>MU</th><th>Laatste login</th><th>Updated</th></tr></thead>
+        <tbody>
+          {% for row in users %}
+          <tr>
+            <td>{{ row.discord_user_id }}</td>
+            <td>{{ row.in_game_user_id }}</td>
+            <td>{{ row.citizen_name or '-' }}</td>
+            <td>{{ row.mu_name or '-' }}</td>
+            <td>{{ row.last_login_at or '-' }}</td>
+            <td>{{ row.updated_at }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan='6'>Geen users gevonden.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}
