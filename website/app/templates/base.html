@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title or 'WarEraNL Panel' }}</title>
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+  <div class="background"></div>
+  <div class="layout">
+    <aside class="sidebar glass">
+      <div class="brand">WarEraNL<br><span>Admin Panel</span></div>
+      <nav>
+        <a href="/" class="{{ 'active' if section == 'dashboard' else '' }}">Dashboard</a>
+        <a href="/community/users" class="{{ 'active' if section == 'community' else '' }}">Community</a>
+        <a href="/automation" class="{{ 'active' if section == 'automation' else '' }}">Automation</a>
+        <a href="/config" class="{{ 'active' if section == 'config' else '' }}">Config</a>
+        <a href="/system/logs" class="{{ 'active' if section == 'system' else '' }}">System</a>
+        <a href="/system/audit" class="{{ 'active' if section == 'audit' else '' }}">Audit</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header class="topbar glass">
+        <div>
+          <h1>{{ heading or 'Dashboard' }}</h1>
+          <p>{{ subtitle or 'WarEraNL Discord bot beheer' }}</p>
+        </div>
+        <div class="toolbar">
+          <button class="btn glass disabled" disabled>Restart bot</button>
+          <button class="btn glass disabled" disabled>Pause tasks</button>
+          <button class="btn glass disabled" disabled>Create announcement</button>
+          {% if user %}
+          <div class="user-chip glass">
+            <strong>{{ user.username }}</strong>
+            <span>{{ user.panel_role_label or user.panel_role }}</span>
+            <a href="/auth/logout">Logout</a>
+          </div>
+          {% endif %}
+        </div>
+      </header>
+
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <script src="/static/js/dashboard.js" defer></script>
+</body>
+</html>

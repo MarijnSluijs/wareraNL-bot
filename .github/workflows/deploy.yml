@@ -35,6 +35,15 @@ jobs:
     needs: syntax-check
     runs-on: ubuntu-latest
     environment: staging
+    env:
+      DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+      DISCORD_BOT_INVITE_LINK: ${{ secrets.DISCORD_BOT_INVITE_LINK }}
+      DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+      DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
+      PANEL_OWNER_IDS: ${{ secrets.PANEL_OWNER_IDS }}
+      PANEL_ADMIN_IDS: ${{ secrets.PANEL_ADMIN_IDS }}
+      PANEL_MODERATOR_IDS: ${{ secrets.PANEL_MODERATOR_IDS }}
+      PANEL_ANALYST_IDS: ${{ secrets.PANEL_ANALYST_IDS }}
     steps:
       - name: Deploy naar staging via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -42,7 +51,35 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: /home/warera/staging/wareraNL-bot/deploy-staging.sh
+          envs: DISCORD_BOT_TOKEN,DISCORD_BOT_INVITE_LINK,DISCORD_CLIENT_ID,DISCORD_CLIENT_SECRET,PANEL_OWNER_IDS,PANEL_ADMIN_IDS,PANEL_MODERATOR_IDS,PANEL_ANALYST_IDS
+          script: |
+            cd /home/warera/staging/wareraNL-bot
+            umask 077
+            {
+              printf 'TOKEN=%s\n' "$DISCORD_BOT_TOKEN"
+              printf 'INVITE_LINK=%s\n' "$DISCORD_BOT_INVITE_LINK"
+              printf 'PREFIX=%s\n' "!"
+              printf '\n'
+              printf '# Website / Admin dashboard - required for real Discord OAuth login\n'
+              printf 'DISCORD_CLIENT_ID=%s\n' "$DISCORD_CLIENT_ID"
+              printf 'DISCORD_CLIENT_SECRET=%s\n' "$DISCORD_CLIENT_SECRET"
+              printf 'DISCORD_REDIRECT_URI=%s\n' "http://134.209.196.108:8001/auth/callback"
+              printf 'PANEL_SESSION_SECRET=%s\n' "e11720acbb2120c6f421f131a7b042f4babd2c7e576b242540a6c3e3d3731f46"
+              printf '\n'
+              printf '# Website / Admin dashboard - panel role mapping\n'
+              printf '# Comma-separated Discord user IDs. Owner IDs are also read from config/config.json.\n'
+              printf 'PANEL_OWNER_IDS=%s\n' "$PANEL_OWNER_IDS"
+              printf 'PANEL_ADMIN_IDS=%s\n' "$PANEL_ADMIN_IDS"
+              printf 'PANEL_MODERATOR_IDS=%s\n' "$PANEL_MODERATOR_IDS"
+              printf 'PANEL_ANALYST_IDS=%s\n' "$PANEL_ANALYST_IDS"
+              printf '\n'
+              printf '# Website / Admin dashboard - optional path overrides\n'
+              printf 'BOT_DB_PATH=%s\n' "database/external.db"
+              printf 'BOT_LOG_PATH=%s\n' "logs/discord.log"
+              printf 'BOT_CONFIG_PATH=%s\n' "config/config.json"
+              printf 'PANEL_AUDIT_LOG_PATH=%s\n' "website/data/panel_audit.jsonl"
+            } > .env
+            /home/warera/staging/wareraNL-bot/deploy-staging.sh
 
   deploy-production:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
@@ -52,6 +89,12 @@ jobs:
     env:
       DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
       DISCORD_BOT_INVITE_LINK: ${{ secrets.DISCORD_BOT_INVITE_LINK }}
+      DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+      DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
+      PANEL_OWNER_IDS: ${{ secrets.PANEL_OWNER_IDS }}
+      PANEL_ADMIN_IDS: ${{ secrets.PANEL_ADMIN_IDS }}
+      PANEL_MODERATOR_IDS: ${{ secrets.PANEL_MODERATOR_IDS }}
+      PANEL_ANALYST_IDS: ${{ secrets.PANEL_ANALYST_IDS }}
     steps:
       - name: Deploy naar productie via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -59,7 +102,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: DISCORD_BOT_TOKEN,DISCORD_BOT_INVITE_LINK
+          envs: DISCORD_BOT_TOKEN,DISCORD_BOT_INVITE_LINK,DISCORD_CLIENT_ID,DISCORD_CLIENT_SECRET,PANEL_OWNER_IDS,PANEL_ADMIN_IDS,PANEL_MODERATOR_IDS,PANEL_ANALYST_IDS
           script: |
             cd /home/warera/live/wareraNL-bot
             umask 077
@@ -67,5 +110,24 @@ jobs:
               printf 'TOKEN=%s\n' "$DISCORD_BOT_TOKEN"
               printf 'INVITE_LINK=%s\n' "$DISCORD_BOT_INVITE_LINK"
               printf 'PREFIX=%s\n' "!"
+              printf '\n'
+              printf '# Website / Admin dashboard - required for real Discord OAuth login\n'
+              printf 'DISCORD_CLIENT_ID=%s\n' "$DISCORD_CLIENT_ID"
+              printf 'DISCORD_CLIENT_SECRET=%s\n' "$DISCORD_CLIENT_SECRET"
+              printf 'DISCORD_REDIRECT_URI=%s\n' "http://134.209.196.108:8000/auth/callback"
+              printf 'PANEL_SESSION_SECRET=%s\n' "e11720acbb2120c6f421f131a7b042f4babd2c7e576b242540a6c3e3d3731f46"
+              printf '\n'
+              printf '# Website / Admin dashboard - panel role mapping\n'
+              printf '# Comma-separated Discord user IDs. Owner IDs are also read from config/config.json.\n'
+              printf 'PANEL_OWNER_IDS=%s\n' "$PANEL_OWNER_IDS"
+              printf 'PANEL_ADMIN_IDS=%s\n' "$PANEL_ADMIN_IDS"
+              printf 'PANEL_MODERATOR_IDS=%s\n' "$PANEL_MODERATOR_IDS"
+              printf 'PANEL_ANALYST_IDS=%s\n' "$PANEL_ANALYST_IDS"
+              printf '\n'
+              printf '# Website / Admin dashboard - optional path overrides\n'
+              printf 'BOT_DB_PATH=%s\n' "database/external.db"
+              printf 'BOT_LOG_PATH=%s\n' "logs/discord.log"
+              printf 'BOT_CONFIG_PATH=%s\n' "config/config.json"
+              printf 'PANEL_AUDIT_LOG_PATH=%s\n' "website/data/panel_audit.jsonl"
             } > .env
             /home/warera/live/wareraNL-bot/deploy.sh

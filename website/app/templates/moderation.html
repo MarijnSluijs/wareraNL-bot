@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% set heading = 'Community - Moderation Cases' %}
+{% set subtitle = 'Overzicht van warns/cases (fase 1)' %}
+{% block content %}
+<section class='grid one'>
+  <article class='card glass'>
+    <div class='table-wrap'>
+      <table>
+        <thead><tr><th>ID</th><th>User</th><th>Moderator</th><th>Reason</th><th>Created</th></tr></thead>
+        <tbody>
+          {% for c in cases %}
+          <tr>
+            <td>{{ c.id }}</td>
+            <td>{{ c.user_id }}</td>
+            <td>{{ c.moderator_id }}</td>
+            <td>{{ c.reason }}</td>
+            <td>{{ c.created_at }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan='5'>Geen moderatiecases beschikbaar.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

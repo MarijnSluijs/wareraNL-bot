@@ -191,6 +191,35 @@ Important: the bot will fail fast if the chosen token is not present. For conven
 - Follow the pattern in `cogs/` when adding new features: encapsulate logic in a Cog, register it in `bot.py` or allow auto-loading from the `cogs/` folder.
 - Avoid hardcoding numeric role/channel IDs in code — add them to `config.json` and reference them from `bot.config`.
 
+## Admin dashboard (FastAPI)
+
+The repository now includes a dashboard app at `website/app`:
+
+```bash
+uvicorn website.app.main:app --reload --port 8000
+```
+
+Required env vars for Discord OAuth:
+
+- `DISCORD_CLIENT_ID`
+- `DISCORD_CLIENT_SECRET`
+- `DISCORD_REDIRECT_URI` (for example `http://127.0.0.1:8000/auth/callback`)
+- `PANEL_SESSION_SECRET`
+
+Panel-role mapping env vars (comma-separated Discord user IDs):
+
+- `PANEL_OWNER_IDS`
+- `PANEL_ADMIN_IDS`
+- `PANEL_MODERATOR_IDS`
+- `PANEL_ANALYST_IDS`
+
+Optional overrides:
+
+- `BOT_DB_PATH` (default `database/external.db`)
+- `BOT_LOG_PATH` (default `logs/discord.log`)
+- `BOT_CONFIG_PATH` (default `config/config.json`)
+- `PANEL_AUDIT_LOG_PATH` (default `website/data/panel_audit.jsonl`)
+
 ## Contributing
 
 Please follow the codebase style, add tests for non-trivial logic, and keep secrets out of commits. If you'd like, I can add an example `CONTRIBUTING.md` with PR/checklist guidelines.

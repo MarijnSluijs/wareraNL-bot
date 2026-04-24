@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% set heading = 'Config' %}
+{% set subtitle = 'Guild settings, channels en feature flags (read-only)' %}
+{% block content %}
+<section class='grid two'>
+  <article class='card glass'>
+    <h2>Guild</h2>
+    <p>Guild ID: <strong>{{ config.guild_id }}</strong></p>
+    <h3>Feature flags</h3>
+    <ul class='stats'>
+      {% for key, val in config.flags.items() %}
+      <li>{{ key }}: <strong>{{ 'on' if val else 'off' }}</strong></li>
+      {% endfor %}
+    </ul>
+  </article>
+  <article class='card glass'>
+    <h2>Channels mapping</h2>
+    <div class='table-wrap'>
+      <table>
+        <thead><tr><th>Functie</th><th>Channel ID</th></tr></thead>
+        <tbody>
+          {% for key, val in config.channels.items() %}
+          <tr><td>{{ key }}</td><td>{{ val }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

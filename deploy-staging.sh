@@ -8,4 +8,5 @@ git reset --hard origin/staging
 ./.venv/bin/pip install -q -e .
 
 sudo systemctl restart wareranl-bot-staging
+sudo systemctl restart wareranl-web-staging
 sudo systemctl --no-pager --full status wareranl-bot-staging
