@@ -34,6 +34,41 @@ def _fmt_price(v: Optional[float]) -> str:
     return f"{v:.2f}"
 
 
+def _fmt_coin_amount(v: Optional[float]) -> str:
+    if v is None:
+        return "—"
+    return f"{max(1, round(v))} c"
+
+
+def _sell_advice(
+    agg_24h: dict,
+    agg_7d: dict,
+    agg_30d: dict,
+    *,
+    any_stat_given: bool,
+) -> str:
+    """Return a compact asking-price recommendation for the embed."""
+    candidates = (
+        ("7 dagen", agg_7d),
+        ("30 dagen", agg_30d),
+        ("24 uur", agg_24h),
+    )
+    for label, agg in candidates:
+        if agg.get("n", 0) >= 3:
+            key = "weighted" if any_stat_given and agg.get("weighted") is not None else "mean"
+            price = agg.get(key)
+            if price is None:
+                continue
+            low = max(1, round(price * 0.9))
+            high = max(low, round(price * 1.1))
+            return (
+                f"Richtprijs: **{_fmt_coin_amount(price)}**\n"
+                f"Snelle verkoop: **{low} c** · ambitieuze listing: **{high} c**\n"
+                f"Gebaseerd op {label} ({agg['n']} verkopen)."
+            )
+    return "Nog te weinig vergelijkbare verkopen voor een betrouwbaar advies."
+
+
 def _fmt_stat_input(
     state: Optional[int],
     attack: Optional[int],
@@ -193,6 +228,21 @@ class MarktprijsCog(CommandCogBase):
         embed.add_field(name="📅 24 uur", value=_window_value(agg_24h), inline=True)
         embed.add_field(name="📆 7 dagen", value=_window_value(agg_7d), inline=True)
         embed.add_field(name="🗓️ 30 dagen", value=_window_value(agg_30d), inline=True)
+        embed.add_field(
+            name="Advies",
+            value=_sell_advice(
+                agg_24h, agg_7d, agg_30d, any_stat_given=any_stat_given
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Legenda",
+            value=(
+                "`c` = coins. `d` = afstand tot jouw opgegeven stats; "
+                "lager betekent vergelijkbaarder."
+            ),
+            inline=False,
+        )
 
         # Top 5 dichtstbijzijnde matches (alleen zinvol als er stats zijn opgegeven)
         if any_stat_given and ranked:
