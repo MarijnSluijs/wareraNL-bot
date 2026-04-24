@@ -26,7 +26,7 @@ logger = logging.getLogger("discord_bot")
 # ── Cooldown intervals ──────────────────────────────────────────────────────
 _DAILY_H = 24
 _WEEKLY_H = 168  # 7 days
-_INACTIVITY_DAYS = 30  # days without login → flagged in audit
+_INACTIVITY_DAYS = 5  # days without login → flagged in audit
 
 # Marijn's Discord user ID (receives the weekly audit DM)
 _MARIJN_DISCORD_ID = 565626197048819731
@@ -88,21 +88,26 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
     async def sync_loop(self) -> None:
         now = datetime.now(timezone.utc)
 
-        for name, key, interval_h, coro in [
+        for name, key, interval_h, afternoon_only, coro in [
             (
                 "commander_role_check",
                 "commander_role_check_last_run",
                 _DAILY_H,
+                False,
                 self._check_commander_roles,
             ),
             (
                 "citizenship_audit",
                 "citizenship_audit_last_run",
-                _WEEKLY_H,
+                _DAILY_H,
+                True,  # only run in the afternoon (13–16 UTC)
                 self._citizenship_audit,
             ),
         ]:
             if not self._db:
+                continue
+            # Afternoon gate: only fire citizenship audit between 13:00 and 15:59 UTC
+            if afternoon_only and not (13 <= now.hour < 16):
                 continue
             try:
                 last_str = await self._db.get_poll_state(key)
@@ -300,8 +305,11 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
             logger.warning("citizenship_audit: nl_country_id or nederlander role not configured")
             return
 
-        moved_or_inactive: list[str] = []  # lines for section A
-        missing_role: list[str] = []       # lines for section B
+        no_link: list[str] = []         # geen identity koppeling
+        not_in_db: list[str] = []        # niet gevonden in citizen DB
+        wrong_country: list[str] = []    # geen Nederlander in-game
+        too_inactive: list[str] = []     # inactief 5+ dagen
+        missing_role: list[str] = []     # in-game Nederlanders zonder Discord rol
 
         for guild in self.bot.guilds:
             nederlander_role = guild.get_role(nederlander_role_id)
@@ -340,33 +348,26 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                 in_game_id = discord_to_ingame.get(discord_id)
 
                 if not in_game_id:
-                    # Has role but no identity link – flag
-                    moved_or_inactive.append(
-                        f"• **{member.display_name}** (`{discord_id}`) — geen identity koppeling"
-                    )
+                    no_link.append(f"• {member.mention}")
                     continue
 
                 d = details.get(in_game_id)
                 if not d:
-                    moved_or_inactive.append(
-                        f"• **{member.display_name}** (`{discord_id}`) — niet gevonden in citizen DB"
-                    )
+                    not_in_db.append(f"• {member.mention}")
                     continue
 
                 country = d["country_id"]
                 last_login = d["last_login_at"]
-                citizen_name = d["citizen_name"] or in_game_id
                 days_inactive = _days_since(last_login)
 
-                issues: list[str] = []
                 if country != nl_country_id:
-                    issues.append(f"land veranderd naar `{country}`")
-                if days_inactive is not None and days_inactive > _INACTIVITY_DAYS:
-                    issues.append(f"inactief {int(days_inactive)}d")
+                    wrong_country.append(
+                        f"• {member.mention} — land `{country}`"
+                    )
 
-                if issues:
-                    moved_or_inactive.append(
-                        f"• **{citizen_name}** ({member.mention}) — {', '.join(issues)}"
+                if days_inactive is not None and days_inactive > _INACTIVITY_DAYS:
+                    too_inactive.append(
+                        f"• {member.mention} — {int(days_inactive)} dagen inactief"
                     )
 
             # ── Section B: In-game Dutch citizens without 'nederlander' role ─
@@ -379,7 +380,6 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
             for user_id, _cid, citizen_name in nl_citizens:
                 discord_id = ingame_to_discord.get(user_id)
                 if not discord_id or not discord_id.isdigit():
-                    # Not linked — skip (they may not be in this Discord)
                     continue
 
                 member = guild.get_member(int(discord_id))
@@ -388,27 +388,36 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
 
                 if nederlander_role not in member.roles:
                     missing_role.append(
-                        f"• **{citizen_name or user_id}** ({member.mention}) — heeft de Nederlander rol niet"
+                        f"• {member.mention} — in-game: **{citizen_name or user_id}**"
                     )
 
-        # ── Build and send DM ────────────────────────────────────────────────
+        # ── Build report ─────────────────────────────────────────────────────
+        date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        ping = f"<@{_CAPTAINWYVERN_DISCORD_ID}>"
         lines: list[str] = [
-            f"## 🇳🇱 Burgerschap Audit — {datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
+            f"## 🇳🇱 Burgerschap Audit — {date_str}",
+            f"{ping} hier is de dagelijkse audit.",
             "",
         ]
 
-        lines.append("### Nederlander-rol houders met problemen")
-        if moved_or_inactive:
-            lines.extend(moved_or_inactive)
-        else:
-            lines.append("*Geen problemen gevonden.*")
+        lines.append("### ❌ Geen identity koppeling")
+        lines.extend(no_link if no_link else ["*Geen problemen gevonden.*"])
 
         lines.append("")
-        lines.append("### In-game Nederlanders zonder Discord rol")
-        if missing_role:
-            lines.extend(missing_role)
-        else:
-            lines.append("*Geen problemen gevonden.*")
+        lines.append("### 🔍 Niet gevonden in citizen DB")
+        lines.extend(not_in_db if not_in_db else ["*Geen problemen gevonden.*"])
+
+        lines.append("")
+        lines.append("### 🌍 Geen Nederlander in-game (land veranderd)")
+        lines.extend(wrong_country if wrong_country else ["*Geen problemen gevonden.*"])
+
+        lines.append("")
+        lines.append(f"### 💤 Inactief ({_INACTIVITY_DAYS}+ dagen)")
+        lines.extend(too_inactive if too_inactive else ["*Geen problemen gevonden.*"])
+
+        lines.append("")
+        lines.append("### 🎭 In-game Nederlanders zonder Discord rol")
+        lines.extend(missing_role if missing_role else ["*Geen problemen gevonden.*"])
 
         report = "\n".join(lines)
 
