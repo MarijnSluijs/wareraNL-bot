@@ -444,3 +444,32 @@ CREATE TABLE IF NOT EXISTS player_tx_cache (
     truncated      INTEGER NOT NULL DEFAULT 0,   -- 1 if original fetch was capped
     updated_at     TEXT NOT NULL
 );
+
+-- ── Item market trades ────────────────────────────────────────────────────────
+
+-- item_trades: itemMarket transactions polled from /transaction.getPaginatedTransactions.
+--   Used by /marktprijs to rank similar historical trades and estimate a price.
+--   Skill columns are NULL when the source payload didn't include that stat.
+CREATE TABLE IF NOT EXISTS item_trades (
+    tx_id             TEXT PRIMARY KEY,            -- mongo _id from transaction
+    created_at        TEXT NOT NULL,               -- ISO timestamp of sale
+    offer_created_at  TEXT,                        -- when listing was posted
+    item_code         TEXT NOT NULL,
+    item_type         TEXT,                        -- e.g. "equipment"
+    quantity          INTEGER NOT NULL DEFAULT 1,
+    price             INTEGER NOT NULL,            -- total money paid (coins)
+    state             INTEGER,                     -- current durability
+    max_state         INTEGER,                     -- max durability
+    attack            INTEGER,
+    critical_chance   INTEGER,
+    critical_damages  INTEGER,
+    armor             INTEGER,
+    precision_        INTEGER,                     -- 'precision' is SQL reserved
+    dodge             INTEGER,
+    buyer_id          TEXT,
+    seller_id         TEXT,
+    raw_json          TEXT NOT NULL,               -- full payload for audit
+    ingested_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_item_trades_code_ts ON item_trades(item_code, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_item_trades_ts      ON item_trades(created_at DESC);
