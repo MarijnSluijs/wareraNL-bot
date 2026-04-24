@@ -88,6 +88,92 @@ class General(commands.Cog, name="general"):
                 self.bot.logger.error(
                     f"Failed to add reaction to message {message.id}: {e}"
                 )
+        words = content.lower().split()
+
+        # fish / vis → send fishSTEER emoji as message
+        if any(w in words for w in ("fish", "vis")):
+            fish_emoji = discord.utils.get(message.guild.emojis, name="fishSTEER") if message.guild else None
+            try:
+                await message.channel.send(str(fish_emoji) if fish_emoji else ":fish:")
+            except discord.HTTPException as e:
+                self.bot.logger.error(
+                    f"Failed to send fish message for message {message.id}: {e}"
+                )
+
+        # "ja" or "yes" alone → :Yesyes: reaction, 10% chance
+        if words == ["ja"] or words == ["yes"]:
+            if random.random() < 0.10:
+                _e = discord.utils.get(message.guild.emojis, name="Yesyes") if message.guild else None
+                if _e:
+                    try:
+                        await message.add_reaction(_e)
+                    except discord.HTTPException:
+                        pass
+
+        # "nee", "nein", or "no" alone → :Nono: reaction, 10% chance
+        if words == ["no"] or words == ["nee"] or words == ["nein"]:
+            if random.random() < 0.10:
+                _e = discord.utils.get(message.guild.emojis, name="Nono") if message.guild else None
+                if _e:
+                    try:
+                        await message.add_reaction(_e)
+                    except discord.HTTPException:
+                        pass
+
+        # cinema / bioscoop → always react :Cinema:
+        if any(w in words for w in ("cinema", "bioscoop")):
+            _e = discord.utils.get(message.guild.emojis, name="Cinema") if message.guild else None
+            if _e:
+                try:
+                    await message.add_reaction(_e)
+                except discord.HTTPException:
+                    pass
+
+        # kiss / kus → react :catKISS:
+        if any(w in words for w in ("kiss", "kus")):
+            _e = discord.utils.get(message.guild.emojis, name="catKISS") if message.guild else None
+            if _e:
+                try:
+                    await message.add_reaction(_e)
+                except discord.HTTPException:
+                    pass
+
+        # ALL CAPS message (3+ chars) → 🔇 reaction
+        if len(content) >= 3 and content == content.upper() and any(c.isalpha() for c in content):
+            try:
+                await message.add_reaction("🔇")
+            except discord.HTTPException:
+                pass
+
+        # water → send funny GIF, 10% chance
+        if "water" in words and random.random() < 0.10:
+            try:
+                await message.channel.send("https://tenor.com/view/watur-alcoholist-at5-water-gif-gif-18135185")
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to send water gif for message {message.id}: {e}")
+
+        # animal word → react with matching emoji, 10% chance each
+        _ANIMAL_REACTIONS: list[tuple[set[str], str]] = [
+            ({"haan", "haantje", "kip", "chicken"}, "🐔"),
+            ({"hond", "dog"}, "🐶"),
+            ({"kat", "poes", "cat"}, "🐱"),
+            ({"muis", "mouse"}, "🐭"),
+            ({"konijn", "rabbit"}, "🐰"),
+            ({"varken", "pig"}, "🐷"),
+            ({"koe", "cow"}, "🐮"),
+            ({"schaap", "sheep"}, "🐑"),
+            ({"paard", "horse"}, "🐴"),
+            ({"eend", "duck"}, "🦆"),
+            ({"geit", "goat"}, "🐐"),
+        ]
+        word_set = set(words)
+        for animal_words, emoji_str in _ANIMAL_REACTIONS:
+            if animal_words & word_set and random.random() < 0.10:
+                try:
+                    await message.add_reaction(emoji_str)
+                except discord.HTTPException:
+                    pass
+                break  # only one animal reaction per message
         #if "app.warera.io" not in content:
         #    return
         try:
