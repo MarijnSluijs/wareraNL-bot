@@ -65,7 +65,7 @@
     {
       "title": "🤝 Community meldingen",
       "color": "0x2ecc71",
-      "description": "Kies voor welke community-activiteiten je gepingd wilt worden.\n\n**Discord Server**: Pings bij wijzigingen aan de Discord server.\n**Giveaways**: Pings bij winacties en weggeefacties.\n**Community**: Pings voor community zaken zoals de Wikipedia.\n**Promotie Team**: Word gepingd om mee te helpen met Reddit- of social media posts.\n**Journalist**: Pings voor roddels.",
+      "description": "Kies voor welke community-activiteiten je gepingd wilt worden.\n\n**Discord Server**: Pings bij wijzigingen aan de Discord server.\n**Giveaways**: Pings bij winacties en weggeefacties.\n**Community**: Pings voor community zaken zoals events.\n**Promotie Team**: Word gepingd om mee te helpen met Reddit- of social media posts.\n**Journalist**: Pings voor roddels.",
       "buttons": [
         {
           "label": "Discord Server",
