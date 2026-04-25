@@ -22,6 +22,12 @@ from services.db.trades import aggregate, rank_matches
 logger = logging.getLogger("discord_bot")
 
 
+def _unwrap(resp) -> dict | list:
+    if isinstance(resp, dict):
+        return resp.get("result", {}).get("data", resp)
+    return resp
+
+
 def _cutoff(hours: int) -> str:
     return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(
         timespec="milliseconds"
@@ -126,6 +132,44 @@ class MarktprijsCog(CommandCogBase):
     def __init__(self, bot) -> None:
         self.bot = bot
 
+    async def _refresh_item_trades(self, item_code: str) -> tuple[int, int, str | None]:
+        """Fetch latest live itemMarket trades for this item and store new rows."""
+        client = self._client
+        db = self._db
+        if client is None or db is None:
+            return 0, 0, "live refresh overgeslagen"
+
+        try:
+            raw = await client.post(
+                "/transaction.getPaginatedTransactions",
+                json={
+                    "limit": 100,
+                    "itemCode": item_code,
+                    "transactionType": "itemMarket",
+                },
+            )
+            data = _unwrap(raw) if isinstance(raw, dict) else {}
+            if isinstance(data, dict):
+                items = (
+                    data.get("items")
+                    or data.get("transactions")
+                    or data.get("results")
+                    or []
+                )
+            elif isinstance(data, list):
+                items = data
+            else:
+                items = []
+            items = [
+                tx for tx in items
+                if isinstance(tx, dict) and tx.get("itemCode") == item_code
+            ]
+            inserted, seen = await db.upsert_trades(items)
+            return inserted, seen, None
+        except Exception as exc:
+            logger.warning("marktprijs: live refresh failed for %s: %s", item_code, exc)
+            return 0, 0, "live refresh mislukt"
+
     @app_commands.command(
         name="marktprijs",
         description="Schat marktprijs van een item o.b.v. recente itemMarket trades.",
@@ -158,6 +202,9 @@ class MarktprijsCog(CommandCogBase):
             await self._send_api_offline(interaction, "Database nog niet gereed.")
             return
 
+        item_code = item_code.strip()
+        inserted, seen, refresh_note = await self._refresh_item_trades(item_code)
+
         # 30-dagen window is onze buitengrens; smaller windows filteren we in-memory.
         since = _cutoff(24 * 30)
         try:
@@ -168,6 +215,9 @@ class MarktprijsCog(CommandCogBase):
             return
 
         if len(rows) < 3:
+            footer = f"Live refresh: {seen} gezien, {inserted} nieuw"
+            if refresh_note:
+                footer += f" • {refresh_note}"
             embed = discord.Embed(
                 title=f"📉 Marktprijs: {item_code}",
                 description=(
@@ -176,6 +226,7 @@ class MarktprijsCog(CommandCogBase):
                 ),
                 colour=self._embed_colour("warning"),
             )
+            embed.set_footer(text=footer)
             await interaction.followup.send(embed=embed)
             return
 
@@ -259,9 +310,13 @@ class MarktprijsCog(CommandCogBase):
                 inline=False,
             )
 
-        embed.set_footer(
-            text=f"Bron: item_trades  •  {len(rows)} trades in 30 dagen voor {item_code}"
+        footer = (
+            f"Bron: item_trades  •  {len(rows)} trades in 30 dagen voor {item_code}"
+            f"  •  live refresh: {seen} gezien, {inserted} nieuw"
         )
+        if refresh_note:
+            footer += f"  •  {refresh_note}"
+        embed.set_footer(text=footer)
         await interaction.followup.send(embed=embed)
 
     @marktprijs.autocomplete("item_code")

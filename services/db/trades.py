@@ -53,6 +53,9 @@ def extract_trade_fields(tx: dict) -> Optional[dict]:
 
     Returns ``None`` if the payload lacks the bare minimum (id, itemCode, money).
     """
+    if tx.get("transactionType") != "itemMarket":
+        return None
+
     tx_id = tx.get("_id") or tx.get("id")
     item_code = tx.get("itemCode")
     money = tx.get("money")
