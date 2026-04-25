@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from typing import Optional
 
 from discord.ext import tasks
@@ -90,73 +90,6 @@ def _entry_wealth(entry: dict) -> float:
     return 0.0
 
 
-def _extract_companies_page(resp: object) -> tuple[list[str], Optional[str]]:
-    """Return (company_ids, next_cursor) from a company.getCompanies response.
-
-    The API returns a list of company ID strings under ``items``.
-    """
-    data = _unwrap(resp)
-    company_ids: list[str] = []
-    next_cursor: Optional[str] = None
-
-    if isinstance(data, list):
-        company_ids = [c for c in data if isinstance(c, str)]
-    elif isinstance(data, dict):
-        for key in ("items", "companies", "data", "results"):
-            v = data.get(key)
-            if isinstance(v, list):
-                # IDs may be strings or dicts; handle both
-                for item in v:
-                    if isinstance(item, str):
-                        company_ids.append(item)
-                    elif isinstance(item, dict):
-                        for id_key in ("_id", "id", "companyId"):
-                            cid = item.get(id_key)
-                            if cid and isinstance(cid, str):
-                                company_ids.append(cid)
-                                break
-                break
-        for key in ("nextCursor", "cursor", "next", "nextPage"):
-            v = data.get(key)
-            if v and isinstance(v, str):
-                next_cursor = v
-                break
-
-    return company_ids, next_cursor
-
-
-def _is_company_inactive(company: dict) -> bool:
-    """Return True if the company is disabled/inactive.
-
-    Disabled companies have a ``disabledAt`` timestamp field; active ones do not.
-    """
-    if company.get("disabledAt"):
-        return True
-    for key in ("isActive", "active"):
-        v = company.get(key)
-        if isinstance(v, bool):
-            if not v:
-                return True
-            return False  # explicitly active
-    for key in ("disabled", "isDisabled", "isSuspended", "suspended"):
-        v = company.get(key)
-        if isinstance(v, bool) and v:
-            return True
-    status = company.get("status")
-    if isinstance(status, str):
-        return status.lower() in ("disabled", "inactive", "suspended", "closed", "banned")
-    return False
-
-
-def _company_balance(company: dict) -> float:
-    """Extract the balance/wealth of a company."""
-    for key in ("balance", "wealth", "money", "gold", "coins", "amount", "estimatedValue", "concreteInvested"):
-        v = company.get(key)
-        if isinstance(v, (int, float)):
-            return float(v)
-    return 0.0
-
-
 # ── Task cog ──────────────────────────────────────────────────────────────────
 
 class WealthTasks(TaskCogBase, name="wealth_tasks"):
@@ -169,7 +102,7 @@ class WealthTasks(TaskCogBase, name="wealth_tasks"):
     def cog_unload(self) -> None:
         self.wealth_refresh.cancel()
 
-    @tasks.loop(hours=24)
+    @tasks.loop(time=time(4, 0, tzinfo=timezone.utc))
     async def wealth_refresh(self) -> None:
         if not self._client or not self._db:
             return
@@ -241,13 +174,12 @@ class WealthTasks(TaskCogBase, name="wealth_tasks"):
             async with sem:
                 wealth_active, api_name = wealth_map.get(user_id, (0.0, None))
                 resolved_name = api_name or citizen_name
-                inactive_wealth = await self._get_inactive_company_wealth(user_id)
                 await self._db.upsert_citizen_wealth(
                     user_id=user_id,
                     country_id=nl_country_id,
                     citizen_name=resolved_name,
                     wealth_active=wealth_active,
-                    wealth_inactive=inactive_wealth,
+                    wealth_inactive=0.0,
                     updated_at=now_str,
                 )
 
@@ -259,54 +191,6 @@ class WealthTasks(TaskCogBase, name="wealth_tasks"):
         await self._db.set_poll_state("wealth_ranking_last_run", now_str)
         logger.info("wealth_refresh: done — %d citizens saved", saved)
         return {"saved": saved}
-
-    async def _get_inactive_company_wealth(self, user_id: str) -> float:
-        """Sum the balance of all disabled/inactive companies owned by *user_id*."""
-        total = 0.0
-        cursor: Optional[str] = None
-        while True:
-            payload: dict = {"userId": user_id, "perPage": 100}
-            if cursor:
-                payload["cursor"] = cursor
-            try:
-                resp = await self._client.post("/company.getCompanies", json=payload)
-            except Exception as exc:
-                logger.warning(
-                    "wealth_refresh: company list failed for user %s: %s", user_id, exc
-                )
-                break
-            company_ids, next_cursor = _extract_companies_page(resp)
-
-            async def _fetch_company(company_id: str) -> float:
-                try:
-                    detail_resp = await self._client.post(
-                        "/company.getById", json={"companyId": company_id}
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "wealth_refresh: getById failed for company %s: %s",
-                        company_id, exc,
-                    )
-                    return 0.0
-                company = _unwrap(detail_resp)
-                if not isinstance(company, dict):
-                    return 0.0
-                inactive = _is_company_inactive(company)
-                bal = _company_balance(company)
-                if inactive:
-                    logger.info(
-                        "wealth_refresh: user %s inactive company %s balance=%s",
-                        user_id, company_id, bal,
-                    )
-                return bal if inactive else 0.0
-
-            page_totals = await asyncio.gather(*[_fetch_company(cid) for cid in company_ids])
-            total += sum(page_totals)
-            if not next_cursor or not company_ids:
-                break
-            cursor = next_cursor
-        return total
-        return total
 
 
 async def setup(bot) -> None:
