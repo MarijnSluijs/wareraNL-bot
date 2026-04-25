@@ -37,13 +37,14 @@ def _cutoff(hours: int) -> str:
 def _fmt_price(v: Optional[float]) -> str:
     if v is None:
         return "—"
-    return f"{v:.2f}"
+    text = f"{v:.3f}".rstrip("0").rstrip(".")
+    return text or "0"
 
 
 def _fmt_coin_amount(v: Optional[float]) -> str:
     if v is None:
         return "—"
-    return f"{max(1, round(v))} c"
+    return f"{_fmt_price(v)} c"
 
 
 def _sell_advice(
@@ -61,15 +62,20 @@ def _sell_advice(
     )
     for label, agg in candidates:
         if agg.get("n", 0) >= 3:
-            key = "weighted" if any_stat_given and agg.get("weighted") is not None else "mean"
+            key = (
+                "weighted"
+                if any_stat_given and agg.get("weighted") is not None
+                else "mean"
+            )
             price = agg.get(key)
             if price is None:
                 continue
-            low = max(1, round(price * 0.9))
-            high = max(low, round(price * 1.1))
+            low = price * 0.9
+            high = max(low, price * 1.1)
             return (
                 f"Richtprijs: **{_fmt_coin_amount(price)}**\n"
-                f"Snelle verkoop: **{low} c** · ambitieuze listing: **{high} c**\n"
+                f"Snelle verkoop: **{_fmt_coin_amount(low)}** · "
+                f"ambitieuze listing: **{_fmt_coin_amount(high)}**\n"
                 f"Gebaseerd op {label} ({agg['n']} verkopen)."
             )
     return "Nog te weinig vergelijkbare verkopen voor een betrouwbaar advies."
@@ -128,9 +134,51 @@ def _row_stats_compact(row: dict) -> str:
     return " ".join(parts) or "—"
 
 
+def _listing_line(index: int, row: dict, dist: float, *, show_distance: bool) -> str:
+    price = row["price"] / max(1, row.get("quantity") or 1)
+    distance = f" d={dist:.3f}" if show_distance else ""
+    return (
+        f"{index:>3}. {_short_ts(row['created_at'])} — "
+        f"{_fmt_coin_amount(price)}{distance} ({_row_stats_compact(row)})"
+    )
+
+
 class MarktprijsCog(CommandCogBase):
     def __init__(self, bot) -> None:
         self.bot = bot
+
+    async def _send_full_listings(
+        self,
+        interaction: discord.Interaction,
+        item_code: str,
+        ranked: list[tuple[dict, float]],
+        *,
+        show_distance: bool,
+    ) -> None:
+        if not ranked:
+            return
+
+        header = f"Alle gevonden listings voor {item_code} ({len(ranked)}):"
+        chunks: list[list[str]] = []
+        current: list[str] = []
+        current_len = len(header) + 8
+        for index, (row, dist) in enumerate(ranked, start=1):
+            line = _listing_line(index, row, dist, show_distance=show_distance)
+            line_len = len(line) + 1
+            if current and current_len + line_len > 1900:
+                chunks.append(current)
+                current = []
+                current_len = len(header) + 8
+            current.append(line)
+            current_len += line_len
+        if current:
+            chunks.append(current)
+
+        for part, lines in enumerate(chunks, start=1):
+            title = header if len(chunks) == 1 else f"{header} deel {part}/{len(chunks)}"
+            await interaction.followup.send(
+                f"{title}\n```text\n" + "\n".join(lines) + "\n```"
+            )
 
     async def _refresh_item_trades(self, item_code: str) -> tuple[int, int, str | None]:
         """Fetch latest live itemMarket trades for this item and store new rows."""
@@ -161,7 +209,8 @@ class MarktprijsCog(CommandCogBase):
             else:
                 items = []
             items = [
-                tx for tx in items
+                tx
+                for tx in items
                 if isinstance(tx, dict) and tx.get("itemCode") == item_code
             ]
             inserted, seen = await db.upsert_trades(items)
@@ -183,6 +232,7 @@ class MarktprijsCog(CommandCogBase):
         armor="Armor stat",
         precision="Precision stat",
         dodge="Dodge stat",
+        full="Toon alle gevonden listings naast de samenvatting",
     )
     async def marktprijs(
         self,
@@ -195,6 +245,7 @@ class MarktprijsCog(CommandCogBase):
         armor: Optional[int] = None,
         precision: Optional[int] = None,
         dodge: Optional[int] = None,
+        full: bool = False,
     ) -> None:
         await interaction.response.defer(thinking=True)
 
@@ -214,22 +265,6 @@ class MarktprijsCog(CommandCogBase):
             await self._send_api_offline(interaction, "DB-fout bij ophalen trades.")
             return
 
-        if len(rows) < 3:
-            footer = f"Live refresh: {seen} gezien, {inserted} nieuw"
-            if refresh_note:
-                footer += f" • {refresh_note}"
-            embed = discord.Embed(
-                title=f"📉 Marktprijs: {item_code}",
-                description=(
-                    f"Te weinig data (n={len(rows)}) in de afgelopen 30 dagen.\n"
-                    "De bot verzamelt per uur nieuwe trades — probeer later opnieuw."
-                ),
-                colour=self._embed_colour("warning"),
-            )
-            embed.set_footer(text=footer)
-            await interaction.followup.send(embed=embed)
-            return
-
         query = {
             "state": state,
             "attack": attack,
@@ -247,6 +282,29 @@ class MarktprijsCog(CommandCogBase):
             # Zonder stats: behandel elk item als gelijk (distance 0) en gebruik
             # pure prijsstatistieken zodat de aggregate-functie nog werkt.
             ranked = [(r, 0.0) for r in rows]
+
+        if len(rows) < 3:
+            footer = f"Live refresh: {seen} gezien, {inserted} nieuw"
+            if refresh_note:
+                footer += f" • {refresh_note}"
+            embed = discord.Embed(
+                title=f"📉 Marktprijs: {item_code}",
+                description=(
+                    f"Te weinig data (n={len(rows)}) in de afgelopen 30 dagen.\n"
+                    "De bot verzamelt per uur nieuwe trades — probeer later opnieuw."
+                ),
+                colour=self._embed_colour("warning"),
+            )
+            embed.set_footer(text=footer)
+            await interaction.followup.send(embed=embed)
+            if full:
+                await self._send_full_listings(
+                    interaction,
+                    item_code,
+                    ranked,
+                    show_distance=any_stat_given,
+                )
+            return
 
         agg_24h = aggregate(ranked, _cutoff(24))
         agg_7d = aggregate(ranked, _cutoff(24 * 7))
@@ -302,7 +360,8 @@ class MarktprijsCog(CommandCogBase):
                 price = row["price"] / max(1, row.get("quantity") or 1)
                 top_lines.append(
                     f"`{_short_ts(row['created_at'])}` — "
-                    f"**{price:g} c**  d={dist:.3f}  ({_row_stats_compact(row)})"
+                    f"**{_fmt_coin_amount(price)}**  d={dist:.3f}  "
+                    f"({_row_stats_compact(row)})"
                 )
             embed.add_field(
                 name="🔎 Top 5 vergelijkbare verkopen",
@@ -318,6 +377,13 @@ class MarktprijsCog(CommandCogBase):
             footer += f"  •  {refresh_note}"
         embed.set_footer(text=footer)
         await interaction.followup.send(embed=embed)
+        if full:
+            await self._send_full_listings(
+                interaction,
+                item_code,
+                ranked,
+                show_distance=any_stat_given,
+            )
 
     @marktprijs.autocomplete("item_code")
     async def _item_code_autocomplete(
