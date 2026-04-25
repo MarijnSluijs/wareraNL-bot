@@ -176,7 +176,6 @@ class General(commands.Cog, name="general"):
                 break  # only one animal reaction per message
         if "app.warera.io" not in content.lower():
             return
-        self.bot.logger.info("app.warera.io" not in content.lower(), content.lower())
         try:
             await message.edit(suppress=True)
             self.bot.logger.info(
