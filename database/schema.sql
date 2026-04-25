@@ -417,6 +417,20 @@ CREATE TABLE IF NOT EXISTS citizen_wealth (
 CREATE INDEX IF NOT EXISTS idx_citizen_wealth_country ON citizen_wealth(country_id);
 CREATE INDEX IF NOT EXISTS idx_citizen_wealth_total   ON citizen_wealth(wealth_total DESC);
 
+-- citizen_wealth_history: daily snapshots of each NL citizen's total wealth.
+--   One row per (user_id, snapshot_date). Used to compute wealth increase
+--   over a configurable number of days in the /wealth command.
+CREATE TABLE IF NOT EXISTS citizen_wealth_history (
+    user_id       TEXT NOT NULL,
+    country_id    TEXT NOT NULL,
+    citizen_name  TEXT,
+    wealth_total  REAL NOT NULL DEFAULT 0,
+    snapshot_date TEXT NOT NULL,  -- ISO date: YYYY-MM-DD (UTC)
+    PRIMARY KEY (user_id, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_wealth_history_country_date
+    ON citizen_wealth_history(country_id, snapshot_date);
+
 -- ── Event gems ────────────────────────────────────────────────────────────────
 
 -- event_gems: gem balance per Discord user, awarded via Discord events.

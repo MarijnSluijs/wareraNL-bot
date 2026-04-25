@@ -165,6 +165,7 @@ class WealthTasks(TaskCogBase, name="wealth_tasks"):
         logger.info("wealth_refresh: processing %d NL citizens", len(citizens))
 
         now_str = datetime.now(timezone.utc).isoformat()
+        today_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         # Process citizens concurrently in batches of 20
         _BATCH = 20
@@ -174,6 +175,7 @@ class WealthTasks(TaskCogBase, name="wealth_tasks"):
             async with sem:
                 wealth_active, api_name = wealth_map.get(user_id, (0.0, None))
                 resolved_name = api_name or citizen_name
+                wealth_total = wealth_active  # inactive companies are now included in active
                 await self._db.upsert_citizen_wealth(
                     user_id=user_id,
                     country_id=nl_country_id,
@@ -182,11 +184,19 @@ class WealthTasks(TaskCogBase, name="wealth_tasks"):
                     wealth_inactive=0.0,
                     updated_at=now_str,
                 )
+                await self._db.insert_wealth_snapshot(
+                    user_id=user_id,
+                    country_id=nl_country_id,
+                    citizen_name=resolved_name,
+                    wealth_total=wealth_total,
+                    snapshot_date=today_date,
+                )
 
         await asyncio.gather(*[_process_citizen(uid, name) for uid, name in citizens])
         saved = len(citizens)
 
         await self._db.flush_citizen_wealth()
+        await self._db.flush_wealth_history()
         await self._db.set_poll_state("wealth_ranking_total", str(saved))
         await self._db.set_poll_state("wealth_ranking_last_run", now_str)
         logger.info("wealth_refresh: done — %d citizens saved", saved)
