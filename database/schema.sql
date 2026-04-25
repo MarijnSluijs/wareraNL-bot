@@ -457,7 +457,7 @@ CREATE TABLE IF NOT EXISTS item_trades (
     item_code         TEXT NOT NULL,
     item_type         TEXT,                        -- e.g. "equipment"
     quantity          INTEGER NOT NULL DEFAULT 1,
-    price             INTEGER NOT NULL,            -- total money paid (coins)
+    price             REAL NOT NULL,               -- total money paid (coins)
     state             INTEGER,                     -- current durability
     max_state         INTEGER,                     -- max durability
     attack            INTEGER,

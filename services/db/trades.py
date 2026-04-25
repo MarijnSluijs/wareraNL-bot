@@ -48,6 +48,15 @@ def _int_or_none(v) -> Optional[int]:
         return None
 
 
+def _float_or_none(v) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def extract_trade_fields(tx: dict) -> Optional[dict]:
     """Flatten a raw itemMarket payload into column values for ``item_trades``.
 
@@ -59,7 +68,8 @@ def extract_trade_fields(tx: dict) -> Optional[dict]:
     tx_id = tx.get("_id") or tx.get("id")
     item_code = tx.get("itemCode")
     money = tx.get("money")
-    if not tx_id or not item_code or money is None:
+    price = _float_or_none(money)
+    if not tx_id or not item_code or price is None:
         return None
 
     item = tx.get("item") if isinstance(tx.get("item"), dict) else {}
@@ -72,7 +82,7 @@ def extract_trade_fields(tx: dict) -> Optional[dict]:
         "item_code": str(item_code),
         "item_type": item.get("type"),
         "quantity": int(tx.get("quantity") or 1),
-        "price": int(money),
+        "price": price,
         "state": _int_or_none(item.get("state")),
         "max_state": _int_or_none(item.get("maxState")),
         "buyer_id": tx.get("buyerId"),
@@ -170,6 +180,13 @@ class TradesMixin:
         async with self._conn.execute("SELECT COUNT(*) FROM item_trades") as cur:
             row = await cur.fetchone()
         return int(row[0]) if row else 0
+
+    async def clear_item_trades(self) -> int:
+        """Delete all stored itemMarket trades. Returns number of deleted rows."""
+        before = await self.item_trades_count()
+        await self._conn.execute("DELETE FROM item_trades")
+        await self._conn.commit()
+        return before
 
 
 # ────────────────────────────────────────────────────────────────────────────

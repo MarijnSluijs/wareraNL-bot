@@ -397,6 +397,33 @@ class MarktprijsCog(CommandCogBase):
             return []
         return [app_commands.Choice(name=c, value=c) for c in codes]
 
+    @app_commands.command(
+        name="cleartradingrecords",
+        description="Wis alle opgeslagen itemMarket trade records.",
+    )
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def clear_trading_records(self, interaction: discord.Interaction) -> None:
+        if not self._db:
+            await self._send_api_offline(interaction, "Database nog niet gereed.")
+            return
+
+        try:
+            deleted = await self._db.clear_item_trades()
+        except Exception:
+            logger.exception("cleartradingrecords: DB error")
+            await self._send_api_offline(
+                interaction,
+                "DB-fout bij wissen van trading records.",
+            )
+            return
+
+        embed = discord.Embed(
+            title="Trading records gewist",
+            description=f"Er zijn **{deleted}** itemMarket trade records verwijderd.",
+            colour=self._embed_colour("success"),
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 async def setup(bot) -> None:
     await bot.add_cog(MarktprijsCog(bot))
