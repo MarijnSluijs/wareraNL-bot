@@ -21,6 +21,30 @@ from services.db.trades import aggregate, rank_matches
 
 logger = logging.getLogger("discord_bot")
 _CLEAR_TRADING_RECORDS_ALLOWED_USER_IDS = {668523476507820042}
+SCRAP_YIELDS_BY_RARITY: dict[str, int] = {
+    "Common": 6,
+    "Uncommon": 18,
+    "Elite": 54,
+    "Rare": 162,
+    "Epic": 486,
+    "Mythic": 1460,
+}
+GEAR_SUFFIX_RARITY: dict[str, str] = {
+    "1": "Common",
+    "2": "Uncommon",
+    "3": "Elite",
+    "4": "Rare",
+    "5": "Epic",
+    "6": "Mythic",
+}
+FIXED_ITEM_RARITY: dict[str, str] = {
+    "knife": "Common",
+    "gun": "Uncommon",
+    "rifle": "Elite",
+    "sniper": "Rare",
+    "tank": "Epic",
+    "jet": "Mythic",
+}
 
 
 def _can_clear_trading_records(interaction: discord.Interaction) -> bool:
@@ -64,6 +88,59 @@ def _fmt_coin_amount(v: Optional[float]) -> str:
     if v is None:
         return "—"
     return f"{_fmt_price(v)} c"
+
+
+def _unit_money(tx: dict) -> Optional[float]:
+    money = tx.get("money")
+    try:
+        value = abs(float(money))
+    except (TypeError, ValueError):
+        return None
+    quantity = tx.get("quantity") or 1
+    try:
+        qty = float(quantity)
+    except (TypeError, ValueError):
+        qty = 1.0
+    if qty <= 0:
+        qty = 1.0
+    return value / qty
+
+
+def _item_rarity(item_code: str) -> Optional[str]:
+    code = item_code.strip().lower()
+    if code in FIXED_ITEM_RARITY:
+        return FIXED_ITEM_RARITY[code]
+    suffix = code[-1:] if code else ""
+    return GEAR_SUFFIX_RARITY.get(suffix)
+
+
+def _scrap_value_text(
+    rarity: Optional[str],
+    scrap_count: Optional[int],
+    scrap_price: Optional[float],
+    scrap_trade_count: int,
+    scrap_note: Optional[str],
+) -> Optional[str]:
+    if not rarity or not scrap_count:
+        return None
+    if scrap_price is None:
+        text = (
+            f"Rarity: **{rarity}**\n"
+            f"Scrap opbrengst: **{scrap_count} scraps**\n"
+            "Scrapprijs: —"
+        )
+        if scrap_note:
+            text += f"\n{scrap_note}"
+        return text
+
+    total_scrap_value = scrap_count * scrap_price
+    return (
+        f"Rarity: **{rarity}**\n"
+        f"Scrap opbrengst: **{scrap_count} scraps**\n"
+        f"Gem. scrapprijs: **{_fmt_coin_amount(scrap_price)}** "
+        f"({scrap_trade_count} trades)\n"
+        f"Scrapwaarde: **{_fmt_coin_amount(total_scrap_value)}**"
+    )
 
 
 def _sell_advice(
@@ -238,6 +315,49 @@ class MarktprijsCog(CommandCogBase):
             logger.warning("marktprijs: live refresh failed for %s: %s", item_code, exc)
             return 0, 0, "live refresh mislukt"
 
+    async def _fetch_scrap_price(self) -> tuple[float | None, int, str | None]:
+        """Return average scraps price from latest trading transactions."""
+        client = self._client
+        if client is None:
+            return None, 0, "scrapprijs niet opgehaald"
+
+        try:
+            raw = await client.post(
+                "/transaction.getPaginatedTransactions",
+                json={
+                    "limit": 100,
+                    "itemCode": "scraps",
+                    "transactionType": "trading",
+                },
+            )
+            data = _unwrap(raw) if isinstance(raw, dict) else {}
+            if isinstance(data, dict):
+                items = (
+                    data.get("items")
+                    or data.get("transactions")
+                    or data.get("results")
+                    or []
+                )
+            elif isinstance(data, list):
+                items = data
+            else:
+                items = []
+            prices = [
+                price
+                for tx in items
+                if isinstance(tx, dict)
+                and tx.get("itemCode") == "scraps"
+                and tx.get("transactionType") == "trading"
+                for price in [_unit_money(tx)]
+                if price is not None
+            ]
+            if not prices:
+                return None, 0, "geen scrap trades gevonden"
+            return sum(prices) / len(prices), len(prices), None
+        except Exception as exc:
+            logger.warning("marktprijs: scrap price fetch failed: %s", exc)
+            return None, 0, "scrapprijs ophalen mislukt"
+
     @app_commands.command(
         name="marktprijs",
         description="Schat marktprijs van een item o.b.v. recente itemMarket trades.",
@@ -274,6 +394,9 @@ class MarktprijsCog(CommandCogBase):
 
         item_code = item_code.strip()
         inserted, seen, refresh_note = await self._refresh_item_trades(item_code)
+        scrap_price, scrap_trade_count, scrap_note = await self._fetch_scrap_price()
+        rarity = _item_rarity(item_code)
+        scrap_count = SCRAP_YIELDS_BY_RARITY.get(rarity or "")
 
         # 30-dagen window is onze buitengrens; smaller windows filteren we in-memory.
         since = _cutoff(24 * 30)
@@ -315,6 +438,15 @@ class MarktprijsCog(CommandCogBase):
                 colour=self._embed_colour("warning"),
             )
             embed.set_footer(text=footer)
+            scrap_value = _scrap_value_text(
+                rarity,
+                scrap_count,
+                scrap_price,
+                scrap_trade_count,
+                scrap_note,
+            )
+            if scrap_value:
+                embed.add_field(name="Scrapwaarde", value=scrap_value, inline=False)
             await interaction.followup.send(embed=embed)
             if full:
                 await self._send_full_listings(
@@ -363,6 +495,15 @@ class MarktprijsCog(CommandCogBase):
             ),
             inline=False,
         )
+        scrap_value = _scrap_value_text(
+            rarity,
+            scrap_count,
+            scrap_price,
+            scrap_trade_count,
+            scrap_note,
+        )
+        if scrap_value:
+            embed.add_field(name="Scrapwaarde", value=scrap_value, inline=False)
         embed.add_field(
             name="Legenda",
             value=(
