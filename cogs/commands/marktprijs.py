@@ -20,6 +20,25 @@ from cogs.commands._base import CommandCogBase
 from services.db.trades import aggregate, rank_matches
 
 logger = logging.getLogger("discord_bot")
+_CLEAR_TRADING_RECORDS_ALLOWED_USER_IDS = {668523476507820042}
+
+
+def _can_clear_trading_records(interaction: discord.Interaction) -> bool:
+    if interaction.user.id in _CLEAR_TRADING_RECORDS_ALLOWED_USER_IDS:
+        return True
+    permissions = getattr(interaction.user, "guild_permissions", None)
+    return bool(permissions and permissions.manage_guild)
+
+
+def clear_trading_records_check():
+    async def predicate(interaction: discord.Interaction) -> bool:
+        if _can_clear_trading_records(interaction):
+            return True
+        raise app_commands.CheckFailure(
+            "Je hebt Manage Server nodig om trading records te wissen."
+        )
+
+    return app_commands.check(predicate)
 
 
 def _unwrap(resp) -> dict | list:
@@ -401,7 +420,7 @@ class MarktprijsCog(CommandCogBase):
         name="cleartradingrecords",
         description="Wis alle opgeslagen itemMarket trade records.",
     )
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @clear_trading_records_check()
     async def clear_trading_records(self, interaction: discord.Interaction) -> None:
         if not self._db:
             await self._send_api_offline(interaction, "Database nog niet gereed.")
