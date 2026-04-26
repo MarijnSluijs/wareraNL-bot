@@ -19,6 +19,7 @@ Mixin                Tables
 :mod:`.company_bonus`   ``company_bonus_watchers``, ``company_bonus_alerts``
 :mod:`.gems`            ``event_gems``
 :mod:`.tx_cache`        ``player_tx_cache``
+:mod:`.trades`          ``item_trades``
 ===================  ========================================
 Usage::
 
@@ -38,6 +39,7 @@ from .citizens import CitizensMixin
 from .company_bonus import CompanyBonusMixin
 from .company_move_advice import CompanyMoveAdviceMixin
 from .pill_reminders import PillRemindersMixin
+from .trades import TradesMixin
 from .tx_cache import TxCacheMixin
 from .events import EventsMixin
 from .giveaways_db import GiveawaysMixin
@@ -69,6 +71,7 @@ class Database(
     CompanyMoveAdviceMixin,
     PillRemindersMixin,
     TxCacheMixin,
+    TradesMixin,
     WealthMixin,
     DatabaseBase,
 ):
