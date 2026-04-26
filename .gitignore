@@ -7,12 +7,7 @@ docker-compose.websites.yml
 pyrightconfig.json
 database/database.db.backup.*
 data/reddit_state.json
-website/data/
-!website/
-!website/__init__.py
-!website/app/
-!website/app/**
-api_explorer/
+dashboard/
 api_dump.json
 scripts/
 TODO.md
