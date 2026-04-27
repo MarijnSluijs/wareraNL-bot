@@ -174,8 +174,8 @@ class General(commands.Cog, name="general"):
                 except discord.HTTPException:
                     pass
                 break  # only one animal reaction per message
-        #if "app.warera.io" not in content:
-        #    return
+        if "app.warera.io" not in content.lower():
+            return
         try:
             await message.edit(suppress=True)
             self.bot.logger.info(
