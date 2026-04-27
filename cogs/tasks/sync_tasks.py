@@ -212,6 +212,15 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
 
         stats["commanders_found"] = len(current_commanders)
 
+        # If the API returned no data at all, assume it is down and abort so
+        # that we never accidentally strip Commander roles due to an outage.
+        if stats["mus_checked"] == 0:
+            logger.warning(
+                "commander_role_check: no MUs could be fetched from the API "
+                "(API may be down) — skipping role changes to avoid mass-removal"
+            )
+            return stats
+
         for guild in self.bot.guilds:
             guild_id = str(guild.id)
             commandant_role = guild.get_role(commandant_role_id)
