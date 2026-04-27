@@ -102,3 +102,96 @@ class WealthMixin:
         async with self._conn.execute(sql, (country_id, user_id)) as cur:
             row = await cur.fetchone()
             return row[0] if row else None
+
+    # ── Daily wealth history ──────────────────────────────────────────────
+
+    async def insert_wealth_snapshot(
+        self,
+        user_id: str,
+        country_id: str,
+        citizen_name: Optional[str],
+        wealth_total: float,
+        snapshot_date: str,
+    ) -> None:
+        """Insert (or replace) a daily wealth snapshot for a citizen.
+
+        ``snapshot_date`` should be an ISO date string (YYYY-MM-DD, UTC).
+        Calling this twice on the same day for the same user will update
+        the value (REPLACE semantics via the composite primary key).
+        """
+        await self._conn.execute(
+            "INSERT OR REPLACE INTO citizen_wealth_history"
+            " (user_id, country_id, citizen_name, wealth_total, snapshot_date)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (user_id, country_id, citizen_name, wealth_total, snapshot_date),
+        )
+
+    async def flush_wealth_history(self) -> None:
+        """Commit pending history writes."""
+        await self._conn.commit()
+
+    async def get_wealth_increase_ranking(
+        self,
+        country_id: str,
+        days: int,
+        limit: int = 10,
+    ) -> list[dict]:
+        """Return top `limit` citizens by wealth increase over the last `days` days.
+
+        Only citizens who have a snapshot both today (most recent) and at least
+        `days` days ago are included.  Sorted by increase descending.
+        """
+        sql = (
+            "SELECT"
+            "  recent.user_id,"
+            "  COALESCE(recent.citizen_name, old.citizen_name) AS citizen_name,"
+            "  recent.wealth_total AS wealth_now,"
+            "  old.wealth_total    AS wealth_then,"
+            "  (recent.wealth_total - old.wealth_total) AS increase"
+            " FROM ("
+            "  SELECT user_id, citizen_name, wealth_total, snapshot_date"
+            "  FROM citizen_wealth_history"
+            "  WHERE country_id = ?"
+            "    AND snapshot_date = ("
+            "      SELECT MAX(snapshot_date) FROM citizen_wealth_history"
+            "      WHERE country_id = ?"
+            "    )"
+            " ) AS recent"
+            " JOIN ("
+            "  SELECT user_id, citizen_name, wealth_total, snapshot_date"
+            "  FROM citizen_wealth_history"
+            "  WHERE country_id = ?"
+            "    AND snapshot_date <= DATE("
+            "      (SELECT MAX(snapshot_date) FROM citizen_wealth_history WHERE country_id = ?),"
+            "      ? || ' days'"
+            "    )"
+            "  GROUP BY user_id"
+            "  HAVING snapshot_date = MAX(snapshot_date)"
+            " ) AS old ON recent.user_id = old.user_id"
+            " ORDER BY increase DESC"
+            " LIMIT ?"
+        )
+        rows: list[dict] = []
+        # The DATE modifier needs a negative offset to go backwards
+        offset = f"-{days}"
+        async with self._conn.execute(
+            sql, (country_id, country_id, country_id, country_id, offset, limit)
+        ) as cur:
+            async for row in cur:
+                rows.append({
+                    "user_id": row[0],
+                    "citizen_name": row[1],
+                    "wealth_now": row[2],
+                    "wealth_then": row[3],
+                    "increase": row[4],
+                })
+        return rows
+
+    async def get_wealth_history_oldest_date(self, country_id: str) -> Optional[str]:
+        """Return the earliest snapshot_date available for ``country_id``, or None."""
+        async with self._conn.execute(
+            "SELECT MIN(snapshot_date) FROM citizen_wealth_history WHERE country_id = ?",
+            (country_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row and row[0] else None

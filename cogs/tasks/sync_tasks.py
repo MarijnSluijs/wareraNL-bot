@@ -19,6 +19,7 @@ from discord import app_commands
 from discord.ext import tasks
 
 from cogs.tasks._base import TaskCogBase
+from services.country_utils import extract_country_list
 from utils.checks import has_privileged_role
 
 logger = logging.getLogger("discord_bot")
@@ -211,6 +212,15 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
 
         stats["commanders_found"] = len(current_commanders)
 
+        # If the API returned no data at all, assume it is down and abort so
+        # that we never accidentally strip Commander roles due to an outage.
+        if stats["mus_checked"] == 0:
+            logger.warning(
+                "commander_role_check: no MUs could be fetched from the API "
+                "(API may be down) — skipping role changes to avoid mass-removal"
+            )
+            return stats
+
         for guild in self.bot.guilds:
             guild_id = str(guild.id)
             commandant_role = guild.get_role(commandant_role_id)
@@ -311,6 +321,19 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
         too_inactive: list[str] = []     # inactief 5+ dagen
         missing_role: list[str] = []     # in-game Nederlanders zonder Discord rol
 
+        # Build country id → name lookup
+        country_names: dict[str, str] = {}
+        if self._client:
+            try:
+                raw = await self._client.get("/country.getAllCountries")
+                for c in extract_country_list(raw):
+                    cid = str(c.get("_id") or c.get("id") or "")
+                    name = str(c.get("name") or c.get("code") or cid)
+                    if cid:
+                        country_names[cid] = name
+            except Exception:
+                logger.warning("citizenship_audit: failed to fetch country list for name lookup")
+
         for guild in self.bot.guilds:
             nederlander_role = guild.get_role(nederlander_role_id)
             if nederlander_role is None:
@@ -361,8 +384,9 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                 days_inactive = _days_since(last_login)
 
                 if country != nl_country_id:
+                    country_label = country_names.get(country, country)
                     wrong_country.append(
-                        f"• {member.mention} — land `{country}`"
+                        f"• {member.mention} — land **{country_label}**"
                     )
 
                 if days_inactive is not None and days_inactive > _INACTIVITY_DAYS:
