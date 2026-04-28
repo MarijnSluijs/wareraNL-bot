@@ -335,6 +335,8 @@ class Owner(commands.Cog, name="owner"):
         async for message in self.bot.get_channel(congres_channel_id).history(
             limit=None, after=start_time
         ):
+            if not isinstance(message.author, discord.Member):
+                continue  # user left the guild, no .roles available
             if message.author.bot or congress_role not in message.author.roles:
                 continue
             message_count[message.author.id] += 1
@@ -360,6 +362,8 @@ class Owner(commands.Cog, name="owner"):
         # this is a forum channel so we can't use history
         for thread in self.bot.get_channel(debate_channel_id).threads:
             async for message in thread.history(limit=None, after=start_time):
+                if not isinstance(message.author, discord.Member):
+                    continue  # user left the guild
                 if message.author.bot or congress_role not in message.author.roles:
                     continue
                 message_count[message.author.id] += 1
@@ -369,6 +373,8 @@ class Owner(commands.Cog, name="owner"):
             limit=None
         ):
             async for message in thread.history(limit=None, after=start_time):
+                if not isinstance(message.author, discord.Member):
+                    continue  # user left the guild
                 if message.author.bot or congress_role not in message.author.roles:
                     continue
                 message_count[message.author.id] += 1
@@ -397,6 +403,8 @@ class Owner(commands.Cog, name="owner"):
             users_counted = []
             for reaction in message.reactions:
                 async for user in reaction.users():
+                    if not isinstance(user, discord.Member):
+                        continue  # user left the guild, no .roles available
                     if user.bot or congress_role not in user.roles:
                         continue
                     if user.id in users_counted:
