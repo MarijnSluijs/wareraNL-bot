@@ -42,7 +42,7 @@ class CitizensMixin:
             "  skill_mode           = excluded.skill_mode,"
             "  last_skills_reset_at = excluded.last_skills_reset_at,"
             "  citizen_name         = excluded.citizen_name,"
-            "  last_login_at        = excluded.last_login_at,"
+            "  last_login_at        = COALESCE(excluded.last_login_at, citizen_levels.last_login_at),"
             "  mu_id   = COALESCE(excluded.mu_id,   citizen_levels.mu_id),"
             "  mu_name = COALESCE(excluded.mu_name, citizen_levels.mu_name),"
             "  updated_at           = excluded.updated_at",
@@ -964,17 +964,18 @@ class CitizensMixin:
 
     async def get_inactive_citizens_in_country(
         self, country_id: str, min_days_inactive: int
-    ) -> list[tuple[str, str, int, str]]:
-        """Return [(user_id, citizen_name, days_inactive, discord_user_id)] for
-        citizens in *country_id* who are inactive AND have a Discord link."""
-        rows: list[tuple[str, str, int, str]] = []
+    ) -> list[tuple[str, str, int, str | None]]:
+        """Return [(user_id, citizen_name, days_inactive, discord_user_id_or_None)] for
+        all citizens in *country_id* who are inactive.  discord_user_id is None when
+        no identity link exists for that citizen."""
+        rows: list[tuple[str, str, int, str | None]] = []
         async with self._conn.execute(
             """
             SELECT cl.user_id, cl.citizen_name,
                    CAST((julianday('now') - julianday(cl.last_login_at)) AS INTEGER) AS days_inactive,
                    il.discord_user_id
             FROM citizen_levels cl
-            INNER JOIN identity_links il ON il.in_game_user_id = cl.user_id
+            LEFT JOIN identity_links il ON il.in_game_user_id = cl.user_id
             WHERE cl.country_id = ?
               AND cl.last_login_at IS NOT NULL
               AND julianday('now') - julianday(cl.last_login_at) > ?
@@ -983,5 +984,5 @@ class CitizensMixin:
             (country_id, min_days_inactive),
         ) as cur:
             async for row in cur:
-                rows.append((str(row[0]), row[1] or "", int(row[2] or 0), str(row[3])))
+                rows.append((str(row[0]), row[1] or "", int(row[2] or 0), str(row[3]) if row[3] else None))
         return rows

@@ -420,7 +420,8 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                         f"• {member.mention} — in-game: **{citizen_name or user_id}**"
                     )
 
-        # ── Section C: In-game NL citizens inactive, only those linked to Discord
+        # ── Section C: All in-game NL citizens who are inactive
+        # Shows Discord mention when an identity link exists, otherwise in-game name only.
         inactive_ingame: list[str] = []
         try:
             ingame_inactive_rows = await self._db.get_inactive_citizens_in_country(
@@ -428,9 +429,15 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
             )
             for uid, name, days, discord_id in ingame_inactive_rows:
                 profile = f"https://app.warera.io/user/{uid}"
-                inactive_ingame.append(
-                    f"• <@{discord_id}> ([{name or uid}]({profile})) — {days} dagen inactief"
-                )
+                display_name = name or uid
+                if discord_id:
+                    inactive_ingame.append(
+                        f"• <@{discord_id}> ([{display_name}]({profile})) — {days} dagen inactief"
+                    )
+                else:
+                    inactive_ingame.append(
+                        f"• [{display_name}]({profile}) — {days} dagen inactief"
+                    )
         except Exception:
             logger.exception("citizenship_audit: failed querying in-game inactive citizens")
 
@@ -463,7 +470,7 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
         lines.extend(missing_role if missing_role else ["*Geen problemen gevonden.*"])
 
         lines.append("")
-        lines.append(f"### 💤 In-game inactief ({_INACTIVITY_DAYS}+ dagen, NL burgers op Discord)")
+        lines.append(f"### 💤 In-game inactief ({_INACTIVITY_DAYS}+ dagen)")
         lines.extend(inactive_ingame if inactive_ingame else ["*Geen problemen gevonden.*"])
 
         report = "\n".join(lines)

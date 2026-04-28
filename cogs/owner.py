@@ -555,11 +555,11 @@ class Owner(commands.Cog, name="owner"):
         self, interaction: discord.Interaction, min_level: int = 15
     ) -> None:
         """List NL in-game citizens (level ≥ min_level) with no Discord identity link."""
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
 
         db = getattr(self.bot, "_ext_db", None)
         if not db:
-            await interaction.followup.send("❌ Database niet beschikbaar.", ephemeral=True)
+            await interaction.followup.send("❌ Database niet beschikbaar.")
             return
 
         nl_country_id: str = self.bot.config.get("nl_country_id", "6813b6d446e731854c7ac7a0")
@@ -569,7 +569,6 @@ class Owner(commands.Cog, name="owner"):
         if not rows:
             await interaction.followup.send(
                 f"✅ Alle Nederlandse spelers (level ≥ {min_level}) zijn gelinkt aan Discord.",
-                ephemeral=True,
             )
             return
 
@@ -589,9 +588,9 @@ class Owner(commands.Cog, name="owner"):
         if current:
             chunks.append(current)
 
-        await interaction.followup.send(chunks[0], ephemeral=True)
+        await interaction.followup.send(chunks[0])
         for chunk in chunks[1:]:
-            await interaction.followup.send(chunk, ephemeral=True)
+            await interaction.followup.send(chunk)
 
     @commands.command(
         name="apioffline",
