@@ -6,6 +6,7 @@ Provides safe access to shared services and common Discord utilities.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Union
 
 import discord
@@ -85,12 +86,39 @@ class CommandCogBase(commands.Cog):
         except Exception:
             return discord.Colour.gold()
 
+    def _api_status_note(self) -> str:
+        client = self._client
+        if not client or not hasattr(client, "status_snapshot"):
+            return ""
+        try:
+            status = client.status_snapshot()
+        except Exception:
+            return ""
+
+        parts: list[str] = []
+        last_success = status.get("last_success_at")
+        if isinstance(last_success, datetime):
+            ts = int(last_success.timestamp())
+            parts.append(f"Laatste succesvolle API-call: <t:{ts}:R>.")
+        last_failure = status.get("last_failure_at")
+        if isinstance(last_failure, datetime):
+            ts = int(last_failure.timestamp())
+            parts.append(f"Laatste fout: <t:{ts}:R>.")
+        error = status.get("last_error")
+        if error:
+            parts.append(f"Foutmelding: `{str(error)[:180]}`")
+        return "\n".join(parts)
+
     def _api_offline_embed(self, note: str = "") -> discord.Embed:
         """Return a standardised 'API offline' embed."""
         desc = (
             "⚠️ De WarEra API is momenteel niet beschikbaar.\n"
-            "Probeer het later opnieuw."
+            "Als deze command lokale cache of databasehistorie heeft, gebruiken we die "
+            "waar mogelijk. Dan is de data niet realtime."
         )
+        status_note = self._api_status_note()
+        if status_note:
+            desc += f"\n\n{status_note}"
         if note:
             desc += f"\n\n{note}"
         embed = discord.Embed(

@@ -1,6 +1,7 @@
 import asyncio
 import json as _json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Sequence
 
 import aiohttp
@@ -31,6 +32,11 @@ class APIClient:
         self._timeout = aiohttp.ClientTimeout(total=timeout)
         # fallback headers provided by caller
         self._base_headers: Dict[str, str] = dict(headers or {})
+        self.last_success_at: Optional[datetime] = None
+        self.last_failure_at: Optional[datetime] = None
+        self.last_error: Optional[str] = None
+        self.last_status: Optional[int] = None
+        self.is_available: Optional[bool] = None
 
         # API key rotation
         self._api_keys = list(api_keys) if api_keys else []
@@ -54,6 +60,28 @@ class APIClient:
             await self._session.close()
             self._session = None
             logger.info("APIClient session closed")
+
+    def _record_success(self, status: int) -> None:
+        self.last_success_at = datetime.now(timezone.utc)
+        self.last_status = status
+        self.last_error = None
+        self.is_available = True
+
+    def _record_failure(self, error: object, status: Optional[int] = None) -> None:
+        self.last_failure_at = datetime.now(timezone.utc)
+        self.last_status = status
+        self.last_error = str(error)
+        self.is_available = False
+
+    def status_snapshot(self) -> dict[str, object]:
+        return {
+            "available": self.is_available,
+            "last_success_at": self.last_success_at,
+            "last_failure_at": self.last_failure_at,
+            "last_error": self.last_error,
+            "last_status": self.last_status,
+            "base_url": self.base_url,
+        }
 
     def _rotate_key(self) -> None:
         if not self._api_keys:
@@ -126,6 +154,7 @@ class APIClient:
                         status = resp.status
                         # success
                         if 200 <= status < 300:
+                            self._record_success(status)
                             try:
                                 return await resp.json()
                             except Exception:
@@ -222,6 +251,7 @@ class APIClient:
                             continue
 
                         # otherwise raise the status error
+                        self._record_failure(f"HTTP {status}", status=status)
                         resp.raise_for_status()
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 # 4xx errors are definitive (not transient) — don't retry them
@@ -237,7 +267,13 @@ class APIClient:
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * 2, 30.0)
                     continue
+                status = (
+                    e.status if isinstance(e, aiohttp.ClientResponseError) else None
+                )
+                self._record_failure(e, status=status)
                 raise
+        self._record_failure("Max API attempts exhausted")
+        raise RuntimeError("Max API attempts exhausted")
 
     async def get(
         self,
@@ -257,6 +293,26 @@ class APIClient:
         headers: Optional[Dict[str, str]] = None,
     ) -> Any:
         return await self._request("POST", path, json=json, headers=headers)
+
+    async def ping(self) -> dict[str, object]:
+        """Check whether the WarEra API responds to a lightweight request."""
+        started = asyncio.get_running_loop().time()
+        try:
+            await self.get("/country.getAllCountries")
+            elapsed_ms = int((asyncio.get_running_loop().time() - started) * 1000)
+            return {
+                "ok": True,
+                "latency_ms": elapsed_ms,
+                **self.status_snapshot(),
+            }
+        except Exception as exc:
+            elapsed_ms = int((asyncio.get_running_loop().time() - started) * 1000)
+            self._record_failure(exc)
+            return {
+                "ok": False,
+                "latency_ms": elapsed_ms,
+                **self.status_snapshot(),
+            }
 
     @staticmethod
     def _unwrap_trpc_batch_item(item: Any) -> Any:
