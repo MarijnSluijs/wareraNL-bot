@@ -364,9 +364,11 @@ class Owner(commands.Cog, name="owner"):
         congress_role = interaction.guild.get_role(1451181300009537547)
         date_label = start_time.strftime("%-d %B %Y")
 
-        # ── Single status DM that gets edited at every step ───────────────
-        status_msg = await interaction.user.send(
-            embed=_status_embed("⏳ **Stap 1/3** — Congres kanaal wordt geanalyseerd...")
+        # ── Single status message in the channel, edited at every step ─────
+        assert interaction.channel is not None
+        status_msg = await interaction.followup.send(
+            embed=_status_embed("⏳ **Stap 1/3** — Congres kanaal wordt geanalyseerd..."),
+            wait=True,
         )
 
         # ── Per-user tracking across all congress channels ────────────────
@@ -525,7 +527,6 @@ class Owner(commands.Cog, name="owner"):
         ))
 
         await status_msg.edit(embed=_status_embed("✅ Analyse voltooid!"))
-        await interaction.followup.send("✅ Analyse voltooid!", ephemeral=True)
 
     # @commands.hybrid_command(
     #     name="embed",
