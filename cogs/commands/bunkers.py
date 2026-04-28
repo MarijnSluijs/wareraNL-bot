@@ -39,8 +39,8 @@ class BunkersCog(CommandCogBase, name="bunkers"):
     )
     async def bunkers(self, ctx: Context) -> None:
         """Display bunker status for all NL-owned regions."""
-        if not self._client:
-            await ctx.send("❌ API client niet beschikbaar.", ephemeral=True)
+        if not self._client or self._client.is_available is False:
+            await self._send_api_offline(ctx)
             return
 
         await ctx.defer()

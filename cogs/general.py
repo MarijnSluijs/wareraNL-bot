@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import platform
 import random
+import re
 import typing
 from typing import TYPE_CHECKING
 
@@ -209,7 +210,11 @@ class General(commands.Cog, name="general"):
                     pass
 
         # ALL CAPS message (3+ chars) → 🔇 reaction
-        if len(content) >= 3 and content == content.upper() and any(c.isalpha() for c in content):
+        # Strip both typed shortcodes (:KEKW:) and actual Discord custom emoji
+        # (<:KEKW:123456789> or <a:KEKW:123456789> for animated) before checking,
+        # so that emoji-only messages don't incorrectly trigger the mute reaction.
+        _caps_stripped = re.sub(r'<a?:[A-Za-z0-9_]+:\d+>|:[A-Za-z0-9_]+:', '', content).strip()
+        if len(content) >= 3 and content == content.upper() and _caps_stripped and any(c.isalpha() for c in _caps_stripped):
             try:
                 await message.add_reaction("🔇")
             except discord.HTTPException:

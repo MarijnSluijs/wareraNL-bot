@@ -732,8 +732,8 @@ class LeaderboardCog(CommandCogBase, name="leaderboard"):
 
     async def _section_vermogen(self, limit: int) -> list[str]:
         client = self._client
-        if not client:
-            return ["*API niet beschikbaar*"]
+        if not client or client.is_available is False:
+            return ["*API momenteel niet beschikbaar (offline)*"]
         try:
             resp = await client.post(
                 "/ranking.getRanking",
