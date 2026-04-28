@@ -364,9 +364,11 @@ class Owner(commands.Cog, name="owner"):
         congress_role = interaction.guild.get_role(1451181300009537547)
         date_label = start_time.strftime("%-d %B %Y")
 
-        # ── Single status DM that gets edited at every step ───────────────
-        status_msg = await interaction.user.send(
-            embed=_status_embed("⏳ **Stap 1/3** — Congres kanaal wordt geanalyseerd...")
+        # ── Single status message in the channel, edited at every step ─────
+        assert interaction.channel is not None
+        status_msg = await interaction.followup.send(
+            embed=_status_embed("⏳ **Stap 1/3** — Congres kanaal wordt geanalyseerd..."),
+            wait=True,
         )
 
         # ── Per-user tracking across all congress channels ────────────────
@@ -525,7 +527,6 @@ class Owner(commands.Cog, name="owner"):
         ))
 
         await status_msg.edit(embed=_status_embed("✅ Analyse voltooid!"))
-        await interaction.followup.send("✅ Analyse voltooid!", ephemeral=True)
 
     # @commands.hybrid_command(
     #     name="embed",
@@ -554,11 +555,11 @@ class Owner(commands.Cog, name="owner"):
         self, interaction: discord.Interaction, min_level: int = 15
     ) -> None:
         """List NL in-game citizens (level ≥ min_level) with no Discord identity link."""
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
 
         db = getattr(self.bot, "_ext_db", None)
         if not db:
-            await interaction.followup.send("❌ Database niet beschikbaar.", ephemeral=True)
+            await interaction.followup.send("❌ Database niet beschikbaar.")
             return
 
         nl_country_id: str = self.bot.config.get("nl_country_id", "6813b6d446e731854c7ac7a0")
@@ -568,7 +569,6 @@ class Owner(commands.Cog, name="owner"):
         if not rows:
             await interaction.followup.send(
                 f"✅ Alle Nederlandse spelers (level ≥ {min_level}) zijn gelinkt aan Discord.",
-                ephemeral=True,
             )
             return
 
@@ -588,9 +588,9 @@ class Owner(commands.Cog, name="owner"):
         if current:
             chunks.append(current)
 
-        await interaction.followup.send(chunks[0], ephemeral=True)
+        await interaction.followup.send(chunks[0])
         for chunk in chunks[1:]:
-            await interaction.followup.send(chunk, ephemeral=True)
+            await interaction.followup.send(chunk)
 
     @commands.command(
         name="apioffline",
