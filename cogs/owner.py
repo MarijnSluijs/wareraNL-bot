@@ -361,6 +361,9 @@ class Owner(commands.Cog, name="owner"):
         congress_role = interaction.guild.get_role(1451181300009537547)
         date_label = start_time.strftime("%-d %B %Y")
 
+        from collections import Counter, defaultdict
+        from statistics import mean, median
+
         # ── Single status message in the channel, edited at every step ─────
         assert interaction.channel is not None
         status_msg = await interaction.followup.send(
@@ -369,189 +372,170 @@ class Owner(commands.Cog, name="owner"):
         )
 
         try:
-            await self._run_congres_analyse(
-                interaction, status_msg, start_time, date_label,
-                congress_role, channel_ids, _status_embed,
-            )
-        except discord.HTTPException as exc:
-            await status_msg.edit(
-                embed=_status_embed(
-                    f"❌ Discord API fout (HTTP {exc.status}): probeer het later opnieuw.\n"
-                    f"`{exc.text or exc}`"
+            # ── Per-user tracking across all congress channels ────────────────
+            user_congres_msgs: Counter[int] = Counter()
+            user_debat_msgs: Counter[int] = Counter()
+            # days on which the member sent ≥1 message in any congress channel
+            user_days: defaultdict[int, set[str]] = defaultdict(set)
+            # debate thread IDs in which the member sent ≥1 message
+            user_debates: defaultdict[int, set[int]] = defaultdict(set)
+            # messages per calendar day (across both channels)
+            user_msgs_per_day: defaultdict[int, Counter] = defaultdict(Counter)
+            # messages per debate thread
+            user_msgs_per_debate: defaultdict[int, Counter] = defaultdict(Counter)
+
+            def _is_congress_member(author) -> bool:
+                return (
+                    isinstance(author, discord.Member)
+                    and not author.bot
+                    and congress_role in author.roles
                 )
-            )
 
-    async def _run_congres_analyse(
-        self,
-        interaction: discord.Interaction,
-        status_msg,
-        start_time,
-        date_label: str,
-        congress_role,
-        channel_ids: dict,
-        _status_embed,
-    ) -> None:
-        from collections import Counter, defaultdict
-        from statistics import mean, median
-
-        congres_channel_id = channel_ids.get("congres")
-
-        # ── Per-user tracking across all congress channels ────────────────
-        user_congres_msgs: Counter[int] = Counter()
-        user_debat_msgs: Counter[int] = Counter()
-        # days on which the member sent ≥1 message in any congress channel
-        user_days: defaultdict[int, set[str]] = defaultdict(set)
-        # debate thread IDs in which the member sent ≥1 message
-        user_debates: defaultdict[int, set[int]] = defaultdict(set)
-        # messages per calendar day (across both channels)
-        user_msgs_per_day: defaultdict[int, Counter] = defaultdict(Counter)
-        # messages per debate thread
-        user_msgs_per_debate: defaultdict[int, Counter] = defaultdict(Counter)
-
-        def _is_congress_member(author) -> bool:
-            return (
-                isinstance(author, discord.Member)
-                and not author.bot
-                and congress_role in author.roles
-            )
-
-        # ── Step 1: congres channel ───────────────────────────────────────
-        async for message in self.bot.get_channel(congres_channel_id).history(
-            limit=None, after=start_time
-        ):
-            if not _is_congress_member(message.author):
-                continue
-            uid = message.author.id
-            day = message.created_at.strftime("%Y-%m-%d")
-            user_congres_msgs[uid] += 1
-            user_days[uid].add(day)
-            user_msgs_per_day[uid][day] += 1
-
-        # ── Step 2: debat forum ───────────────────────────────────────────
-        debate_channel_id = channel_ids.get("debat")
-        if not debate_channel_id:
-            await status_msg.edit(embed=_status_embed("❌ `debat` channel niet geconfigureerd."))
-            return
-
-        await status_msg.edit(
-            embed=_status_embed("⏳ **Stap 2/3** — Debat kanaal (actieve + gesloten threads) wordt geanalyseerd...")
-        )
-
-        debat_channel = self.bot.get_channel(debate_channel_id)
-        all_threads = list(debat_channel.threads)
-        async for thread in debat_channel.archived_threads(limit=None):
-            all_threads.append(thread)
-
-        for thread in all_threads:
-            async for message in thread.history(limit=None, after=start_time):
+            # ── Step 1: congres channel ───────────────────────────────────────
+            async for message in self.bot.get_channel(congres_channel_id).history(
+                limit=None, after=start_time
+            ):
                 if not _is_congress_member(message.author):
                     continue
                 uid = message.author.id
                 day = message.created_at.strftime("%Y-%m-%d")
-                user_debat_msgs[uid] += 1
+                user_congres_msgs[uid] += 1
                 user_days[uid].add(day)
-                user_debates[uid].add(thread.id)
                 user_msgs_per_day[uid][day] += 1
-                user_msgs_per_debate[uid][thread.id] += 1
 
-        # ── Build combined activity embed(s) per member ───────────────────
-        all_users = set(user_congres_msgs.keys()) | set(user_debat_msgs.keys())
-        sorted_users = sorted(
-            all_users,
-            key=lambda u: user_congres_msgs[u] + user_debat_msgs[u],
-            reverse=True,
-        )
+            # ── Step 2: debat forum ───────────────────────────────────────────
+            debate_channel_id = channel_ids.get("debat")
+            if not debate_channel_id:
+                await status_msg.edit(embed=_status_embed("❌ `debat` channel niet geconfigureerd."))
+                return
 
-        activity_lines: list[str] = []
-        for uid in sorted_users:
-            total = user_congres_msgs[uid] + user_debat_msgs[uid]
-            n_days = len(user_days[uid])
-            n_debates = len(user_debates[uid])
-
-            day_counts = list(user_msgs_per_day[uid].values())
-            avg_day = mean(day_counts) if day_counts else 0.0
-            med_day = median(day_counts) if day_counts else 0.0
-
-            debate_counts = list(user_msgs_per_debate[uid].values())
-            avg_debate = mean(debate_counts) if debate_counts else 0.0
-            med_debate = median(debate_counts) if debate_counts else 0.0
-
-            per_debate_str = (
-                f" | {avg_debate:.1f}/debat (med. {med_debate:.1f})"
-                if n_debates > 0
-                else ""
-            )
-            activity_lines.append(
-                f"<@{uid}> — **{total}** berichten"
-                f" ({user_congres_msgs[uid]}🏛️ + {user_debat_msgs[uid]}🗣️)\n"
-                f"📅 {n_days} actieve dagen  |  🗣️ {n_debates} debatten aanwezig\n"
-                f"📊 {avg_day:.1f}/dag (med. {med_day:.1f}){per_debate_str}"
+            await status_msg.edit(
+                embed=_status_embed("⏳ **Stap 2/3** — Debat kanaal (actieve + gesloten threads) wordt geanalyseerd...")
             )
 
-        if not activity_lines:
-            activity_lines = ["*Geen activiteit gevonden.*"]
+            debat_channel = self.bot.get_channel(debate_channel_id)
+            all_threads = list(debat_channel.threads)
+            async for thread in debat_channel.archived_threads(limit=None):
+                all_threads.append(thread)
 
-        assert interaction.channel is not None
-        # Send in chunks (≤3800 chars per embed description)
-        _MAX = 3800
-        embed_chunks: list[str] = []
-        current_chunk = ""
-        for line in activity_lines:
-            segment = ("\n\n" if current_chunk else "") + line
-            if len(current_chunk) + len(segment) > _MAX:
+            for thread in all_threads:
+                async for message in thread.history(limit=None, after=start_time):
+                    if not _is_congress_member(message.author):
+                        continue
+                    uid = message.author.id
+                    day = message.created_at.strftime("%Y-%m-%d")
+                    user_debat_msgs[uid] += 1
+                    user_days[uid].add(day)
+                    user_debates[uid].add(thread.id)
+                    user_msgs_per_day[uid][day] += 1
+                    user_msgs_per_debate[uid][thread.id] += 1
+
+            # ── Build combined activity embed(s) per member ───────────────────
+            all_users = set(user_congres_msgs.keys()) | set(user_debat_msgs.keys())
+            sorted_users = sorted(
+                all_users,
+                key=lambda u: user_congres_msgs[u] + user_debat_msgs[u],
+                reverse=True,
+            )
+
+            activity_lines: list[str] = []
+            for uid in sorted_users:
+                total = user_congres_msgs[uid] + user_debat_msgs[uid]
+                n_days = len(user_days[uid])
+                n_debates = len(user_debates[uid])
+
+                day_counts = list(user_msgs_per_day[uid].values())
+                avg_day = mean(day_counts) if day_counts else 0.0
+                med_day = median(day_counts) if day_counts else 0.0
+
+                debate_counts = list(user_msgs_per_debate[uid].values())
+                avg_debate = mean(debate_counts) if debate_counts else 0.0
+                med_debate = median(debate_counts) if debate_counts else 0.0
+
+                per_debate_str = (
+                    f" | {avg_debate:.1f}/debat (med. {med_debate:.1f})"
+                    if n_debates > 0
+                    else ""
+                )
+                activity_lines.append(
+                    f"<@{uid}> — **{total}** berichten"
+                    f" ({user_congres_msgs[uid]}🏛️ + {user_debat_msgs[uid]}🗣️)\n"
+                    f"📅 {n_days} actieve dagen  |  🗣️ {n_debates} debatten aanwezig\n"
+                    f"📊 {avg_day:.1f}/dag (med. {med_day:.1f}){per_debate_str}"
+                )
+
+            if not activity_lines:
+                activity_lines = ["*Geen activiteit gevonden.*"]
+
+            assert interaction.channel is not None
+            # Send in chunks (≤3800 chars per embed description)
+            _MAX = 3800
+            embed_chunks: list[str] = []
+            current_chunk = ""
+            for line in activity_lines:
+                segment = ("\n\n" if current_chunk else "") + line
+                if len(current_chunk) + len(segment) > _MAX:
+                    embed_chunks.append(current_chunk)
+                    current_chunk = line
+                else:
+                    current_chunk += segment
+            if current_chunk:
                 embed_chunks.append(current_chunk)
-                current_chunk = line
-            else:
-                current_chunk += segment
-        if current_chunk:
-            embed_chunks.append(current_chunk)
 
-        for i, chunk in enumerate(embed_chunks):
-            title = f"Congres Activiteitsanalyse — {date_label}"
-            if len(embed_chunks) > 1:
-                title += f" ({i + 1}/{len(embed_chunks)})"
+            for i, chunk in enumerate(embed_chunks):
+                title = f"Congres Activiteitsanalyse — {date_label}"
+                if len(embed_chunks) > 1:
+                    title += f" ({i + 1}/{len(embed_chunks)})"
+                await interaction.channel.send(embed=discord.Embed(  # type: ignore[union-attr]
+                    title=title,
+                    description=chunk,
+                    color=self.color,
+                ))
+
+            # ── Step 3: stembureau reactions ──────────────────────────────────
+            stembureau_channel_id = channel_ids.get("stembureau")
+            if not stembureau_channel_id:
+                await status_msg.edit(embed=_status_embed("❌ `stembureau` channel niet geconfigureerd."))
+                return
+
+            await status_msg.edit(
+                embed=_status_embed("⏳ **Stap 3/3** — Stembureau kanaal (reacties) wordt geanalyseerd...")
+            )
+
+            vote_count: Counter[int] = Counter()
+            async for message in self.bot.get_channel(stembureau_channel_id).history(
+                limit=None, after=start_time
+            ):
+                users_counted: list[int] = []
+                for reaction in message.reactions:
+                    async for user in reaction.users():
+                        if not isinstance(user, discord.Member):
+                            continue
+                        if user.bot or congress_role not in user.roles:
+                            continue
+                        if user.id in users_counted:
+                            continue
+                        users_counted.append(user.id)
+                        vote_count[user.id] += 1
+
+            results = "\n".join(
+                [f"<@{user_id}>: {count}" for user_id, count in vote_count.most_common()]
+            ) or "*Geen stemmen gevonden.*"
             await interaction.channel.send(embed=discord.Embed(  # type: ignore[union-attr]
-                title=title,
-                description=chunk,
+                title="Stembureau Analyse",
+                description=f"Votes in de stembureau channel sinds {date_label}:\n{results}",
                 color=self.color,
             ))
 
-        # ── Step 3: stembureau reactions ──────────────────────────────────
-        stembureau_channel_id = channel_ids.get("stembureau")
-        if not stembureau_channel_id:
-            await status_msg.edit(embed=_status_embed("❌ `stembureau` channel niet geconfigureerd."))
-            return
+            await status_msg.edit(embed=_status_embed("✅ Analyse voltooid!"))
 
-        await status_msg.edit(
-            embed=_status_embed("⏳ **Stap 3/3** — Stembureau kanaal (reacties) wordt geanalyseerd...")
-        )
-
-        vote_count: Counter[int] = Counter()
-        async for message in self.bot.get_channel(stembureau_channel_id).history(
-            limit=None, after=start_time
-        ):
-            users_counted: list[int] = []
-            for reaction in message.reactions:
-                async for user in reaction.users():
-                    if not isinstance(user, discord.Member):
-                        continue
-                    if user.bot or congress_role not in user.roles:
-                        continue
-                    if user.id in users_counted:
-                        continue
-                    users_counted.append(user.id)
-                    vote_count[user.id] += 1
-
-        results = "\n".join(
-            [f"<@{user_id}>: {count}" for user_id, count in vote_count.most_common()]
-        ) or "*Geen stemmen gevonden.*"
-        await interaction.channel.send(embed=discord.Embed(  # type: ignore[union-attr]
-            title="Stembureau Analyse",
-            description=f"Votes in de stembureau channel sinds {date_label}:\n{results}",
-            color=self.color,
-        ))
-
-        await status_msg.edit(embed=_status_embed("✅ Analyse voltooid!"))
+        except discord.HTTPException as exc:
+            await status_msg.edit(
+                embed=_status_embed(
+                    f"❌ Discord API tijdelijk niet beschikbaar (HTTP {exc.status}). "
+                    "Probeer het later opnieuw."
+                )
+            )
 
     # @commands.hybrid_command(
     #     name="embed",
