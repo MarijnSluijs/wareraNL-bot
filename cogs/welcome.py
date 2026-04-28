@@ -652,7 +652,7 @@ class Welcome(commands.Cog, name="welcome"):
         return 2
 
     @staticmethod
-    def _normalize_ingame_id(in_game_id: str) -> str:
+    def normalize_ingame_id(in_game_id: str) -> str:
         """Normalize and validate in-game ID or WarEra profile URL input."""
         raw_value = str(in_game_id).strip()
         if not raw_value:
@@ -954,7 +954,7 @@ class Welcome(commands.Cog, name="welcome"):
 
         channel = interaction.channel
         try:
-            in_game_id = self._normalize_ingame_id(in_game_id)
+            in_game_id = self.normalize_ingame_id(in_game_id)
         except ValueError as e:
             await interaction.followup.send(str(e), ephemeral=True)
             return
@@ -1400,7 +1400,7 @@ class Welcome(commands.Cog, name="welcome"):
             # avoid "The application did not respond" (Discord requires a response within 3s)
             await interaction.response.defer(ephemeral=True)
             try:
-                in_game_id = self._normalize_ingame_id(in_game_id)
+                in_game_id = self.normalize_ingame_id(in_game_id)
             except ValueError as e:
                 await interaction.followup.send(str(e), ephemeral=True)
                 return

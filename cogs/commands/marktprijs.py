@@ -143,6 +143,20 @@ def _scrap_value_text(
     )
 
 
+def _stale_data_text(
+    refresh_note: Optional[str],
+    scrap_note: Optional[str],
+) -> Optional[str]:
+    notes = [note for note in (refresh_note, scrap_note) if note]
+    if not notes:
+        return None
+    return (
+        "⚠️ De WarEra API gaf niet alle realtime data terug.\n"
+        "Deze response gebruikt beschikbare lokale history/cache waar mogelijk.\n"
+        f"Details: {', '.join(notes)}."
+    )
+
+
 def _sell_advice(
     agg_24h: dict,
     agg_7d: dict,
@@ -438,6 +452,9 @@ class MarktprijsCog(CommandCogBase):
                 colour=self._embed_colour("warning"),
             )
             embed.set_footer(text=footer)
+            stale_text = _stale_data_text(refresh_note, scrap_note)
+            if stale_text:
+                embed.add_field(name="Data status", value=stale_text, inline=False)
             scrap_value = _scrap_value_text(
                 rarity,
                 scrap_count,
@@ -495,6 +512,9 @@ class MarktprijsCog(CommandCogBase):
             ),
             inline=False,
         )
+        stale_text = _stale_data_text(refresh_note, scrap_note)
+        if stale_text:
+            embed.add_field(name="Data status", value=stale_text, inline=False)
         scrap_value = _scrap_value_text(
             rarity,
             scrap_count,

@@ -62,6 +62,76 @@ class General(commands.Cog, name="general"):
         )
         self.config = getattr(self.bot, "config", {}) or {}
 
+    def _api_status_embed(self, status: dict[str, object]) -> discord.Embed:
+        ok = bool(status.get("ok"))
+        embed = discord.Embed(
+            title="🏓 API Ping",
+            description=(
+                "PONG — WarEra API reageert."
+                if ok
+                else "Geen PONG — WarEra API reageert niet."
+            ),
+            color=(
+                self.color
+                if ok
+                else int(self.config.get("colors", {}).get("warning", "0xF59E42"), 16)
+            ),
+        )
+        embed.add_field(name="Status", value="Online" if ok else "Offline", inline=True)
+        embed.add_field(
+            name="Latency",
+            value=f"{status.get('latency_ms', '—')} ms",
+            inline=True,
+        )
+        last_success = status.get("last_success_at")
+        if isinstance(last_success, datetime):
+            embed.add_field(
+                name="Laatste succes",
+                value=f"<t:{int(last_success.timestamp())}:R>",
+                inline=True,
+            )
+        last_failure = status.get("last_failure_at")
+        if isinstance(last_failure, datetime):
+            embed.add_field(
+                name="Laatste fout",
+                value=f"<t:{int(last_failure.timestamp())}:R>",
+                inline=True,
+            )
+        error = status.get("last_error")
+        if error:
+            embed.add_field(
+                name="Foutmelding",
+                value=f"`{str(error)[:900]}`",
+                inline=False,
+            )
+        base_url = status.get("base_url")
+        if base_url:
+            embed.set_footer(text=str(base_url))
+        return embed
+
+    @app_commands.command(
+        name="apiping",
+        description="Ping de WarEra API en toon of realtime data beschikbaar is.",
+    )
+    async def apiping(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        client = getattr(self.bot, "_ext_client", None)
+        if not client or not hasattr(client, "ping"):
+            embed = discord.Embed(
+                title="🏓 API Ping",
+                description="Geen API-client beschikbaar in deze bot-sessie.",
+                color=int(
+                    self.config.get("colors", {}).get("warning", "0xF59E42"), 16
+                ),
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+        status = await client.ping()
+        await interaction.followup.send(
+            embed=self._api_status_embed(status),
+            ephemeral=True,
+        )
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
         """
