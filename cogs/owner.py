@@ -325,9 +325,6 @@ class Owner(commands.Cog, name="owner"):
         self, interaction: discord.Interaction, datum: str = "07-02-2026"
     ) -> None:
         """Count messages/votes from each congress member in the congress channels since a given date."""
-        from collections import Counter, defaultdict
-        from statistics import mean, median
-
         if not await self.bot.is_owner(interaction.user):
             await interaction.response.send_message(
                 "❌ Alleen de bot-eigenaar kan dit gebruiken.", ephemeral=True
@@ -370,6 +367,34 @@ class Owner(commands.Cog, name="owner"):
             embed=_status_embed("⏳ **Stap 1/3** — Congres kanaal wordt geanalyseerd..."),
             wait=True,
         )
+
+        try:
+            await self._run_congres_analyse(
+                interaction, status_msg, start_time, date_label,
+                congress_role, channel_ids, _status_embed,
+            )
+        except discord.HTTPException as exc:
+            await status_msg.edit(
+                embed=_status_embed(
+                    f"❌ Discord API fout (HTTP {exc.status}): probeer het later opnieuw.\n"
+                    f"`{exc.text or exc}`"
+                )
+            )
+
+    async def _run_congres_analyse(
+        self,
+        interaction: discord.Interaction,
+        status_msg,
+        start_time,
+        date_label: str,
+        congress_role,
+        channel_ids: dict,
+        _status_embed,
+    ) -> None:
+        from collections import Counter, defaultdict
+        from statistics import mean, median
+
+        congres_channel_id = channel_ids.get("congres")
 
         # ── Per-user tracking across all congress channels ────────────────
         user_congres_msgs: Counter[int] = Counter()
