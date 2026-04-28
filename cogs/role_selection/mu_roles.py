@@ -12,11 +12,13 @@ from discord.ext import commands
 
 from utils.checks import has_privileged_role
 
-from .roles import (
+from cogs.role_selection.roles import (
     RoleToggleView,
     load_roles_template,
     mu_roles_path,
 )
+
+from cogs.welcome import Welcome
 
 
 def mus_json_path(testing: bool = False) -> str:
@@ -267,6 +269,8 @@ class MuRoles(commands.Cog, name="mu_roles"):
     ) -> None:
         await interaction.response.defer(ephemeral=True)
 
+
+        mu_id = Welcome.normalize_ingame_id(mu_id)
         mu_name = await self._fetch_mu_name(mu_id)
 
         if rol is None:
