@@ -242,6 +242,34 @@ class MuRoles(commands.Cog, name="mu_roles"):
             for entry in entries
             if current_lower in entry["id"].lower()
         ][:25]
+    
+    def _normalize_mu_id(self, in_game_id: str) -> str:
+        """Normalize and validate in-game ID or WarEra profile URL input."""
+        raw_value = str(in_game_id).strip()
+        if not raw_value:
+            raise ValueError("In-game ID cannot be empty.")
+
+        # Accept direct profile links like: https://app.warera.io/mu/{id}
+        match = re.match(
+            r"^https?://app\.warera\.io/mu/([^/?#]+)(?:[/?#].*)?$",
+            raw_value,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            normalized = match.group(1).strip()
+        else:
+            normalized = raw_value
+            if "://" in raw_value:
+                raise ValueError(
+                    "Invalid WarEra profile URL. "
+                    "Use `https://app.warera.io/mu/{id}` or provide the raw in-game ID."
+                )
+
+        if not normalized:
+            raise ValueError("Could not extract an in-game ID from the provided input.")
+        if len(normalized) > 64:
+            raise ValueError("In-game ID is too long (max 64 characters).")
+        return normalized
 
     @app_commands.command(
         name="voegmu",
@@ -270,7 +298,7 @@ class MuRoles(commands.Cog, name="mu_roles"):
         await interaction.response.defer(ephemeral=True)
 
 
-        mu_id = Welcome.normalize_ingame_id(mu_id)
+        mu_id = self._normalize_mu_id(mu_id)
         mu_name = await self._fetch_mu_name(mu_id)
 
         if rol is None:
