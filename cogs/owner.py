@@ -6,7 +6,7 @@ Prefix commands (owner-only unless noted):
   !uptime                       — show how long the bot has been online
   !load / !unload / !reload (cog) — hot-reload individual cog modules
   !clearluck                    — clear the luck-score cache
-  !congres_analyse              — generate a congressional analysis report
+  !congres_analyse              — generate a congressional analysis report (now: /congres-analyse)
   !shutdown                     — gracefully shut down the bot
   !restart                      — restart the bot process in-place
   !say (message)                — make the bot send a message
@@ -21,6 +21,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
+
+from utils.checks import has_privileged_role
 
 
 class Owner(commands.Cog, name="owner"):
@@ -312,99 +314,200 @@ class Owner(commands.Cog, name="owner"):
         )
         await context.channel.send(embed=embed)
 
-    @commands.command(
+    @app_commands.command(
         name="congres-analyse",
-        description="Analyseer de congresleden en hun stemgedrag.",
+        description="Analyseer de congresleden en hun stemgedrag vanaf een gegeven datum.",
     )
-    @commands.is_owner()
-    async def congres_analyse(self, context: Context) -> None:
-        """count messages from each congress member in congress channel over last 30 days"""
-        from collections import Counter
-        from datetime import datetime
+    @app_commands.describe(
+        datum="Startdatum in formaat DD-MM-JJJJ (bijv. 07-02-2026). Laat leeg voor 7 februari 2026."
+    )
+    async def congres_analyse(
+        self, interaction: discord.Interaction, datum: str = "07-02-2026"
+    ) -> None:
+        """Count messages/votes from each congress member in the congress channels since a given date."""
+        from collections import Counter, defaultdict
+        from statistics import mean, median
+
+        if not await self.bot.is_owner(interaction.user):
+            await interaction.response.send_message(
+                "❌ Alleen de bot-eigenaar kan dit gebruiken.", ephemeral=True
+            )
+            return
+
+        # ── Parse date ────────────────────────────────────────────────────
+        start_time: datetime | None = None
+        for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
+            try:
+                start_time = datetime.strptime(datum.strip(), fmt)
+                break
+            except ValueError:
+                continue
+        if start_time is None:
+            await interaction.response.send_message(
+                f"❌ Ongeldig datumformaat `{datum}`. Gebruik DD-MM-JJJJ, bijv. `07-02-2026`.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        def _status_embed(description: str) -> discord.Embed:
+            return discord.Embed(description=description, color=self.color)
 
         channel_ids = self.bot.config.get("channels", {})
         congres_channel_id = channel_ids.get("congres")
         if not congres_channel_id:
-            await context.send("❌ `congres` channel niet geconfigureerd.")
+            await interaction.followup.send("❌ `congres` channel niet geconfigureerd.", ephemeral=True)
             return
 
-        congress_role = context.guild.get_role(1451181300009537547)
+        assert interaction.guild is not None
+        congress_role = interaction.guild.get_role(1451181300009537547)
+        date_label = start_time.strftime("%-d %B %Y")
 
-        start_time = datetime(2026, 2, 7)  # Get messages from 7 february to today
-        message_count = Counter()
+        # ── Single status DM that gets edited at every step ───────────────
+        status_msg = await interaction.user.send(
+            embed=_status_embed("⏳ **Stap 1/3** — Congres kanaal wordt geanalyseerd...")
+        )
+
+        # ── Per-user tracking across all congress channels ────────────────
+        user_congres_msgs: Counter[int] = Counter()
+        user_debat_msgs: Counter[int] = Counter()
+        # days on which the member sent ≥1 message in any congress channel
+        user_days: defaultdict[int, set[str]] = defaultdict(set)
+        # debate thread IDs in which the member sent ≥1 message
+        user_debates: defaultdict[int, set[int]] = defaultdict(set)
+        # messages per calendar day (across both channels)
+        user_msgs_per_day: defaultdict[int, Counter] = defaultdict(Counter)
+        # messages per debate thread
+        user_msgs_per_debate: defaultdict[int, Counter] = defaultdict(Counter)
+
+        def _is_congress_member(author) -> bool:
+            return (
+                isinstance(author, discord.Member)
+                and not author.bot
+                and congress_role in author.roles
+            )
+
+        # ── Step 1: congres channel ───────────────────────────────────────
         async for message in self.bot.get_channel(congres_channel_id).history(
             limit=None, after=start_time
         ):
-            if not isinstance(message.author, discord.Member):
-                continue  # user left the guild, no .roles available
-            if message.author.bot or congress_role not in message.author.roles:
+            if not _is_congress_member(message.author):
                 continue
-            message_count[message.author.id] += 1
+            uid = message.author.id
+            day = message.created_at.strftime("%Y-%m-%d")
+            user_congres_msgs[uid] += 1
+            user_days[uid].add(day)
+            user_msgs_per_day[uid][day] += 1
 
-        # Send the results
-        results = "\n".join(
-            [f"<@{user_id}>: {count}" for user_id, count in message_count.most_common()]
-        )
-        embed = discord.Embed(
-            title="Congresleden Analyse",
-            description=f"Berichten in het congres kanaal sinds 7 februari:\n{results}",
-            color=self.color,
-        )
-        await context.send(embed=embed)
-
-        # count messages from each congress member in debate forum over last 30 days
+        # ── Step 2: debat forum ───────────────────────────────────────────
         debate_channel_id = channel_ids.get("debat")
         if not debate_channel_id:
-            await context.send("❌ `debat` channel niet geconfigureerd.")
+            await status_msg.edit(embed=_status_embed("❌ `debat` channel niet geconfigureerd."))
             return
 
-        message_count = Counter()
-        # this is a forum channel so we can't use history
-        for thread in self.bot.get_channel(debate_channel_id).threads:
-            async for message in thread.history(limit=None, after=start_time):
-                if not isinstance(message.author, discord.Member):
-                    continue  # user left the guild
-                if message.author.bot or congress_role not in message.author.roles:
-                    continue
-                message_count[message.author.id] += 1
-
-        # also count over closed threads
-        async for thread in self.bot.get_channel(debate_channel_id).archived_threads(
-            limit=None
-        ):
-            async for message in thread.history(limit=None, after=start_time):
-                if not isinstance(message.author, discord.Member):
-                    continue  # user left the guild
-                if message.author.bot or congress_role not in message.author.roles:
-                    continue
-                message_count[message.author.id] += 1
-
-        # Send the results
-        results = "\n".join(
-            [f"<@{user_id}>: {count}" for user_id, count in message_count.most_common()]
+        await status_msg.edit(
+            embed=_status_embed("⏳ **Stap 2/3** — Debat kanaal (actieve + gesloten threads) wordt geanalyseerd...")
         )
-        embed = discord.Embed(
-            title="Debatleden Analyse",
-            description=f"Berichten in het debat kanaal sinds 7 februari:\n{results}",
-            color=self.color,
-        )
-        await context.send(embed=embed)
 
-        # count votes from each congress member in stembureau channel over last 30 days
+        debat_channel = self.bot.get_channel(debate_channel_id)
+        all_threads = list(debat_channel.threads)
+        async for thread in debat_channel.archived_threads(limit=None):
+            all_threads.append(thread)
+
+        for thread in all_threads:
+            async for message in thread.history(limit=None, after=start_time):
+                if not _is_congress_member(message.author):
+                    continue
+                uid = message.author.id
+                day = message.created_at.strftime("%Y-%m-%d")
+                user_debat_msgs[uid] += 1
+                user_days[uid].add(day)
+                user_debates[uid].add(thread.id)
+                user_msgs_per_day[uid][day] += 1
+                user_msgs_per_debate[uid][thread.id] += 1
+
+        # ── Build combined activity embed(s) per member ───────────────────
+        all_users = set(user_congres_msgs.keys()) | set(user_debat_msgs.keys())
+        sorted_users = sorted(
+            all_users,
+            key=lambda u: user_congres_msgs[u] + user_debat_msgs[u],
+            reverse=True,
+        )
+
+        activity_lines: list[str] = []
+        for uid in sorted_users:
+            total = user_congres_msgs[uid] + user_debat_msgs[uid]
+            n_days = len(user_days[uid])
+            n_debates = len(user_debates[uid])
+
+            day_counts = list(user_msgs_per_day[uid].values())
+            avg_day = mean(day_counts) if day_counts else 0.0
+            med_day = median(day_counts) if day_counts else 0.0
+
+            debate_counts = list(user_msgs_per_debate[uid].values())
+            avg_debate = mean(debate_counts) if debate_counts else 0.0
+            med_debate = median(debate_counts) if debate_counts else 0.0
+
+            per_debate_str = (
+                f" | {avg_debate:.1f}/debat (med. {med_debate:.1f})"
+                if n_debates > 0
+                else ""
+            )
+            activity_lines.append(
+                f"<@{uid}> — **{total}** berichten"
+                f" ({user_congres_msgs[uid]}🏛️ + {user_debat_msgs[uid]}🗣️)\n"
+                f"📅 {n_days} actieve dagen  |  🗣️ {n_debates} debatten aanwezig\n"
+                f"📊 {avg_day:.1f}/dag (med. {med_day:.1f}){per_debate_str}"
+            )
+
+        if not activity_lines:
+            activity_lines = ["*Geen activiteit gevonden.*"]
+
+        assert interaction.channel is not None
+        # Send in chunks (≤3800 chars per embed description)
+        _MAX = 3800
+        embed_chunks: list[str] = []
+        current_chunk = ""
+        for line in activity_lines:
+            segment = ("\n\n" if current_chunk else "") + line
+            if len(current_chunk) + len(segment) > _MAX:
+                embed_chunks.append(current_chunk)
+                current_chunk = line
+            else:
+                current_chunk += segment
+        if current_chunk:
+            embed_chunks.append(current_chunk)
+
+        for i, chunk in enumerate(embed_chunks):
+            title = f"Congres Activiteitsanalyse — {date_label}"
+            if len(embed_chunks) > 1:
+                title += f" ({i + 1}/{len(embed_chunks)})"
+            await interaction.channel.send(embed=discord.Embed(  # type: ignore[union-attr]
+                title=title,
+                description=chunk,
+                color=self.color,
+            ))
+
+        # ── Step 3: stembureau reactions ──────────────────────────────────
         stembureau_channel_id = channel_ids.get("stembureau")
         if not stembureau_channel_id:
-            await context.send("❌ `stembureau` channel niet geconfigureerd.")
+            await status_msg.edit(embed=_status_embed("❌ `stembureau` channel niet geconfigureerd."))
             return
-        vote_count = Counter()
+
+        await status_msg.edit(
+            embed=_status_embed("⏳ **Stap 3/3** — Stembureau kanaal (reacties) wordt geanalyseerd...")
+        )
+
+        vote_count: Counter[int] = Counter()
         async for message in self.bot.get_channel(stembureau_channel_id).history(
             limit=None, after=start_time
         ):
-            # count reactions as votes, only counting each member once per message
-            users_counted = []
+            users_counted: list[int] = []
             for reaction in message.reactions:
                 async for user in reaction.users():
                     if not isinstance(user, discord.Member):
-                        continue  # user left the guild, no .roles available
+                        continue
                     if user.bot or congress_role not in user.roles:
                         continue
                     if user.id in users_counted:
@@ -412,16 +515,17 @@ class Owner(commands.Cog, name="owner"):
                     users_counted.append(user.id)
                     vote_count[user.id] += 1
 
-        # Send the results
         results = "\n".join(
             [f"<@{user_id}>: {count}" for user_id, count in vote_count.most_common()]
-        )
-        embed = discord.Embed(
+        ) or "*Geen stemmen gevonden.*"
+        await interaction.channel.send(embed=discord.Embed(  # type: ignore[union-attr]
             title="Stembureau Analyse",
-            description=f"Votes in de stembureau channel sinds 7 februari:\n{results}",
+            description=f"Votes in de stembureau channel sinds {date_label}:\n{results}",
             color=self.color,
-        )
-        await context.send(embed=embed)
+        ))
+
+        await status_msg.edit(embed=_status_embed("✅ Analyse voltooid!"))
+        await interaction.followup.send("✅ Analyse voltooid!", ephemeral=True)
 
     # @commands.hybrid_command(
     #     name="embed",
@@ -439,6 +543,54 @@ class Owner(commands.Cog, name="owner"):
     #     embed = discord.Embed(description=message, color=0xBEBEFE)
     #     await context.send(embed=embed)
 
+
+    @app_commands.command(
+        name="nl-niet-op-discord",
+        description="Toont Nederlandse in-game spelers (level ≥15) die niet gelinkt zijn aan Discord.",
+    )
+    @app_commands.describe(min_level="Minimaal level (standaard 15)")
+    @has_privileged_role()
+    async def nl_niet_op_discord(
+        self, interaction: discord.Interaction, min_level: int = 15
+    ) -> None:
+        """List NL in-game citizens (level ≥ min_level) with no Discord identity link."""
+        await interaction.response.defer(ephemeral=True)
+
+        db = getattr(self.bot, "_ext_db", None)
+        if not db:
+            await interaction.followup.send("❌ Database niet beschikbaar.", ephemeral=True)
+            return
+
+        nl_country_id: str = self.bot.config.get("nl_country_id", "6813b6d446e731854c7ac7a0")
+
+        rows = await db.get_citizens_without_discord_link(nl_country_id, min_level)
+
+        if not rows:
+            await interaction.followup.send(
+                f"✅ Alle Nederlandse spelers (level ≥ {min_level}) zijn gelinkt aan Discord.",
+                ephemeral=True,
+            )
+            return
+
+        # Build paginated output (≤1900 chars per message)
+        lines = [
+            f"• [{name}](https://app.warera.io/user/{uid}) — level {lvl}"
+            for uid, name, lvl in rows
+        ]
+        header = f"**Nederlandse spelers level ≥{min_level} zonder Discord-koppeling ({len(rows)} totaal):**\n"
+        chunks: list[str] = []
+        current = header
+        for line in lines:
+            if len(current) + len(line) + 1 > 1900:
+                chunks.append(current)
+                current = ""
+            current += line + "\n"
+        if current:
+            chunks.append(current)
+
+        await interaction.followup.send(chunks[0], ephemeral=True)
+        for chunk in chunks[1:]:
+            await interaction.followup.send(chunk, ephemeral=True)
 
     @commands.command(
         name="apioffline",

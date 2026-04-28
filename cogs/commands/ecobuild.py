@@ -544,10 +544,8 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
         the ethics bonus must be derived via the recommended-region list or
         inferred from the SR/total split in the country data.
         """
-        if not self._client:
+        if not self._client or self._client.is_available is False:
             return {}
-
-        # Build region_id → [company_ids] and region_id → item_code mappings
         region_cids: dict[str, list[str]] = {}
         region_item: dict[str, str] = {}
         for c in companies:
@@ -788,7 +786,7 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
     ) -> None:
         await interaction.response.defer(thinking=True)
 
-        if not self._client:
+        if not self._client or self._client.is_available is False:
             await self._send_api_offline(interaction)
             return
 

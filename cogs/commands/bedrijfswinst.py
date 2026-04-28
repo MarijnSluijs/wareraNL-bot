@@ -759,7 +759,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
     ) -> None:
         await interaction.response.defer(thinking=True)
 
-        if not self._client:
+        if not self._client or self._client.is_available is False:
             await self._send_api_offline(interaction)
             return
 

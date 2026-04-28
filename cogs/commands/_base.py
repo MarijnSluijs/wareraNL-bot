@@ -14,7 +14,7 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
 
-from services.country_utils import ALL_COUNTRY_NAMES, extract_country_list
+from services.country_utils import ALL_COUNTRY_NAMES, _COUNTRY_ALIASES, extract_country_list
 
 
 async def citizen_autocomplete(
@@ -41,14 +41,37 @@ async def country_autocomplete(
 ) -> list[app_commands.Choice[str]]:
     """Module-level autocomplete callback for country name parameters.
 
+    Matches English names as usual, and also Dutch names (showing them as
+    "English (Dutch)" so the user can see both).
     Use this directly in ``@app_commands.autocomplete(country=country_autocomplete)``.
     """
     q = current.strip().lower()
-    return [
-        app_commands.Choice(name=name, value=name)
-        for name in ALL_COUNTRY_NAMES
-        if q in name.lower()
-    ][:25]
+    results: list[app_commands.Choice[str]] = []
+    seen: set[str] = set()
+
+    # English name matches
+    for name in ALL_COUNTRY_NAMES:
+        if q in name.lower() and name not in seen:
+            results.append(app_commands.Choice(name=name, value=name))
+            seen.add(name)
+
+    # Dutch alias matches — show as "English (Dutch)" with English value
+    if len(results) < 25:
+        for dutch_lower, english_lower in _COUNTRY_ALIASES.items():
+            if q in dutch_lower and len(results) < 25:
+                english = next(
+                    (n for n in ALL_COUNTRY_NAMES if n.lower() == english_lower), None
+                )
+                if english and english not in seen:
+                    results.append(
+                        app_commands.Choice(
+                            name=f"{english} ({dutch_lower.title()})",
+                            value=english,
+                        )
+                    )
+                    seen.add(english)
+
+    return results[:25]
 
 
 async def dreigingsniveau_autocomplete(
@@ -146,7 +169,7 @@ class CommandCogBase(commands.Cog):
 
     async def _fetch_country_list(self, ctx: Union[Context, discord.Interaction]) -> list[dict] | None:
         """Fetch and unwrap the country list; sends an API-offline embed on failure."""
-        if not self._client:
+        if not self._client or self._client.is_available is False:
             await self._send_api_offline(ctx)
             return None
         try:

@@ -76,10 +76,8 @@ class SpelerInactiviteitCog(CommandCogBase, name="speler_inactiviteit"):
             return
 
         client = self._client
-        if not client:
-            await interaction.followup.send(
-                "❌ API client niet beschikbaar.", ephemeral=True
-            )
+        if not client or client.is_available is False:
+            await self._send_api_offline(interaction)
             return
 
         nl_country_id: str = self.config.get("nl_country_id", "")

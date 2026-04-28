@@ -19,8 +19,8 @@ from cogs.tasks._base import TaskCogBase
 
 logger = logging.getLogger("discord_bot")
 
-# Production channel where the Bunkerslaaf ping is sent (same as bunkers.py)
-_PROD_CHANNEL_ID = 1489316733528576080
+# Production channel where the Bunkerslaaf ping is sent
+_PROD_CHANNEL_ID = 1468692756707807376
 _PROD_ROLE_ID    = 1494815320316055573
 
 # Testing
@@ -164,6 +164,10 @@ class EnemyWatcherTasks(TaskCogBase, name="enemy_watcher_tasks"):
             )
             return
 
+        # bot-mededelingen: secondary channel, no role ping (None in testing)
+        meded_channel_id = self.config.get("channels", {}).get("bot_mededelingen")
+        meded_channel = self.bot.get_channel(meded_channel_id) if meded_channel_id else None
+
         guild = channel.guild
         role = guild.get_role(role_id)
         role_mention = role.mention if role else f"<@&{role_id}>"
@@ -184,6 +188,11 @@ class EnemyWatcherTasks(TaskCogBase, name="enemy_watcher_tasks"):
                 embed=embed,
                 allowed_mentions=discord.AllowedMentions(roles=True),
             )
+            if meded_channel and meded_channel != channel:
+                try:
+                    await meded_channel.send(embed=embed)
+                except discord.HTTPException as exc:
+                    logger.warning("enemy_watcher: failed to send to bot-mededelingen: %s", exc)
             logger.info(
                 "enemy_watcher: notified about new enemy %s (%s)",
                 country_name, country_id,

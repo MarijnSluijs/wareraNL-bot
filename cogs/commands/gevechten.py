@@ -215,7 +215,7 @@ class GevechtenCog(CommandCogBase, name="gevechten"):
     ) -> None:
         await interaction.response.defer(thinking=True)
 
-        if not self._client:
+        if not self._client or self._client.is_available is False:
             await interaction.followup.send(embed=self._api_offline_embed(), ephemeral=True)
             return
 

@@ -74,7 +74,10 @@ class PeilCog(CommandCogBase, name="peil"):
         • alles     — voer alle peilingen uit
         """
         if not self._client or not self._db:
-            await ctx.send("Diensten niet geïnitialiseerd.", ephemeral=True)
+            if getattr(self.bot, "_force_api_offline", False):
+                await ctx.send("❌ Api offline.", ephemeral=True)
+            else:
+                await ctx.send("❌ Diensten niet geïnitialiseerd.", ephemeral=True)
             return
 
         if hasattr(ctx, "defer"):

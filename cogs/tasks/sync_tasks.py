@@ -89,11 +89,12 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
     async def sync_loop(self) -> None:
         now = datetime.now(timezone.utc)
 
-        for name, key, interval_h, afternoon_only, coro in [
+        for name, key, interval_h, afternoon_only, skip_in_testing, coro in [
             (
                 "commander_role_check",
                 "commander_role_check_last_run",
                 _DAILY_H,
+                False,
                 False,
                 self._check_commander_roles,
             ),
@@ -102,10 +103,14 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                 "citizenship_audit_last_run",
                 _DAILY_H,
                 True,  # only run in the afternoon (13–16 UTC)
+                True,  # do not run automatically on the test server
                 self._citizenship_audit,
             ),
         ]:
             if not self._db:
+                continue
+            # Skip tasks that are disabled in testing mode
+            if skip_in_testing and getattr(self.bot, "testing", False):
                 continue
             # Afternoon gate: only fire citizenship audit between 13:00 and 15:59 UTC
             if afternoon_only and not (13 <= now.hour < 16):
@@ -415,6 +420,20 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                         f"• {member.mention} — in-game: **{citizen_name or user_id}**"
                     )
 
+        # ── Section C: In-game NL citizens inactive, only those linked to Discord
+        inactive_ingame: list[str] = []
+        try:
+            ingame_inactive_rows = await self._db.get_inactive_citizens_in_country(
+                nl_country_id, _INACTIVITY_DAYS
+            )
+            for uid, name, days, discord_id in ingame_inactive_rows:
+                profile = f"https://app.warera.io/user/{uid}"
+                inactive_ingame.append(
+                    f"• <@{discord_id}> ([{name or uid}]({profile})) — {days} dagen inactief"
+                )
+        except Exception:
+            logger.exception("citizenship_audit: failed querying in-game inactive citizens")
+
         # ── Build report ─────────────────────────────────────────────────────
         date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         ping = f"<@{_CAPTAINWYVERN_DISCORD_ID}>"
@@ -442,6 +461,10 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
         lines.append("")
         lines.append("### 🎭 In-game Nederlanders zonder Discord rol")
         lines.extend(missing_role if missing_role else ["*Geen problemen gevonden.*"])
+
+        lines.append("")
+        lines.append(f"### 💤 In-game inactief ({_INACTIVITY_DAYS}+ dagen, NL burgers op Discord)")
+        lines.extend(inactive_ingame if inactive_ingame else ["*Geen problemen gevonden.*"])
 
         report = "\n".join(lines)
 
