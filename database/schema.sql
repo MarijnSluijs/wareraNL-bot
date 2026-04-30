@@ -299,6 +299,21 @@ CREATE TABLE IF NOT EXISTS battle_country_hits (
 CREATE INDEX IF NOT EXISTS idx_battle_country_hits_country  ON battle_country_hits(country_id);
 CREATE INDEX IF NOT EXISTS idx_battle_country_hits_created  ON battle_country_hits(battle_created_at);
 
+-- ── Pill tracking ─────────────────────────────────────────────────────────────
+
+-- citizen_pill_tracking: tracks the last known pill buff expiry per citizen.
+--   Updated hourly during the NL citizen refresh by scanning getUserLite for all
+--   NL players.  buff_expires_at is the Unix timestamp when the active/last buff
+--   ended (or will end).  When buff_expires_at + 57600 (16h) > now, the player
+--   is in debuff.  NULL means no pill has ever been observed.
+CREATE TABLE IF NOT EXISTS citizen_pill_tracking (
+    user_id         TEXT PRIMARY KEY,
+    country_id      TEXT NOT NULL,
+    buff_expires_at INTEGER,             -- Unix timestamp (seconds); NULL = never seen
+    updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pill_tracking_country ON citizen_pill_tracking(country_id);
+
 -- ── Article tips ──────────────────────────────────────────────────────────────
 
 -- article_tips: individual article tip transactions (outgoing from the tipper's perspective)

@@ -916,6 +916,41 @@ class CitizensMixin:
                 result[row[0]] = row[1]
         return result
 
+    async def get_user_ids_for_mus(self, mu_names: list[str]) -> list[str]:
+        """Return user_ids from citizen_levels for players in any of the given MUs."""
+        if not mu_names:
+            return []
+        placeholders = ",".join("?" * len(mu_names))
+        rows: list[str] = []
+        async with self._conn.execute(
+            f"SELECT user_id FROM citizen_levels WHERE mu_name IN ({placeholders})",
+            tuple(mu_names),
+        ) as cur:
+            async for row in cur:
+                rows.append(row[0])
+        return rows
+
+    async def get_user_ids_for_group(
+        self,
+        *,
+        country_id: Optional[str] = None,
+        mu_name: Optional[str] = None,
+    ) -> list[str]:
+        """Return user_ids from citizen_levels matching the given country/MU filter."""
+        if mu_name:
+            sql = "SELECT user_id FROM citizen_levels WHERE mu_name = ?"
+            params: tuple = (mu_name,)
+        elif country_id:
+            sql = "SELECT user_id FROM citizen_levels WHERE country_id = ?"
+            params = (country_id,)
+        else:
+            return []
+        rows: list[str] = []
+        async with self._conn.execute(sql, params) as cur:
+            async for row in cur:
+                rows.append(row[0])
+        return rows
+
     async def get_citizens_in_country(
         self, country_id: str
     ) -> list[tuple[str, str, Optional[str]]]:

@@ -122,6 +122,33 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
             except Exception as e:
                 self.bot.logger.error("Failed to save general roles template: %s", e)
 
+        # ── Wakkerdam Toeschouwer channel permissions ─────────────────────────
+        if not testing:
+            _wakkerdam_role = discord.utils.get(
+                interaction.guild.roles, name="Wakkerdam Toeschouwer"
+            )
+            if _wakkerdam_role:
+                _wakkerdam_channels = {
+                    1499384534976954408: discord.PermissionOverwrite(
+                        read_messages=True, send_messages=False
+                    ),
+                    1499377427460263946: discord.PermissionOverwrite(
+                        read_messages=True, send_messages=False
+                    ),
+                    1499377525808173168: discord.PermissionOverwrite(
+                        read_messages=True, send_messages=True
+                    ),
+                }
+                for ch_id, overwrite in _wakkerdam_channels.items():
+                    ch = interaction.guild.get_channel(ch_id)
+                    if ch is not None:
+                        try:
+                            await ch.set_permissions(_wakkerdam_role, overwrite=overwrite)
+                        except Exception as e:
+                            self.bot.logger.warning(
+                                "Failed to set permissions for channel %d: %s", ch_id, e
+                            )
+
         # Post the Company bonus check (bedrijven bonus check) button
         bw_embed = discord.Embed(
             title="🏭 Bedrijven notificaties",

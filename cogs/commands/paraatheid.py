@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time as _t
+from datetime import datetime as _dt, timezone as _tz
 
 import discord
 from discord import app_commands
@@ -26,6 +28,35 @@ from services.country_utils import country_id as cid_of
 from services.country_utils import find_country
 
 logger = logging.getLogger("discord_bot")
+
+
+def _fmt_hm(secs: float) -> str:
+    """Format seconds as 'Xh Ym'."""
+    total_m = int(secs) // 60
+    h, m = divmod(total_m, 60)
+    return f"{h}u {m:02d}m"
+
+
+def _pill_field_value(stats: dict) -> str:
+    """Format pill stats dict as a field value string."""
+    buff: int = stats["buff"]
+    debuff: int = stats["debuff"]
+    none_: int = stats["none"]
+    total: int = stats["total"]
+    parts: list[str] = []
+    if buff:
+        avg_str = _fmt_hm(stats["avg_buff_secs"])
+        parts.append(f"💊 In buff: **{buff}** (gem. {avg_str} over)")
+    else:
+        parts.append("💊 In buff: **0**")
+    if debuff:
+        avg_str = _fmt_hm(stats["avg_debuff_secs"])
+        parts.append(f"⏳ In debuff: **{debuff}** (gem. {avg_str} over)")
+    else:
+        parts.append("⏳ In debuff: **0**")
+    parts.append(f"❌ Geen actieve pil: **{none_}**")
+    parts.append(f"*(Totaal: {total} spelers)*")
+    return "\n".join(parts)
 
 
 class ParaatheadCog(CommandCogBase, name="paraatheid"):
@@ -161,6 +192,45 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                 description="\n\n".join(lines_p),
                 colour=colour,
             )
+            # Pill buff/debuff status via live API (only if exactly one player found)
+            if len(results) == 1 and self._client:
+                try:
+                    user_data = await self._client.get(
+                        "/user.getUserLite",
+                        params={"userId": results[0]["user_id"]},
+                    )
+                    buffs = (user_data or {}).get("buffs") or {}
+                    buff_codes: list = buffs.get("buffCodes") or []
+                    buff_end_at: str | None = buffs.get("buffEndAt")
+                    import time as _t
+                    import math
+                    now_ts = _t.time()
+                    if "cocain" in buff_codes and buff_end_at:
+                        try:
+                            from datetime import datetime as _dt, timezone as _tz
+                            end_ts = _dt.fromisoformat(buff_end_at.replace("Z", "+00:00")).timestamp()
+                            secs_left = max(0.0, end_ts - now_ts)
+                            pill_val = f"💊 In buff — nog {_fmt_hm(secs_left)}"
+                        except Exception:
+                            pill_val = "💊 In buff"
+                    else:
+                        debuff_duration = 16 * 3600
+                        if buff_end_at:
+                            try:
+                                from datetime import datetime as _dt, timezone as _tz
+                                end_ts = _dt.fromisoformat(buff_end_at.replace("Z", "+00:00")).timestamp()
+                                debuff_left = max(0.0, end_ts + debuff_duration - now_ts)
+                                if debuff_left > 0:
+                                    pill_val = f"⏳ In debuff — nog {_fmt_hm(debuff_left)}"
+                                else:
+                                    pill_val = "❌ Geen actieve pil"
+                            except Exception:
+                                pill_val = "❌ Geen actieve pil"
+                        else:
+                            pill_val = "❌ Geen actieve pil"
+                    embed.add_field(name="💊 Pill status", value=pill_val, inline=False)
+                except Exception:
+                    pass
             await ctx.send(embed=embed)
             return
 
@@ -258,6 +328,18 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                     pending.append(line)
             if len(pending) > 2:
                 await _flush_mu(pending)
+            # Pill buff/debuff section (from hourly tracking DB)
+            if self._db:
+                try:
+                    pill_stats = await self._db.get_pill_stats_from_tracking(mu_names=[mu_name])
+                    pill_emb = discord.Embed(
+                        title=f"💊 Pill status — {mu_name}",
+                        description=_pill_field_value(pill_stats),
+                        colour=colour,
+                    )
+                    await ctx.send(embed=pill_emb)
+                except Exception:
+                    pass
             return
 
         # ══ Mode 3: NL MUs ════════════════════════════════════════════════
@@ -265,13 +347,6 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
             nl_country_id = self.config.get("nl_country_id")
             testing = getattr(self.bot, "testing", False)
             mus_json = "templates/mus.testing.json" if testing else "templates/mus.json"
-
-            mu_tasks = self.bot.get_cog("mu_tasks")
-            if mu_tasks:
-                try:
-                    await mu_tasks.refresh_mu_info()
-                except Exception as exc:
-                    logger.warning("paraatheid alle_mus: MU refresh failed: %s", exc)
 
             try:
                 with open(mus_json, encoding="utf-8") as _f:
@@ -325,6 +400,14 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                 description="par = paraat / totaal  •  kan = kan nu resetten  •  ≥15/≥20 = paraat op lvl ≥15/≥20  •  avg = gem. wachttijd eco-spelers",
                 colour=discord.Color.gold(),
             )
+
+            # Fetch last_updated for NL citizen data
+            _nl_last_updated: str | None = None
+            if nl_country_id and self._db:
+                try:
+                    _, _, _nl_last_updated = await self._db.get_level_distribution(nl_country_id)
+                except Exception:
+                    pass
             has_data = False
 
             for mu_type, _emoji, field_label in _cat_cfg:
@@ -389,7 +472,24 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                     "Geen gecachete MU-data gevonden. Voer eerst `/peil burgers` uit."
                 )
                 return
+            _footer_parts = ["Automatisch elk uur vernieuwd  •  Handmatig: /peil burgers nl"]
+            if _nl_last_updated:
+                _footer_parts.insert(0, f"Bijgewerkt: {_nl_last_updated[:16].replace('T', ' ')} UTC")
+            emb.set_footer(text="  •  ".join(_footer_parts))
             await ctx.send(embed=emb)
+            # Pill buff/debuff section (from hourly tracking DB, MU members only)
+            if self._db:
+                try:
+                    _nl_mu_names = list(_mu_types.keys())
+                    pill_stats = await self._db.get_pill_stats_from_tracking(mu_names=_nl_mu_names)
+                    pill_emb = discord.Embed(
+                        title="💊 Pill status — NL MUs",
+                        description=_pill_field_value(pill_stats),
+                        colour=discord.Color.gold(),
+                    )
+                    await ctx.send(embed=pill_emb)
+                except Exception:
+                    pass
             return
 
         # ══ Mode 4: land ══════════════════════════════════════════════
@@ -520,6 +620,19 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
 
         for emb in page_embeds:
             await ctx.send(embed=emb)
+
+        # Pill buff/debuff section (from hourly tracking DB)
+        if self._db:
+            try:
+                pill_stats = await self._db.get_pill_stats_from_tracking(country_id=cid)
+                pill_emb = discord.Embed(
+                    title=f"💊 Pill status — {country_name}",
+                    description=_pill_field_value(pill_stats),
+                    colour=colour,
+                )
+                await ctx.send(embed=pill_emb)
+            except Exception:
+                pass
 
 
 async def setup(bot) -> None:

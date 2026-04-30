@@ -37,7 +37,7 @@ class PeilCog(CommandCogBase, name="peil"):
     )
     @app_commands.describe(
         onderdeel="Wat wil je peilen?",
-        land="Land (alleen voor 'burgers'). Leeg = alle landen.",
+        land="Land (voor 'burgers': welk land; voor 'mus': filter op land). Leeg = alles.",
     )
     @app_commands.choices(
         onderdeel=[
@@ -86,7 +86,7 @@ class PeilCog(CommandCogBase, name="peil"):
         if onderdeel in ("burgers", "alles"):
             await self._peil_burgers(ctx, land)
         if onderdeel in ("mus", "alles"):
-            await self._peil_mus(ctx)
+            await self._peil_mus(ctx, land)
         if onderdeel in ("productie", "alles"):
             await self._peil_productie(ctx)
         if onderdeel in ("events", "alles"):
@@ -183,11 +183,26 @@ class PeilCog(CommandCogBase, name="peil"):
     # MUs subsystem                                                        #
     # ------------------------------------------------------------------ #
 
-    async def _peil_mus(self, ctx: Context) -> None:
+    async def _peil_mus(self, ctx: Context, land: str | None = None) -> None:
         citizen_cache = getattr(self.bot, "_ext_citizen_cache", None)
         if not citizen_cache:
             await ctx.send("❌ Citizen cache niet beschikbaar.", ephemeral=True)
             return
+
+        # Resolve land → country_id filter
+        filter_country_id: str | None = None
+        filter_country_name: str | None = None
+        if land:
+            country_list = await self._fetch_country_list(ctx)
+            if country_list is None:
+                return
+            target = find_country(land, country_list)
+            if target is None:
+                await ctx.send(f"Land `{land}` niet gevonden.", ephemeral=True)
+                return
+            filter_country_id = cid_of(target)
+            filter_country_name = target.get("name", land)
+
         status_msg = await ctx.send("🔄 MU-namen vernieuwen…", ephemeral=True)
         try:
             mu_tasks = self.bot.get_cog("mu_tasks")
@@ -195,11 +210,12 @@ class PeilCog(CommandCogBase, name="peil"):
                 await mu_tasks.refresh_mu_info()
                 await mu_tasks.refresh_all_mu_names()
 
-            total_mus = (await self._db.get_all_known_mu_ids()) if self._db else []
+            total_mus = (await self._db.get_all_known_mu_ids(country_id=filter_country_id)) if self._db else []
             total_count = len(total_mus)
 
+            scope_label = f" ({filter_country_name})" if filter_country_name else ""
             await status_msg.edit(
-                content=f"🔄 MU sweep gestart — {total_count} MUs laden…"
+                content=f"🔄 MU sweep gestart — {total_count} MUs laden{scope_label}…"
             )
 
             last_edit_idx = 0
@@ -223,6 +239,7 @@ class PeilCog(CommandCogBase, name="peil"):
             t_start = time.monotonic()
             mus_tagged, citizens_updated = await citizen_cache.sweep_all_mu_memberships(
                 progress_callback=_progress,
+                country_id=filter_country_id,
             )
             elapsed = time.monotonic() - t_start
             elapsed_str = (
@@ -230,9 +247,10 @@ class PeilCog(CommandCogBase, name="peil"):
                 if elapsed >= 60
                 else f"{elapsed:.1f}s"
             )
+            scope_suffix = f" voor **{filter_country_name}**" if filter_country_name else ""
             await status_msg.edit(
                 content=(
-                    f"✅ MU sweep klaar — {mus_tagged}/{total_count} MUs getagt met land, "
+                    f"✅ MU sweep klaar{scope_suffix} — {mus_tagged}/{total_count} MUs getagt met land, "
                     f"{citizens_updated} burgers bijgewerkt. ⏱ {elapsed_str}"
                 )
             )

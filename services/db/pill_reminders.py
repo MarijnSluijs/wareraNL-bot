@@ -103,6 +103,43 @@ class PillRemindersMixin:
             )
         await self._conn.commit()
 
+    async def get_pill_status_for_user(
+        self, in_game_user_id: str
+    ) -> dict | None:
+        """Return pill status for a single user by in-game ID.
+
+        Returns ``None`` if the user is not a pill-reminder subscriber.
+        Otherwise returns ``{status, expires_at, secs_remaining}`` where
+        ``status`` is ``"buff"``, ``"debuff"``, or ``"none"``.
+        """
+        now = int(time.time())
+        debuff_duration = 16 * 3600
+
+        async with self._conn.execute(
+            "SELECT expires_at FROM pill_reminders WHERE in_game_user_id = ?",
+            (in_game_user_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            if row is None:
+                return None
+
+        expires_at: int | None = row[0]
+        if expires_at is None:
+            return {"status": "none", "expires_at": None, "secs_remaining": 0}
+        if expires_at > now:
+            return {
+                "status": "buff",
+                "expires_at": expires_at,
+                "secs_remaining": expires_at - now,
+            }
+        if expires_at + debuff_duration > now:
+            return {
+                "status": "debuff",
+                "expires_at": expires_at,
+                "secs_remaining": expires_at + debuff_duration - now,
+            }
+        return {"status": "none", "expires_at": expires_at, "secs_remaining": 0}
+
     # ── DM task helpers ───────────────────────────────────────────────────────
 
     async def get_due_pill_reminders(self) -> list[dict]:

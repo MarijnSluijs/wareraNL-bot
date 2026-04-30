@@ -228,8 +228,11 @@ class CitizenCache:
     async def sweep_all_mu_memberships(
         self,
         progress_callback=None,
+        country_id: str | None = None,
     ) -> tuple[int, int]:
         """Sweep every MU in known_mus: fetch its members, infer home country, update DB.
+
+        If *country_id* is given, only MUs already tagged with that country are swept.
 
         For each MU:
         1. Call /mu.getById to get the current member list.
@@ -244,7 +247,7 @@ class CitizenCache:
         """
         from collections import Counter
 
-        mu_rows = await self._db.get_all_known_mu_ids()
+        mu_rows = await self._db.get_all_known_mu_ids(country_id=country_id)
         total = len(mu_rows)
         now_iso = datetime.now(timezone.utc).isoformat()
 

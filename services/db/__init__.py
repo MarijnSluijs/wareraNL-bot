@@ -39,6 +39,7 @@ from .citizens import CitizensMixin
 from .company_bonus import CompanyBonusMixin
 from .company_move_advice import CompanyMoveAdviceMixin
 from .pill_reminders import PillRemindersMixin
+from .pill_tracking import PillTrackingMixin
 from .trades import TradesMixin
 from .tx_cache import TxCacheMixin
 from .events import EventsMixin
@@ -70,6 +71,7 @@ class Database(
     CompanyBonusMixin,
     CompanyMoveAdviceMixin,
     PillRemindersMixin,
+    PillTrackingMixin,
     TxCacheMixin,
     TradesMixin,
     WealthMixin,

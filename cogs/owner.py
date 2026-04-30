@@ -438,6 +438,16 @@ class Owner(commands.Cog, name="owner"):
                 reverse=True,
             )
 
+            # Batch-resolve Discord user IDs → in-game names
+            ingame_names: dict[str, str] = {}
+            if self._db and all_users:
+                try:
+                    ingame_names = await self._db.get_citizen_names_by_discord_ids(
+                        list(all_users)
+                    )
+                except Exception:
+                    pass
+
             activity_lines: list[str] = []
             for uid in sorted_users:
                 total = user_congres_msgs[uid] + user_debat_msgs[uid]
@@ -457,8 +467,10 @@ class Owner(commands.Cog, name="owner"):
                     if n_debates > 0
                     else ""
                 )
+                ingame = ingame_names.get(str(uid))
+                mention = f"<@{uid}>" + (f" ({ingame})" if ingame else "")
                 activity_lines.append(
-                    f"<@{uid}> — **{total}** berichten"
+                    f"{mention} — **{total}** berichten"
                     f" ({user_congres_msgs[uid]}🏛️ + {user_debat_msgs[uid]}🗣️)\n"
                     f"📅 {n_days} actieve dagen  |  🗣️ {n_debates} debatten aanwezig\n"
                     f"📊 {avg_day:.1f}/dag (med. {med_day:.1f}){per_debate_str}"
@@ -492,6 +504,19 @@ class Owner(commands.Cog, name="owner"):
                     color=self.color,
                 ))
 
+            # Emoji legend
+            await interaction.channel.send(embed=discord.Embed(  # type: ignore[union-attr]
+                description=(
+                    "**Legenda** — "
+                    "🏛️ congres-kanaal berichten  •  "
+                    "🗣️ debat-forum berichten  •  "
+                    "📅 actieve dagen  •  "
+                    "🗣️ debatten bijgewoond  •  "
+                    "📊 gem./dag (mediaan)"
+                ),
+                color=self.color,
+            ))
+
             # ── Step 3: stembureau reactions ──────────────────────────────────
             stembureau_channel_id = channel_ids.get("stembureau")
             if not stembureau_channel_id:
@@ -518,8 +543,23 @@ class Owner(commands.Cog, name="owner"):
                         users_counted.append(user.id)
                         vote_count[user.id] += 1
 
+            # Batch-resolve stembureau voters → in-game names
+            vote_ingame: dict[str, str] = {}
+            if self._db and vote_count:
+                try:
+                    vote_ingame = await self._db.get_citizen_names_by_discord_ids(
+                        list(vote_count.keys())
+                    )
+                except Exception:
+                    pass
+
             results = "\n".join(
-                [f"<@{user_id}>: {count}" for user_id, count in vote_count.most_common()]
+                [
+                    f"<@{user_id}>"
+                    + (f" ({vote_ingame.get(str(user_id), '')})" if vote_ingame.get(str(user_id)) else "")
+                    + f": {count}"
+                    for user_id, count in vote_count.most_common()
+                ]
             ) or "*Geen stemmen gevonden.*"
             await interaction.channel.send(embed=discord.Embed(  # type: ignore[union-attr]
                 title="Stembureau Analyse",

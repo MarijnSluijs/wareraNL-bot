@@ -44,12 +44,24 @@ class MusRegistryMixin:
                 names.append(row[0])
         return names
 
-    async def get_all_known_mu_ids(self) -> list[tuple[str, str, str | None]]:
-        """Return [(mu_id, mu_name, country_id)] for every row in known_mus."""
+    async def get_all_known_mu_ids(
+        self, country_id: str | None = None
+    ) -> list[tuple[str, str, str | None]]:
+        """Return [(mu_id, mu_name, country_id)] for every row in known_mus.
+
+        If *country_id* is given, only rows tagged with that country are returned.
+        """
         rows: list[tuple[str, str, str | None]] = []
-        async with self._conn.execute(
-            "SELECT mu_id, mu_name, country_id FROM known_mus ORDER BY mu_name"
-        ) as cur:
+        if country_id is not None:
+            sql = (
+                "SELECT mu_id, mu_name, country_id FROM known_mus"
+                " WHERE country_id = ? ORDER BY mu_name"
+            )
+            params: tuple = (country_id,)
+        else:
+            sql = "SELECT mu_id, mu_name, country_id FROM known_mus ORDER BY mu_name"
+            params = ()
+        async with self._conn.execute(sql, params) as cur:
             async for row in cur:
                 rows.append((row[0], row[1], row[2]))
         return rows
