@@ -439,10 +439,11 @@ class Owner(commands.Cog, name="owner"):
             )
 
             # Batch-resolve Discord user IDs → in-game names
+            _db = getattr(self.bot, "_ext_db", None)
             ingame_names: dict[str, str] = {}
-            if self._db and all_users:
+            if _db and all_users:
                 try:
-                    ingame_names = await self._db.get_citizen_names_by_discord_ids(
+                    ingame_names = await _db.get_citizen_names_by_discord_ids(
                         list(all_users)
                     )
                 except Exception:
@@ -545,9 +546,9 @@ class Owner(commands.Cog, name="owner"):
 
             # Batch-resolve stembureau voters → in-game names
             vote_ingame: dict[str, str] = {}
-            if self._db and vote_count:
+            if _db and vote_count:
                 try:
-                    vote_ingame = await self._db.get_citizen_names_by_discord_ids(
+                    vote_ingame = await _db.get_citizen_names_by_discord_ids(
                         list(vote_count.keys())
                     )
                 except Exception:
