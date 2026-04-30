@@ -20,6 +20,7 @@ logger = logging.getLogger("discord_bot")
 # Full all-countries sweep at most once every N hours.
 _ALL_COUNTRIES_INTERVAL_H = 6
 _MU_ROLE_SYNC_INTERVAL_H = 24
+_PILL_BUFF_CODE = "cocain"
 
 
 class CitizenTasks(TaskCogBase, name="citizen_tasks"):
@@ -112,6 +113,70 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
             await self._sync_discord_nicknames_for_country(nl_country_id, name)
         except Exception:
             logger.exception("citizen_refresh: NL nickname sync failed")
+
+        try:
+            await self._do_nl_pill_scan(nl_country_id)
+        except Exception:
+            logger.exception("citizen_refresh: NL pill scan failed")
+
+    async def _do_nl_pill_scan(self, nl_country_id: str) -> None:
+        """Batch-fetch getUserLite for all NL citizens and persist pill buff expiry.
+
+        Only overwrites buff_expires_at when an active buff is found; existing
+        values (for debuff detection) are preserved for players with no current buff.
+        """
+        if not self._client or not self._db:
+            return
+        try:
+            user_rows = await self._db.get_citizens_in_country(nl_country_id)
+        except Exception:
+            logger.exception("pill_scan: failed to fetch NL citizen IDs")
+            return
+
+        user_ids = [row[0] for row in user_rows]
+        if not user_ids:
+            return
+
+        logger.info("pill_scan: scanning %d NL citizens", len(user_ids))
+        try:
+            results = await self._client.batch_get(
+                "user.getUserLite",
+                [{"userId": uid} for uid in user_ids],
+            )
+        except Exception:
+            logger.exception("pill_scan: batch API call failed")
+            return
+
+        from datetime import datetime as _dt, timezone as _tz
+        import time as _time
+        now_ts = int(_time.time())
+        updated_at = datetime.now(timezone.utc).isoformat()
+
+        tracking_rows: list[tuple] = []
+        for uid, data in zip(user_ids, results):
+            if not isinstance(data, dict):
+                tracking_rows.append((uid, nl_country_id, None, updated_at))
+                continue
+            buffs = data.get("buffs") or {}
+            buff_codes: list = buffs.get("buffCodes") or []
+            buff_end_at: str | None = buffs.get("buffEndAt")
+            expires_at: int | None = None
+            if _PILL_BUFF_CODE in buff_codes and buff_end_at:
+                try:
+                    ts = _dt.fromisoformat(buff_end_at.replace("Z", "+00:00")).timestamp()
+                    expires_at = int(ts)
+                except Exception:
+                    pass
+            tracking_rows.append((uid, nl_country_id, expires_at, updated_at))
+
+        try:
+            await self._db.bulk_upsert_pill_tracking(tracking_rows)
+        except Exception:
+            logger.exception("pill_scan: failed to persist tracking data")
+            return
+
+        active = sum(1 for _, _, exp, _ in tracking_rows if exp is not None and exp > now_ts)
+        logger.info("pill_scan: done — %d/%d with active buff", active, len(user_ids))
 
     async def _do_all_countries_refresh(self, now_utc: datetime) -> None:
         """Refresh citizen level cache for all countries."""

@@ -155,6 +155,31 @@ class IdentityLinksMixin:
                     results[in_game_id] = str(row[1])
         return results
 
+    async def get_citizen_names_by_discord_ids(
+        self, discord_ids: list[str | int]
+    ) -> dict[str, str]:
+        """Return ``{discord_user_id: citizen_name}`` for a batch of Discord IDs.
+
+        Joins ``identity_links`` → ``citizen_levels``.  IDs that have no
+        identity link or no matching ``citizen_levels`` row are omitted.
+        """
+        if not discord_ids:
+            return {}
+        str_ids = [str(d) for d in discord_ids]
+        placeholders = ",".join("?" for _ in str_ids)
+        sql = (
+            "SELECT il.discord_user_id, cl.citizen_name "
+            "FROM identity_links il "
+            "JOIN citizen_levels cl ON cl.user_id = il.in_game_user_id "
+            f"WHERE il.discord_user_id IN ({placeholders})"
+            "  AND cl.citizen_name IS NOT NULL"
+        )
+        result: dict[str, str] = {}
+        async with self._conn.execute(sql, tuple(str_ids)) as cur:
+            async for row in cur:
+                result[str(row[0])] = str(row[1])
+        return result
+
     async def count_identity_links(
         self, guild_id: Optional[str] = None, nationality: Optional[str] = None
     ) -> int:

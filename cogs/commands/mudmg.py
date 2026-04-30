@@ -212,7 +212,7 @@ class MudmgCog(CommandCogBase, name="mudmg"):
     # ── Overview (no MU arg) ──────────────────────────────────────────────────
 
     async def _send_mu_overview(self, ctx: Context, entries: list[dict]) -> None:
-        """Fetch all MU stats and send an overview embed grouped by category."""
+        """Fetch all MU stats and send a flat ranked overview by weekly damage."""
         inputs = [{"muId": e["id"]} for e in entries]
         try:
             results = await self._client.batch_get("/mu.getById", inputs)
@@ -221,60 +221,71 @@ class MudmgCog(CommandCogBase, name="mudmg"):
             await self._send_api_offline(ctx)
             return
 
-        # Map entry id → live payload
-        id_to_data: dict[str, dict] = {}
-        for entry, payload in zip(entries, results):
-            if isinstance(payload, dict):
-                id_to_data[entry["id"]] = payload
-
-        # Group entries by category
-        grouped: dict[str, list[tuple[dict, dict]]] = {c: [] for c in _CATEGORY_ORDER}
-        for entry in entries:
-            cat = entry.get("type", "Standaard")
-            if cat not in grouped:
-                cat = "Standaard"
-            grouped[cat].append((entry, id_to_data.get(entry["id"], {})))
-
-        embed = discord.Embed(
-            title="⚔️ Nederlandse Militaire Eenheden — Schadeoverzicht",
-            colour=self._embed_colour(),
-        )
-
+        # Build a flat list of (name, category, weekly, total)
+        rows: list[tuple[str, str, float, float]] = []
         grand_weekly = 0.0
         grand_total = 0.0
+        for entry, payload in zip(entries, results):
+            w, t = _mu_rankings(payload if isinstance(payload, dict) else {})
+            cat = entry.get("type", "Standaard")
+            rows.append((entry["name"], cat, w, t))
+            grand_weekly += w
+            grand_total += t
 
-        for cat in _CATEGORY_ORDER:
-            group = grouped[cat]
-            if not group:
-                continue
+        # Sort by weekly damage descending
+        rows.sort(key=lambda r: r[2], reverse=True)
 
-            # Sort by weekly damage descending
-            group.sort(key=lambda t: _mu_rankings(t[1])[0], reverse=True)
+        # Build code-block table that fits in an embed description (max 4096 chars)
+        _CAT_ICON = {"Elite": "🎖️", "Eco": "🏭", "Standaard": "🛡️"}
+        name_w = min(max((len(r[0]) for r in rows), default=4), 22)
+        W = 10
+        T = 10
+        header = f"{'#':>2}  {'Naam':<{name_w}}  {'Wekelijks':>{W}}  {'Totaal':>{T}}"
+        sep = "\u2500" * len(header)
+        lines = [header, sep]
+        for i, (name, cat, weekly, total) in enumerate(rows, 1):
+            icon = _CAT_ICON.get(cat, "  ")
+            display = name[:name_w] if len(name) > name_w else name
+            w_str = fmt_damage(weekly) if weekly else "\u2014"
+            t_str = fmt_damage(total) if total else "\u2014"
+            lines.append(f"{i:>2}  {display:<{name_w}}  {w_str:>{W}}  {t_str:>{T}}  {icon}")
+        lines.append(sep)
+        gw_str = fmt_damage(grand_weekly) if grand_weekly else "\u2014"
+        gt_str = fmt_damage(grand_total) if grand_total else "\u2014"
+        lines.append(f"{'':>2}  {'Totaal NL':<{name_w}}  {gw_str:>{W}}  {gt_str:>{T}}")
 
-            cat_weekly = 0.0
-            cat_total = 0.0
-            tbl_rows: list[tuple[str, float, float]] = []
+        table = "```\n" + "\n".join(lines) + "\n```"
 
-            for entry, mu_data in group:
-                w, t = _mu_rankings(mu_data)
-                cat_weekly += w
-                cat_total += t
-                tbl_rows.append((entry["name"], w, t))
+        # Split into multiple embeds if description exceeds 4096 chars (very unlikely)
+        _MAX_DESC = 4000
+        chunks: list[str] = []
+        if len(table) <= _MAX_DESC:
+            chunks = [table]
+        else:
+            chunk_lines: list[str] = [lines[0], lines[1]]
+            for line in lines[2:]:
+                candidate = "```\n" + "\n".join(chunk_lines + [line]) + "\n```"
+                if len(candidate) > _MAX_DESC and len(chunk_lines) > 2:
+                    chunks.append("```\n" + "\n".join(chunk_lines) + "\n```")
+                    chunk_lines = [lines[0], lines[1], line]
+                else:
+                    chunk_lines.append(line)
+            if chunk_lines:
+                chunks.append("```\n" + "\n".join(chunk_lines) + "\n```")
 
-            grand_weekly += cat_weekly
-            grand_total += cat_total
-
-            embed.add_field(
-                name=_CATEGORY_LABEL.get(cat, cat),
-                value=_overview_table(tbl_rows, (cat_weekly, cat_total)),
-                inline=False,
+        legend = "🎖️ Elite  •  🏭 Eco  •  🛡️ Standaard"
+        for i, chunk in enumerate(chunks):
+            title = "⚔️ Nederlandse MUs — Ranking wekelijkse schade"
+            if len(chunks) > 1:
+                title += f" ({i + 1}/{len(chunks)})"
+            embed = discord.Embed(
+                title=title,
+                description=chunk,
+                colour=self._embed_colour(),
             )
-
-        gw_str = fmt_damage(grand_weekly) if grand_weekly else "—"
-        gt_str = fmt_damage(grand_total) if grand_total else "—"
-        embed.set_footer(text=f"Totaal NL — week: {gw_str} | totaal: {gt_str}")
-
-        await ctx.send(embed=embed)
+            if i == len(chunks) - 1:
+                embed.set_footer(text=legend)
+            await ctx.send(embed=embed)
 
     # ── Detail (MU arg) ───────────────────────────────────────────────────────
 

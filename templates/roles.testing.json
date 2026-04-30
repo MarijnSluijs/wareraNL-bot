@@ -185,6 +185,19 @@
           "row": 1
         }
       ]
+    },
+    {
+      "title": "👁️ Wakkerdam",
+      "color": "0x95a5a6",
+      "description": "Klik op de knop hieronder om de **Wakkerdam Toeschouwer** rol te krijgen.\n\nMet deze rol krijg je leestoegang tot de Wakkerdam-kanalen en kun je schrijven in het toeschouwerskanaal.",
+      "buttons": [
+        {
+          "label": "Wakkerdam Toeschouwer",
+          "role_id": 0,
+          "style": "secondary",
+          "row": 0
+        }
+      ]
     }
   ]
 }
