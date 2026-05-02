@@ -44,6 +44,7 @@ jobs:
       PANEL_ADMIN_IDS: ${{ secrets.PANEL_ADMIN_IDS }}
       PANEL_MODERATOR_IDS: ${{ secrets.PANEL_MODERATOR_IDS }}
       PANEL_ANALYST_IDS: ${{ secrets.PANEL_ANALYST_IDS }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - name: Deploy naar staging via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -72,6 +73,7 @@ jobs:
               printf 'PANEL_ADMIN_IDS=%s\n' "$PANEL_ADMIN_IDS"
               printf 'PANEL_MODERATOR_IDS=%s\n' "$PANEL_MODERATOR_IDS"
               printf 'PANEL_ANALYST_IDS=%s\n' "$PANEL_ANALYST_IDS"
+              printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY"
               printf '\n'
               printf '# Website / Admin dashboard - optional path overrides\n'
               printf 'BOT_DB_PATH=%s\n' "database/external.db"
@@ -95,6 +97,7 @@ jobs:
       PANEL_ADMIN_IDS: ${{ secrets.PANEL_ADMIN_IDS }}
       PANEL_MODERATOR_IDS: ${{ secrets.PANEL_MODERATOR_IDS }}
       PANEL_ANALYST_IDS: ${{ secrets.PANEL_ANALYST_IDS }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - name: Deploy naar productie via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -123,6 +126,7 @@ jobs:
               printf 'PANEL_ADMIN_IDS=%s\n' "$PANEL_ADMIN_IDS"
               printf 'PANEL_MODERATOR_IDS=%s\n' "$PANEL_MODERATOR_IDS"
               printf 'PANEL_ANALYST_IDS=%s\n' "$PANEL_ANALYST_IDS"
+              printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY"
               printf '\n'
               printf '# Website / Admin dashboard - optional path overrides\n'
               printf 'BOT_DB_PATH=%s\n' "database/external.db"
