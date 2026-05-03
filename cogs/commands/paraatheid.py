@@ -621,8 +621,9 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
         for emb in page_embeds:
             await ctx.send(embed=emb)
 
-        # Pill buff/debuff section (from hourly tracking DB)
-        if self._db:
+        # Pill buff/debuff section — only for NL (tracking data is NL-only)
+        nl_country_id_cfg = self.config.get("nl_country_id")
+        if self._db and nl_country_id_cfg and cid == nl_country_id_cfg:
             try:
                 pill_stats = await self._db.get_pill_stats_from_tracking(country_id=cid)
                 pill_emb = discord.Embed(

@@ -375,13 +375,20 @@ class DiscordBot(commands.Bot):
         guild_id: int = int(self.config.get("guild_id") or 0)
         if guild_id:
             guild = discord.Object(id=guild_id)
-            self.tree.copy_global_to(guild=guild)
+            # Sync guild-scoped commands (e.g. owner cog) to the guild.
+            # Do NOT use copy_global_to here — combining 91 global + 12 guild-only
+            # commands would exceed Discord's 100-command guild limit (103 total).
+            # Global commands are synced separately below; Discord counts each pool
+            # independently so 91 global + 12 guild-only is within limits.
             await self.tree.sync(guild=guild)
-            self._last_sync_at = datetime.now(timezone.utc)
-            self._last_sync_scope = f"guild:{guild_id} (auto)"
-            self.logger.info("Slash commands synced to guild %d", guild_id)
+            self.logger.info("Guild-scoped commands synced to guild %d", guild_id)
         else:
-            self.logger.warning("guild_id not set in config — skipping auto slash-command sync")
+            self.logger.warning("guild_id not set in config — skipping guild slash-command sync")
+        # Sync global commands globally (visible in all guilds + DMs).
+        await self.tree.sync()
+        self._last_sync_at = datetime.now(timezone.utc)
+        self._last_sync_scope = f"guild:{guild_id} + global" if guild_id else "global"
+        self.logger.info("Global slash commands synced")
 
     async def on_disconnect(self) -> None:
         """

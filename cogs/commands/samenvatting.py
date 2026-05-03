@@ -28,15 +28,36 @@ logger = logging.getLogger("discord_bot")
 # rarely exceed 50k tokens, so 500 is a safe ceiling.
 _MAX_MESSAGES = 500
 
-# System prompt (Dutch)
-_SYSTEM_PROMPT = (
-    "Je bent een assistent die Discord-gesprekken samenvat. "
-    "De gebruiker geeft je een reeks berichten uit een Discord-kanaal. "
-    "Schrijf een heldere, beknopte samenvatting in het Nederlands. "
-    "Groepeer gerelateerde onderwerpen samen. "
-    "Noem de gebruikersnamen alleen als ze relevant zijn voor de context. "
-    "Gebruik geen markdown-opmaak met # koppen — gewone alinea's zijn prima."
-)
+# System prompts per detail level
+_SYSTEM_PROMPTS: dict[str, str] = {
+    "globaal": (
+        "Je bent een assistent die Discord-gesprekken samenvat. "
+        "Geef een korte samenvatting in 2-3 zinnen in het Nederlands. "
+        "Noem alleen de belangrijkste onderwerpen die besproken zijn."
+    ),
+    "normaal": (
+        "Je bent een assistent die Discord-gesprekken samenvat. "
+        "De gebruiker geeft je een reeks berichten uit een Discord-kanaal. "
+        "Schrijf een heldere, beknopte samenvatting in het Nederlands. "
+        "Groepeer gerelateerde onderwerpen samen. "
+        "Noem de gebruikersnamen alleen als ze relevant zijn voor de context. "
+        "Gebruik geen markdown-opmaak met # koppen — gewone alinea's zijn prima."
+    ),
+    "gedetailleerd": (
+        "Je bent een assistent die Discord-gesprekken samenvat. "
+        "De gebruiker geeft je een reeks berichten uit een Discord-kanaal. "
+        "Schrijf een uitgebreide, gedetailleerde samenvatting in het Nederlands. "
+        "Bespreek alle onderwerpen die aan bod kwamen met voldoende context. "
+        "Groepeer gerelateerde onderwerpen samen met duidelijke alinea's. "
+        "Noem relevante gebruikersnamen en citeer standpunten waar nuttig. "
+        "Gebruik geen markdown-opmaak met # koppen — gewone alinea's zijn prima."
+    ),
+}
+_MAX_TOKENS_PER_LEVEL: dict[str, int] = {
+    "globaal": 200,
+    "normaal": 1024,
+    "gedetailleerd": 3000,
+}
 
 
 class SamenvattingCog(commands.Cog, name="samenvatting"):
@@ -52,10 +73,16 @@ class SamenvattingCog(commands.Cog, name="samenvatting"):
         description="Maak een AI-samenvatting van de berichten in dit kanaal.",
     )
     @app_commands.describe(
-        uren="Berichten van de afgelopen X uur samenvatten (bijv. 6)"
+        uren="Berichten van de afgelopen X uur samenvatten (bijv. 6)",
+        detailniveau="Hoe uitgebreid de samenvatting moet zijn (standaard: normaal)",
     )
+    @app_commands.choices(detailniveau=[
+        app_commands.Choice(name="Globaal (2-3 zinnen)", value="globaal"),
+        app_commands.Choice(name="Normaal", value="normaal"),
+        app_commands.Choice(name="Gedetailleerd", value="gedetailleerd"),
+    ])
     @app_commands.checks.cooldown(1, 30, key=lambda i: i.channel_id)
-    async def samenvatting(self, interaction: discord.Interaction, uren: int) -> None:
+    async def samenvatting(self, interaction: discord.Interaction, uren: int, detailniveau: str = "normaal") -> None:
         allowed_role_ids: list[int] = self.bot.config.get("roles", {}).get(
             "samenvatting_allowed", []
         )
@@ -104,11 +131,13 @@ class SamenvattingCog(commands.Cog, name="samenvatting"):
             )
             return
 
-        # Fetch messages
+        # Fetch messages — no limit so we get everything in the time window,
+        # then cap at _MAX_MESSAGES (keeping the most recent ones).
         cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=uren)
         messages: list[discord.Message] = []
+        truncated = False
         try:
-            async for msg in channel.history(limit=_MAX_MESSAGES, after=cutoff, oldest_first=True):
+            async for msg in channel.history(limit=None, after=cutoff, oldest_first=True):
                 if msg.author.bot:
                     continue
                 if msg.content.strip():
@@ -118,6 +147,10 @@ class SamenvattingCog(commands.Cog, name="samenvatting"):
                 "De bot heeft geen toestemming om berichten in dit kanaal te lezen.", ephemeral=True
             )
             return
+
+        if len(messages) > _MAX_MESSAGES:
+            messages = messages[-_MAX_MESSAGES:]
+            truncated = True
 
         if not messages:
             await interaction.followup.send(
@@ -134,7 +167,9 @@ class SamenvattingCog(commands.Cog, name="samenvatting"):
 
         # Call OpenAI
         try:
-            summary = await self._summarise(transcript, uren, len(messages), api_key)
+            summary = await self._summarise(
+                transcript, uren, len(messages), api_key, detailniveau
+            )
         except Exception as exc:
             logger.error("Samenvatting: OpenAI call failed: %s", exc)
             await interaction.followup.send(
@@ -143,23 +178,59 @@ class SamenvattingCog(commands.Cog, name="samenvatting"):
             )
             return
 
-        # Build embed
+        # Build embed(s)
         label = f"{uren} uur" if uren != 1 else "1 uur"
-        embed = discord.Embed(
-            title=f"📋 Samenvatting — afgelopen {label}",
-            description=summary,
-            colour=discord.Colour.blurple(),
-        )
-        embed.set_footer(text=f"{len(messages)} berichten • model: gpt-4o-mini")
-        await interaction.followup.send(embed=embed)
+        detail_label = {"globaal": "globaal", "normaal": "normaal", "gedetailleerd": "gedetailleerd"}.get(detailniveau, detailniveau)
+        truncated_note = f" • ⚠️ afgekapt op {_MAX_MESSAGES}" if truncated else ""
+        footer = f"{len(messages)} berichten{truncated_note} • model: gpt-4o-mini • {detail_label}"
+
+        # Split long summaries (gedetailleerd can exceed embed description limit)
+        _EMBED_MAX = 4000
+        chunks = []
+        if len(summary) <= _EMBED_MAX:
+            chunks = [summary]
+        else:
+            # Split on paragraph boundaries where possible
+            current = ""
+            for paragraph in summary.split("\n\n"):
+                segment = ("\n\n" if current else "") + paragraph
+                if len(current) + len(segment) > _EMBED_MAX:
+                    chunks.append(current)
+                    current = paragraph
+                else:
+                    current += segment
+            if current:
+                chunks.append(current)
+
+        for i, chunk in enumerate(chunks):
+            title = f"📋 Samenvatting — afgelopen {label}"
+            if len(chunks) > 1:
+                title += f" ({i + 1}/{len(chunks)})"
+            embed = discord.Embed(
+                title=title,
+                description=chunk,
+                colour=discord.Colour.blurple(),
+            )
+            if i == len(chunks) - 1:
+                embed.set_footer(text=footer)
+            if i == 0:
+                await interaction.followup.send(embed=embed)
+            else:
+                assert interaction.channel is not None
+                await interaction.channel.send(embed=embed)  # type: ignore[union-attr]
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _summarise(self, transcript: str, uren: int, n_messages: int, api_key: str) -> str:
+    async def _summarise(
+        self, transcript: str, uren: int, n_messages: int, api_key: str, detailniveau: str = "normaal"
+    ) -> str:
         """Call the OpenAI Chat Completions API and return the summary text."""
         import httpx
+
+        system_prompt = _SYSTEM_PROMPTS.get(detailniveau, _SYSTEM_PROMPTS["normaal"])
+        max_tokens = _MAX_TOKENS_PER_LEVEL.get(detailniveau, 1024)
 
         user_prompt = (
             f"Hieronder staan {n_messages} berichten uit een Discord-kanaal van de afgelopen {uren} uur. "
@@ -169,10 +240,10 @@ class SamenvattingCog(commands.Cog, name="samenvatting"):
         payload = {
             "model": "gpt-4o-mini",
             "messages": [
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "max_tokens": 1024,
+            "max_tokens": max_tokens,
             "temperature": 0.4,
         }
 

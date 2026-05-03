@@ -114,6 +114,16 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
         except Exception:
             logger.exception("citizen_refresh: NL nickname sync failed")
 
+        # Refresh MU memberships from the authoritative MU member lists so that
+        # citizens who recently joined/changed MUs are correctly tagged.
+        try:
+            testing = getattr(self.bot, "testing", False)
+            mus_json = "templates/mus.testing.json" if testing else "templates/mus.json"
+            updated = await self._citizen_cache.refresh_mu_memberships(nl_country_id, mus_json)
+            logger.info("citizen_refresh: NL MU memberships refreshed (%d updated)", updated)
+        except Exception:
+            logger.exception("citizen_refresh: NL MU membership refresh failed")
+
         try:
             await self._do_nl_pill_scan(nl_country_id)
         except Exception:
@@ -264,11 +274,12 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
             logger.exception("mu_role_sync: failed to save last-run state")
 
         logger.info(
-            "mu_role_sync: done (guilds=%d citizens_with_mu=%d mapped=%d assigned=%d had=%d role_missing=%d member_missing=%d errors=%d)",
+            "mu_role_sync: done (guilds=%d citizens_with_mu=%d mapped=%d assigned=%d removed=%d had=%d role_missing=%d member_missing=%d errors=%d)",
             stats["guilds"],
             stats["citizens_with_mu"],
             stats["mapped_discord_users"],
             stats["assigned"],
+            stats["removed"],
             stats["already_had_role"],
             stats["roles_missing_in_guild"],
             stats["member_not_found"],
@@ -283,6 +294,7 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
             "mapped_discord_users": 0,
             "assigned": 0,
             "already_had_role": 0,
+            "removed": 0,
             "roles_missing_in_guild": 0,
             "member_not_found": 0,
             "errors": 0,
@@ -294,17 +306,29 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
         if not mu_to_role_id:
             return stats
 
-        citizen_mus = await self._db.get_citizen_mus()
-        citizens_with_known_mu = [
-            (in_game_id, mu_id)
-            for in_game_id, mu_id in citizen_mus
-            if mu_id and mu_id in mu_to_role_id
-        ]
-        stats["citizens_with_mu"] = len(citizens_with_known_mu)
-        if not citizens_with_known_mu:
+        # Set of all Discord role IDs that represent MU memberships.
+        all_mu_role_ids: set[int] = set(mu_to_role_id.values())
+
+        # Get ALL NL citizens (including those with no MU) so we can also
+        # remove stale MU roles from members who switched or left their MU.
+        nl_country_id = self.config.get("nl_country_id")
+        if not nl_country_id:
             return stats
 
-        in_game_ids = list({in_game_id for in_game_id, _ in citizens_with_known_mu})
+        citizen_mu_info = await self._db.get_nl_citizens_mu_info(nl_country_id)
+        # Map: in_game_id → desired role_id (None = should have no MU role)
+        desired_mu_role: dict[str, int | None] = {}
+        for in_game_id, mu_id in citizen_mu_info:
+            if mu_id and mu_id in mu_to_role_id:
+                desired_mu_role[in_game_id] = mu_to_role_id[mu_id]
+            else:
+                desired_mu_role[in_game_id] = None
+
+        stats["citizens_with_mu"] = sum(1 for v in desired_mu_role.values() if v is not None)
+        if not desired_mu_role:
+            return stats
+
+        in_game_ids = list(desired_mu_role.keys())
 
         for guild in self.bot.guilds:
             guild_id = str(guild.id)
@@ -318,43 +342,50 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
             if not in_game_to_discord:
                 continue
 
-            seen_assignments: set[tuple[int, int]] = set()
-            for in_game_id, mu_id in citizens_with_known_mu:
-                discord_id = in_game_to_discord.get(in_game_id)
-                if not discord_id:
-                    continue
-
-                role_id = mu_to_role_id.get(str(mu_id))
-                if not role_id:
-                    continue
-                role = guild.get_role(role_id)
-                if role is None:
-                    stats["roles_missing_in_guild"] += 1
-                    continue
-
-                if not discord_id.isdigit():
+            for in_game_id, discord_id_str in in_game_to_discord.items():
+                if not discord_id_str or not discord_id_str.isdigit():
                     stats["member_not_found"] += 1
                     continue
-                member = guild.get_member(int(discord_id))
+                member = guild.get_member(int(discord_id_str))
                 if member is None or member.bot:
                     stats["member_not_found"] += 1
                     continue
 
-                if role in member.roles:
-                    stats["already_had_role"] += 1
-                    continue
+                target_role_id = desired_mu_role.get(in_game_id)
 
-                assignment_key = (member.id, role.id)
-                if assignment_key in seen_assignments:
+                # Determine which MU roles to remove (any MU role that isn't target)
+                stale_roles = [
+                    r for r in member.roles
+                    if r.id in all_mu_role_ids and r.id != target_role_id
+                ]
+
+                # Determine if the target role needs to be added
+                role_to_add: discord.Role | None = None
+                if target_role_id is not None:
+                    target_role = guild.get_role(target_role_id)
+                    if target_role is None:
+                        stats["roles_missing_in_guild"] += 1
+                    elif target_role in member.roles:
+                        stats["already_had_role"] += 1
+                    else:
+                        role_to_add = target_role
+
+                if not stale_roles and role_to_add is None:
                     continue
-                seen_assignments.add(assignment_key)
 
                 try:
-                    await member.add_roles(
-                        role,
-                        reason="Daily MU role sync from citizen MU membership",
-                    )
-                    stats["assigned"] += 1
+                    if stale_roles:
+                        await member.remove_roles(
+                            *stale_roles,
+                            reason="Daily MU role sync: stale MU role removed",
+                        )
+                        stats["removed"] += len(stale_roles)
+                    if role_to_add is not None:
+                        await member.add_roles(
+                            role_to_add,
+                            reason="Daily MU role sync from citizen MU membership",
+                        )
+                        stats["assigned"] += 1
                 except discord.HTTPException:
                     stats["errors"] += 1
 
