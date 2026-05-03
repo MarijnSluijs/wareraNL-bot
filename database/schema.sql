@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS citizen_levels (
     updated_at           TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_citizen_levels_country ON citizen_levels(country_id);
+CREATE INDEX IF NOT EXISTS idx_citizen_levels_mu_name ON citizen_levels(mu_name) WHERE mu_name IS NOT NULL;
 
 -- identity_links: mapping between Discord identities and in-game identities
 --   updated on verification approvals in welcome flow

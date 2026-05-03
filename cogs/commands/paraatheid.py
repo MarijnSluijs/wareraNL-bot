@@ -380,7 +380,7 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                 await ctx.send("Geen MUs gevonden in het configuratiebestand.")
                 return
             try:
-                mu_stats = await self._db.get_all_mu_readiness(nl_country_id)
+                mu_stats = await self._db.get_all_mu_readiness()
             except Exception as exc:
                 await ctx.send(f"Databasefout: {exc}")
                 return
