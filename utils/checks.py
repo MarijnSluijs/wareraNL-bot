@@ -9,10 +9,10 @@ PRIVILEGED_ROLE_IDS: set[int] = {
     1401530996725383178,  # president
     1401531414553428139,  # vice_president
     1458527742646816892,  # government
+    1451181300009537547,  # congress member
     1458427087189835776,  # commandant
     1475468331896148079,  # bot_ontwikkelaar
 }
-
 
 def has_privileged_role() -> app_commands.check:
     """app_commands check: owner OR one of the privileged roles (bypassed in test mode)."""

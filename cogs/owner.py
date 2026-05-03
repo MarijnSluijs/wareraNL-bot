@@ -23,7 +23,15 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
 
-from utils.checks import has_privileged_role
+from utils.checks import has_privileged_role, PRIVILEGED_ROLE_IDS
+
+
+async def _owner_or_privileged(ctx: Context) -> bool:
+    if await ctx.bot.is_owner(ctx.author):
+        return True
+    return isinstance(ctx.author, discord.Member) and bool(
+        {r.id for r in ctx.author.roles} & PRIVILEGED_ROLE_IDS
+    )
 
 
 class Owner(commands.Cog, name="owner"):
@@ -287,6 +295,42 @@ class Owner(commands.Cog, name="owner"):
             allowed_mentions=discord.AllowedMentions(everyone=False, roles=False),
         )
 
+    @commands.command(
+        name="reembed",
+        description="Kopieer de embeds van een bericht naar dit kanaal (geen 'Forwarded' label).",
+    )
+    @commands.check(_owner_or_privileged)
+    async def reembed(self, context: Context, message_id: int, channel_id: int = 0) -> None:
+        """Fetch a message by ID and re-send all its embeds in the current channel.
+
+        Usage:
+          !reembed <message_id>                   — looks in the current channel
+          !reembed <message_id> <channel_id>      — looks in the specified channel
+        """
+        await context.message.delete()
+        source_channel = (
+            self.bot.get_channel(channel_id) if channel_id else context.channel
+        )
+        if source_channel is None:
+            await context.send(f"❌ Kanaal `{channel_id}` niet gevonden.")
+            return
+
+        try:
+            msg = await source_channel.fetch_message(message_id)  # type: ignore[union-attr]
+        except discord.NotFound:
+            await context.send(f"❌ Bericht `{message_id}` niet gevonden in <#{source_channel.id}>.")
+            return
+        except discord.Forbidden:
+            await context.send(f"❌ Geen toegang tot kanaal <#{source_channel.id}>.")
+            return
+
+        if not msg.embeds:
+            await context.send("❌ Dat bericht bevat geen embeds.")
+            return
+
+        for embed in msg.embeds:
+            await context.send(embed=embed)
+
     @commands.hybrid_command(
         name="purge",
         description="Delete a number of messages.",
@@ -322,16 +366,11 @@ class Owner(commands.Cog, name="owner"):
         datum="Startdatum in formaat DD-MM-JJJJ (bijv. 07-02-2026). Laat leeg voor 7 februari 2026.",
         met_reacties="Reacties tellen (standaard: ja). Zet op nee voor een snellere analyse zonder reacties.",
     )
+    @has_privileged_role()
     async def congres_analyse(
         self, interaction: discord.Interaction, datum: str = "07-02-2026", met_reacties: bool = True
     ) -> None:
         """Count messages/votes from each congress member in the congress channels since a given date."""
-        if not await self.bot.is_owner(interaction.user):
-            await interaction.response.send_message(
-                "❌ Alleen de bot-eigenaar kan dit gebruiken.", ephemeral=True
-            )
-            return
-
         # ── Parse date ────────────────────────────────────────────────────
         start_time: datetime | None = None
         for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
