@@ -295,41 +295,55 @@ class Owner(commands.Cog, name="owner"):
             allowed_mentions=discord.AllowedMentions(everyone=False, roles=False),
         )
 
-    @commands.command(
+    @app_commands.command(
         name="reembed",
-        description="Kopieer de embeds van een bericht naar dit kanaal (geen 'Forwarded' label).",
+        description="Kopieer embeds uit een bericht naar dit kanaal. Gebruik dit commando IN het doelkanaal.",
     )
-    @commands.check(_owner_or_privileged)
-    async def reembed(self, context: Context, message_id: int, channel_id: int = 0) -> None:
-        """Fetch a message by ID and re-send all its embeds in the current channel.
+    @app_commands.describe(
+        message_id="ID van het bericht met de embeds (rechtsklik → Kopieer bericht-ID).",
+        source_channel="Het kanaal waar het originele bericht staat.",
+    )
+    @has_privileged_role()
+    async def reembed(
+        self,
+        interaction: discord.Interaction,
+        message_id: str,
+        source_channel: discord.TextChannel,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
 
-        Usage:
-          !reembed <message_id>                   — looks in the current channel
-          !reembed <message_id> <channel_id>      — looks in the specified channel
-        """
-        await context.message.delete()
-        source_channel = (
-            self.bot.get_channel(channel_id) if channel_id else context.channel
-        )
-        if source_channel is None:
-            await context.send(f"❌ Kanaal `{channel_id}` niet gevonden.")
+        try:
+            msg_id = int(message_id)
+        except ValueError:
+            await interaction.followup.send("❌ Ongeldig bericht-ID.", ephemeral=True)
             return
 
         try:
-            msg = await source_channel.fetch_message(message_id)  # type: ignore[union-attr]
+            msg = await source_channel.fetch_message(msg_id)
         except discord.NotFound:
-            await context.send(f"❌ Bericht `{message_id}` niet gevonden in <#{source_channel.id}>.")
+            await interaction.followup.send(
+                f"❌ Bericht `{msg_id}` niet gevonden in {source_channel.mention}.",
+                ephemeral=True,
+            )
             return
         except discord.Forbidden:
-            await context.send(f"❌ Geen toegang tot kanaal <#{source_channel.id}>.")
+            await interaction.followup.send(
+                f"❌ Geen toegang tot {source_channel.mention}.",
+                ephemeral=True,
+            )
             return
 
         if not msg.embeds:
-            await context.send("❌ Dat bericht bevat geen embeds.")
+            await interaction.followup.send("❌ Dat bericht bevat geen embeds.", ephemeral=True)
             return
 
+        dest = interaction.channel
         for embed in msg.embeds:
-            await context.send(embed=embed)
+            await dest.send(embed=embed)  # type: ignore[union-attr]
+
+        await interaction.followup.send(
+            f"✅ {len(msg.embeds)} embed(s) gekopieerd.", ephemeral=True
+        )
 
     @commands.hybrid_command(
         name="purge",
