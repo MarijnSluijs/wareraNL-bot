@@ -461,10 +461,29 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                         f"{'totaal':<{name_w_all}}  {tot_par_str:>5}  {tot_kan_str:>3}  {tot_w15_str:>3}  {tot_w20_str:>3}  {tot_avg_str:>5}"
                     )
 
-                block_text = (
-                    "```\n" + hdr + "\n" + sep + "\n" + "\n".join(rows) + "\n```"
-                )
-                emb.add_field(name=field_label, value=block_text, inline=False)
+                # Split rows into chunks that each fit within Discord's 1024-char field limit
+                FIELD_MAX = 1024
+                prefix = "```\n" + hdr + "\n" + sep + "\n"
+                suffix = "\n```"
+                overhead = len(prefix) + len(suffix)
+                chunks: list[list[str]] = []
+                current: list[str] = []
+                current_len = 0
+                for row in rows:
+                    row_len = len(row) + 1  # +1 for newline
+                    if current and overhead + current_len + row_len > FIELD_MAX:
+                        chunks.append(current)
+                        current = []
+                        current_len = 0
+                    current.append(row)
+                    current_len += row_len
+                if current:
+                    chunks.append(current)
+
+                for i, chunk in enumerate(chunks):
+                    block_text = prefix + "\n".join(chunk) + suffix
+                    chunk_label = field_label if i == 0 else f"{field_label} (vervolg)"
+                    emb.add_field(name=chunk_label, value=block_text, inline=False)
                 has_data = True
 
             if not has_data:
