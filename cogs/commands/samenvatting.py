@@ -63,6 +63,8 @@ class SamenvattingCog(commands.Cog, name="samenvatting"):
         if allowed_role_ids and isinstance(member, discord.Member):
             # Server admins always pass
             is_admin = member.guild_permissions.administrator
+            # Specific user always passes
+            is_breakerh = member.name == "breakerh"
             # Privileged bot roles also pass
             privileged_keys = {"officier", "government", "commandant", "president", "vice_president"}
             privileged_ids = {
@@ -72,7 +74,7 @@ class SamenvattingCog(commands.Cog, name="samenvatting"):
             member_role_ids = {r.id for r in member.roles}
             has_allowed = bool(member_role_ids.intersection(allowed_role_ids))
             has_privileged = bool(member_role_ids.intersection(privileged_ids - {None}))
-            if not (is_admin or has_allowed or has_privileged):
+            if not (is_admin or is_breakerh or has_allowed or has_privileged):
                 await interaction.response.send_message(
                     "Je hebt niet de juiste rol om dit commando te gebruiken.",
                     ephemeral=True,
