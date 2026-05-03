@@ -214,7 +214,7 @@ class General(commands.Cog, name="general"):
         # (<:KEKW:123456789> or <a:KEKW:123456789> for animated) before checking,
         # so that emoji-only messages don't incorrectly trigger the mute reaction.
         _caps_stripped = re.sub(r'<a?:[A-Za-z0-9_]+:\d+>|:[A-Za-z0-9_]+:', '', content).strip()
-        if len(content) >= 3 and content == content.upper() and _caps_stripped and any(c.isalpha() for c in _caps_stripped):
+        if len(_caps_stripped) >= 50 and content == content.upper() and any(c.isalpha() for c in _caps_stripped):
             try:
                 await message.add_reaction("🔇")
             except discord.HTTPException:

@@ -706,6 +706,49 @@ class CitizensMixin:
                 rows.append((str(row[0]), str(row[1])))
         return rows
 
+    async def get_nl_citizens_mu_info(
+        self, country_id: str
+    ) -> list[tuple[str, str | None]]:
+        """Return [(user_id, mu_id_or_None)] for all citizens in *country_id*.
+
+        Citizens with no MU have mu_id=None.  Used to determine which Discord
+        members should have a MU role and which should have none.
+        """
+        rows: list[tuple[str, str | None]] = []
+        async with self._conn.execute(
+            "SELECT user_id, mu_id FROM citizen_levels WHERE country_id = ?",
+            (country_id,),
+        ) as cur:
+            async for row in cur:
+                rows.append((str(row[0]), str(row[1]) if row[1] else None))
+        return rows
+
+    async def get_active_nl_citizens_without_mu(
+        self, country_id: str, min_level: int = 20, max_hours_inactive: int = 72
+    ) -> list[tuple[str, str, int]]:
+        """Return [(user_id, citizen_name, level)] for NL citizens who:
+        - are at least *min_level*
+        - logged in within the last *max_hours_inactive* hours
+        - have no MU (mu_id IS NULL or empty)
+        """
+        rows: list[tuple[str, str, int]] = []
+        async with self._conn.execute(
+            """
+            SELECT user_id, COALESCE(citizen_name, user_id), level
+            FROM citizen_levels
+            WHERE country_id = ?
+              AND level >= ?
+              AND (mu_id IS NULL OR mu_id = '')
+              AND last_login_at IS NOT NULL
+              AND datetime(last_login_at) >= datetime('now', ? || ' hours')
+            ORDER BY level DESC
+            """,
+            (country_id, min_level, f"-{max_hours_inactive}"),
+        ) as cur:
+            async for row in cur:
+                rows.append((str(row[0]), str(row[1]), int(row[2] or 0)))
+        return rows
+
     async def get_distinct_mu_ids_for_country(
         self, country_id: str
     ) -> list[tuple[str, str]]:

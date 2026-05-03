@@ -61,7 +61,6 @@ class Owner(commands.Cog, name="owner"):
             await context.send(embed=embed)
             return
         elif scope == "guild":
-            context.bot.tree.copy_global_to(guild=context.guild)
             await context.bot.tree.sync(guild=context.guild)
             context.bot._last_sync_at = datetime.now(timezone.utc)
             context.bot._last_sync_scope = f"guild:{context.guild.id} (handmatig)"
@@ -367,7 +366,7 @@ class Owner(commands.Cog, name="owner"):
         # ── Single status message in the channel, edited at every step ─────
         assert interaction.channel is not None
         status_msg = await interaction.followup.send(
-            embed=_status_embed("⏳ **Stap 1/3** — Congres kanaal wordt geanalyseerd..."),
+            embed=_status_embed("⏳ **Stap 1/3** — Congres kanaal wordt geanalyseerd (berichten + reacties)..."),
             wait=True,
         )
 
@@ -375,6 +374,8 @@ class Owner(commands.Cog, name="owner"):
             # ── Per-user tracking across all congress channels ────────────────
             user_congres_msgs: Counter[int] = Counter()
             user_debat_msgs: Counter[int] = Counter()
+            user_congres_reactions: Counter[int] = Counter()
+            user_debat_reactions: Counter[int] = Counter()
             # days on which the member sent ≥1 message in any congress channel
             user_days: defaultdict[int, set[str]] = defaultdict(set)
             # debate thread IDs in which the member sent ≥1 message
@@ -395,13 +396,17 @@ class Owner(commands.Cog, name="owner"):
             async for message in self.bot.get_channel(congres_channel_id).history(
                 limit=None, after=start_time
             ):
-                if not _is_congress_member(message.author):
-                    continue
-                uid = message.author.id
-                day = message.created_at.strftime("%Y-%m-%d")
-                user_congres_msgs[uid] += 1
-                user_days[uid].add(day)
-                user_msgs_per_day[uid][day] += 1
+                if _is_congress_member(message.author):
+                    uid = message.author.id
+                    day = message.created_at.strftime("%Y-%m-%d")
+                    user_congres_msgs[uid] += 1
+                    user_days[uid].add(day)
+                    user_msgs_per_day[uid][day] += 1
+                # Count emoji reactions placed by congress members on any message
+                for reaction in message.reactions:
+                    async for user in reaction.users():
+                        if _is_congress_member(user):
+                            user_congres_reactions[user.id] += 1
 
             # ── Step 2: debat forum ───────────────────────────────────────────
             debate_channel_id = channel_ids.get("debat")
@@ -410,7 +415,7 @@ class Owner(commands.Cog, name="owner"):
                 return
 
             await status_msg.edit(
-                embed=_status_embed("⏳ **Stap 2/3** — Debat kanaal (actieve + gesloten threads) wordt geanalyseerd...")
+                embed=_status_embed("⏳ **Stap 2/3** — Debat kanaal (actieve + gesloten threads, berichten + reacties) wordt geanalyseerd...")
             )
 
             debat_channel = self.bot.get_channel(debate_channel_id)
@@ -420,18 +425,22 @@ class Owner(commands.Cog, name="owner"):
 
             for thread in all_threads:
                 async for message in thread.history(limit=None, after=start_time):
-                    if not _is_congress_member(message.author):
-                        continue
-                    uid = message.author.id
-                    day = message.created_at.strftime("%Y-%m-%d")
-                    user_debat_msgs[uid] += 1
-                    user_days[uid].add(day)
-                    user_debates[uid].add(thread.id)
-                    user_msgs_per_day[uid][day] += 1
-                    user_msgs_per_debate[uid][thread.id] += 1
+                    if _is_congress_member(message.author):
+                        uid = message.author.id
+                        day = message.created_at.strftime("%Y-%m-%d")
+                        user_debat_msgs[uid] += 1
+                        user_days[uid].add(day)
+                        user_debates[uid].add(thread.id)
+                        user_msgs_per_day[uid][day] += 1
+                        user_msgs_per_debate[uid][thread.id] += 1
+                    # Count emoji reactions placed by congress members
+                    for reaction in message.reactions:
+                        async for user in reaction.users():
+                            if _is_congress_member(user):
+                                user_debat_reactions[user.id] += 1
 
             # ── Build combined activity embed(s) per member ───────────────────
-            all_users = set(user_congres_msgs.keys()) | set(user_debat_msgs.keys())
+            all_users = set(user_congres_msgs.keys()) | set(user_debat_msgs.keys()) | set(user_congres_reactions.keys()) | set(user_debat_reactions.keys())
             sorted_users = sorted(
                 all_users,
                 key=lambda u: user_congres_msgs[u] + user_debat_msgs[u],
@@ -452,6 +461,7 @@ class Owner(commands.Cog, name="owner"):
             activity_lines: list[str] = []
             for uid in sorted_users:
                 total = user_congres_msgs[uid] + user_debat_msgs[uid]
+                total_reactions = user_congres_reactions[uid] + user_debat_reactions[uid]
                 n_days = len(user_days[uid])
                 n_debates = len(user_debates[uid])
 
@@ -468,11 +478,12 @@ class Owner(commands.Cog, name="owner"):
                     if n_debates > 0
                     else ""
                 )
+                reactions_str = f"  |  👍 {total_reactions} reacties" if total_reactions > 0 else ""
                 ingame = ingame_names.get(str(uid))
                 mention = f"<@{uid}>" + (f" ({ingame})" if ingame else "")
                 activity_lines.append(
                     f"{mention} — **{total}** berichten"
-                    f" ({user_congres_msgs[uid]}🏛️ + {user_debat_msgs[uid]}🗣️)\n"
+                    f" ({user_congres_msgs[uid]}🏛️ + {user_debat_msgs[uid]}🗣️){reactions_str}\n"
                     f"📅 {n_days} actieve dagen  |  🗣️ {n_debates} debatten aanwezig\n"
                     f"📊 {avg_day:.1f}/dag (med. {med_day:.1f}){per_debate_str}"
                 )
@@ -511,7 +522,8 @@ class Owner(commands.Cog, name="owner"):
                     "**Legenda** — "
                     "🏛️ congres-kanaal berichten  •  "
                     "🗣️ debat-forum berichten  •  "
-                    "📅 actieve dagen  •  "
+                    "� emoji-reacties geplaatst  •  "
+                    "�📅 actieve dagen  •  "
                     "🗣️ debatten bijgewoond  •  "
                     "📊 gem./dag (mediaan)"
                 ),
@@ -642,6 +654,57 @@ class Owner(commands.Cog, name="owner"):
         for chunk in chunks[1:]:
             await interaction.followup.send(chunk)
 
+    @app_commands.command(
+        name="nl-niet-in-mu",
+        description="Toont actieve Nederlandse spelers (level ≥20, actief ≤72u) zonder militaire eenheid.",
+    )
+    @app_commands.describe(min_level="Minimaal level (standaard 20)")
+    @has_privileged_role()
+    async def nl_niet_in_mu(
+        self, interaction: discord.Interaction, min_level: int = 20
+    ) -> None:
+        """List active NL citizens with level >= min_level, active in last 72h, without an MU."""
+        await interaction.response.defer()
+
+        db = getattr(self.bot, "_ext_db", None)
+        if not db:
+            await interaction.followup.send("❌ Database niet beschikbaar.")
+            return
+
+        nl_country_id: str = self.bot.config.get("nl_country_id", "6813b6d446e731854c7ac7a0")
+
+        rows = await db.get_active_nl_citizens_without_mu(
+            nl_country_id, min_level=min_level, max_hours_inactive=72
+        )
+
+        if not rows:
+            await interaction.followup.send(
+                f"✅ Geen actieve Nederlandse spelers (level ≥{min_level}, actief ≤72u) gevonden zonder militaire eenheid.",
+            )
+            return
+
+        lines = [
+            f"• [{name}](https://app.warera.io/user/{uid}) — level {lvl}"
+            for uid, name, lvl in rows
+        ]
+        header = (
+            f"**Nederlandse spelers level ≥{min_level} zonder MU "
+            f"(actief in laatste 72u, {len(rows)} totaal):**\n"
+        )
+        chunks: list[str] = []
+        current = header
+        for line in lines:
+            if len(current) + len(line) + 1 > 1900:
+                chunks.append(current)
+                current = ""
+            current += line + "\n"
+        if current:
+            chunks.append(current)
+
+        await interaction.followup.send(chunks[0])
+        for chunk in chunks[1:]:
+            await interaction.followup.send(chunk)
+
     @commands.command(
         name="apioffline",
         description="Simuleer de API als offline of herstel de verbinding (test mode).",
@@ -681,5 +744,11 @@ class Owner(commands.Cog, name="owner"):
 
 
 async def setup(bot) -> None:
-    """Add the Owner cog to the bot."""
-    await bot.add_cog(Owner(bot))
+    """Add the Owner cog to the bot.
+
+    Owner commands are registered guild-only (not globally) to avoid hitting
+    Discord's 100 global slash-command limit.
+    """
+    guild_id = int(bot.config.get("guild_id") or 0)
+    guilds = [discord.Object(id=guild_id)] if guild_id else []
+    await bot.add_cog(Owner(bot), guilds=guilds or None)
