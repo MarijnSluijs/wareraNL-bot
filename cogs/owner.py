@@ -13,6 +13,7 @@ Prefix commands (owner-only unless noted):
   /purge (amount)               — delete messages in bulk (requires manage_messages)
 """
 
+import asyncio
 import os
 import sys
 from datetime import datetime, timezone
@@ -318,10 +319,11 @@ class Owner(commands.Cog, name="owner"):
         description="Analyseer de congresleden en hun stemgedrag vanaf een gegeven datum.",
     )
     @app_commands.describe(
-        datum="Startdatum in formaat DD-MM-JJJJ (bijv. 07-02-2026). Laat leeg voor 7 februari 2026."
+        datum="Startdatum in formaat DD-MM-JJJJ (bijv. 07-02-2026). Laat leeg voor 7 februari 2026.",
+        met_reacties="Reacties tellen (standaard: ja). Zet op nee voor een snellere analyse zonder reacties.",
     )
     async def congres_analyse(
-        self, interaction: discord.Interaction, datum: str = "07-02-2026"
+        self, interaction: discord.Interaction, datum: str = "07-02-2026", met_reacties: bool = True
     ) -> None:
         """Count messages/votes from each congress member in the congress channels since a given date."""
         if not await self.bot.is_owner(interaction.user):
@@ -365,8 +367,9 @@ class Owner(commands.Cog, name="owner"):
 
         # ── Single status message in the channel, edited at every step ─────
         assert interaction.channel is not None
+        reacties_label = "berichten + reacties" if met_reacties else "berichten"
         status_msg = await interaction.followup.send(
-            embed=_status_embed("⏳ **Stap 1/3** — Congres kanaal wordt geanalyseerd (berichten + reacties)..."),
+            embed=_status_embed(f"⏳ **Stap 1/3** — Congres kanaal wordt geanalyseerd ({reacties_label})..."),
             wait=True,
         )
 
@@ -403,10 +406,11 @@ class Owner(commands.Cog, name="owner"):
                     user_days[uid].add(day)
                     user_msgs_per_day[uid][day] += 1
                 # Count emoji reactions placed by congress members on any message
-                for reaction in message.reactions:
-                    async for user in reaction.users():
-                        if _is_congress_member(user):
-                            user_congres_reactions[user.id] += 1
+                if met_reacties:
+                    for reaction in message.reactions:
+                        async for user in reaction.users():
+                            if _is_congress_member(user):
+                                user_congres_reactions[user.id] += 1
 
             # ── Step 2: debat forum ───────────────────────────────────────────
             debate_channel_id = channel_ids.get("debat")
@@ -415,7 +419,7 @@ class Owner(commands.Cog, name="owner"):
                 return
 
             await status_msg.edit(
-                embed=_status_embed("⏳ **Stap 2/3** — Debat kanaal (actieve + gesloten threads, berichten + reacties) wordt geanalyseerd...")
+                embed=_status_embed(f"⏳ **Stap 2/3** — Debat kanaal (actieve + gesloten threads, {reacties_label}) wordt geanalyseerd...")
             )
 
             debat_channel = self.bot.get_channel(debate_channel_id)
@@ -423,21 +427,27 @@ class Owner(commands.Cog, name="owner"):
             async for thread in debat_channel.archived_threads(limit=None):
                 all_threads.append(thread)
 
-            for thread in all_threads:
-                async for message in thread.history(limit=None, after=start_time):
-                    if _is_congress_member(message.author):
-                        uid = message.author.id
-                        day = message.created_at.strftime("%Y-%m-%d")
-                        user_debat_msgs[uid] += 1
-                        user_days[uid].add(day)
-                        user_debates[uid].add(thread.id)
-                        user_msgs_per_day[uid][day] += 1
-                        user_msgs_per_debate[uid][thread.id] += 1
-                    # Count emoji reactions placed by congress members
-                    for reaction in message.reactions:
-                        async for user in reaction.users():
-                            if _is_congress_member(user):
-                                user_debat_reactions[user.id] += 1
+            # Process threads concurrently (max 5 at a time) to avoid sequential slowness
+            sem = asyncio.Semaphore(5)
+
+            async def _process_thread(thread: discord.Thread) -> None:
+                async with sem:
+                    async for message in thread.history(limit=None, after=start_time):
+                        if _is_congress_member(message.author):
+                            uid = message.author.id
+                            day = message.created_at.strftime("%Y-%m-%d")
+                            user_debat_msgs[uid] += 1
+                            user_days[uid].add(day)
+                            user_debates[uid].add(thread.id)
+                            user_msgs_per_day[uid][day] += 1
+                            user_msgs_per_debate[uid][thread.id] += 1
+                        if met_reacties:
+                            for reaction in message.reactions:
+                                async for user in reaction.users():
+                                    if _is_congress_member(user):
+                                        user_debat_reactions[user.id] += 1
+
+            await asyncio.gather(*[_process_thread(t) for t in all_threads])
 
             # ── Build combined activity embed(s) per member ───────────────────
             all_users = set(user_congres_msgs.keys()) | set(user_debat_msgs.keys()) | set(user_congres_reactions.keys()) | set(user_debat_reactions.keys())
