@@ -606,8 +606,9 @@ class GlobalLuck(commands.Cog, name="globalluck"):
                         top_lines.append(_row_lb(i, entry, entry["luck_score"], highlight=(entry["user_id"] == user_id)))
                     player_lines: list[str] = []
                     if not is_in_top and not is_in_bot and rank is not None:
-                        player_entry = {"citizen_name": username, "luck_score": luck_score, "opens_count": opens, "country_id": country_id, "user_id": user_id}
-                        player_lines = ["    • • •", _row_lb(rank, player_entry, luck_score, highlight=True)]
+                        cached_luck = target["luck_score"]
+                        player_entry = {"citizen_name": username, "luck_score": cached_luck, "opens_count": target["opens_count"], "country_id": country_id, "user_id": user_id}
+                        player_lines = ["    • • •", _row_lb(rank, player_entry, cached_luck, highlight=True)]
                     bot_lines = ["    • • •", lb_header, lb_sep]
                     for i, entry in enumerate(reversed(bot5_n), start=0):
                         actual_rank = total_ranked - i
@@ -634,8 +635,8 @@ class GlobalLuck(commands.Cog, name="globalluck"):
                         top_lines.append(_row_lb(i, entry, entry["elite_luck_score"], highlight=(entry["user_id"] == user_id)))
                     player_lines = []
                     if not is_in_top and not is_in_bot and elite_rank is not None:
-                        esc = live_elite_luck if live_elite_luck is not None else (target.get("elite_luck_score") or 0.0)
-                        player_entry = {"citizen_name": username, "luck_score": luck_score, "elite_luck_score": esc, "opens_count": elite_opens, "country_id": country_id, "user_id": user_id}
+                        esc = target.get("elite_luck_score") or 0.0
+                        player_entry = {"citizen_name": username, "luck_score": luck_score, "elite_luck_score": esc, "opens_count": target.get("elite_opens_count") or elite_opens, "country_id": country_id, "user_id": user_id}
                         player_lines = ["    • • •", _row_lb(elite_rank, player_entry, esc, highlight=True)]
                     bot_lines = ["    • • •", lb_header, lb_sep]
                     for i, entry in enumerate(reversed(bot5_e), start=0):
@@ -676,22 +677,21 @@ class GlobalLuck(commands.Cog, name="globalluck"):
 
                     player_lines = []
                     if not is_in_top5 and not is_in_bot5 and combined_rank is not None:
+                        cached_combined = target.get("combined_score") if target.get("combined_score") is not None else _comb_score(target)
                         player_entry = {
                             "citizen_name": username,
-                            "luck_score": luck_score,
-                            "elite_luck_score": live_elite_luck,
-                            "combined_score": _combined_score_local(),
-                            "opens_count": opens,
+                            "luck_score": target["luck_score"],
+                            "elite_luck_score": target.get("elite_luck_score"),
+                            "combined_score": cached_combined,
+                            "opens_count": target["opens_count"],
                             "country_id": country_id,
                             "user_id": user_id,
                         }
-                        player_lines = ["    • • •", _row_lb(combined_rank, player_entry, _combined_score_local(), highlight=True)]
+                        player_lines = ["    • • •", _row_lb(combined_rank, player_entry, cached_combined, highlight=True)]
 
                     bot_lines = ["    • • •", lb_header, lb_sep]
                     for i, entry in enumerate(reversed(bot5_comb), start=0):
-                        if entry["user_id"] == user_id:
-                            score = _combined_score_local()
-                        elif entry.get("combined_score") is not None:
+                        if entry.get("combined_score") is not None:
                             score = entry["combined_score"]
                         else:
                             score = _comb_score(entry)

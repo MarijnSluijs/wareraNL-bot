@@ -18,7 +18,11 @@
         "officier": 1475206894992883723,
         "twijfelgeval": 1468219354754711674,
         "congreslid": 1451181300009537547,
-        "samenvatting_allowed": [1451181300009537547, 1458527742646816892, 1401530996725383178]
+        "samenvatting_allowed": [
+            1451181300009537547,
+            1458527742646816892,
+            1401530996725383178
+        ]
     },
     "channels": {
         "welcome_message": 1401530718223335499,
@@ -35,7 +39,11 @@
         "roles": 1456612515902390353,
         "roles_claim": 1456612515902390353,
         "vragen": 1456252976967581877,
-        "embassy_categories": [1456259898349453433, 1481707074445381723, 1496021951720980681],
+        "embassy_categories": [
+            1456259898349453433,
+            1481707074445381723,
+            1496021951720980681
+        ],
         "reddit": 1474728411338641488,
         "articles": 1474728499242860645,
         "congres": 1469622838368669768,
@@ -44,7 +52,8 @@
         "events": 1474472809215299706,
         "mu_aanmelden": 1480649484819235019,
         "bounties": 1493179198884548688,
-        "id_controle": 1483193363653202020        
+        "id_controle": 1483193363653202020,
+        "lvl5_notificaties": 1456287198780457134
     },
     "welcome_message": "# Welcome to the Official Nederland War Era Server!\n\nGreetings, traveler! You have arrived at the gates of Nederland.\n\nPlease select your status below to proceed with verification:",
     "colors": {
@@ -54,12 +63,18 @@
         "warning": "0xF59E42"
     },
     "users": {
-        "mofa": { "discord_id": "219398950287835136", "in_game_id": "69820c895312557c1f363ab7" }
+        "mofa": {
+            "discord_id": "219398950287835136",
+            "in_game_id": "69820c895312557c1f363ab7"
+        }
     },
     "ticket_counter": 222,
     "api_base_url": "https://api2.warera.io/trpc",
     "articles_db_path": "database/articles.db",
     "articles_startup_count": 1,
     "nl_country_id": "6813b6d446e731854c7ac7a0",
-    "owner_ids": [565626197048819731, 230386541690748929]
+    "owner_ids": [
+        565626197048819731,
+        230386541690748929
+    ]
 }

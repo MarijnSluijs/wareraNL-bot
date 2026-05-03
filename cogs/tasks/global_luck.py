@@ -137,8 +137,9 @@ class GlobalLuckTasks(TaskCogBase, name="global_luck_tasks"):
     @global_luck_refresh.before_loop
     async def before_global_luck_refresh(self) -> None:
         await self._wait_for_services()
-        # Align to next 03:00 UTC so the heavy sweep runs overnight
-        await asyncio.sleep(_seconds_until_hour(3))
+        # Align to next 09:00 UTC — same as the NL luck sweep so both rankings
+        # are always based on data from the same run.
+        await asyncio.sleep(_seconds_until_hour(9))
 
     async def run_global_luck_refresh(self) -> None:
         """Public entry point for /peil or debug commands."""
