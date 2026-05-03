@@ -39,8 +39,8 @@ class CitizensMixin:
             " ON CONFLICT(user_id) DO UPDATE SET"
             "  country_id           = excluded.country_id,"
             "  level                = excluded.level,"
-            "  skill_mode           = excluded.skill_mode,"
-            "  last_skills_reset_at = excluded.last_skills_reset_at,"
+            "  skill_mode           = COALESCE(excluded.skill_mode, citizen_levels.skill_mode),"
+            "  last_skills_reset_at = COALESCE(excluded.last_skills_reset_at, citizen_levels.last_skills_reset_at),"
             "  citizen_name         = excluded.citizen_name,"
             "  last_login_at        = COALESCE(excluded.last_login_at, citizen_levels.last_login_at),"
             "  mu_id   = COALESCE(excluded.mu_id,   citizen_levels.mu_id),"
@@ -61,13 +61,34 @@ class CitizensMixin:
         )
 
     async def update_citizen_mu(
-        self, user_id: str, mu_id: Optional[str], mu_name: Optional[str]
+        self,
+        user_id: str,
+        mu_id: Optional[str],
+        mu_name: Optional[str],
+        country_id: Optional[str] = None,
     ) -> None:
-        """Update a citizen's military unit information."""
-        await self._conn.execute(
-            "UPDATE citizen_levels SET mu_id = ?, mu_name = ? WHERE user_id = ?",
-            (mu_id, mu_name, user_id),
-        )
+        """Update a citizen's military unit information.
+
+        If *country_id* is supplied and the citizen is not yet in citizen_levels,
+        a stub row is inserted so MU members who joined after the last country
+        refresh are still counted.
+        """
+        if country_id:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            await self._conn.execute(
+                "INSERT INTO citizen_levels (user_id, country_id, mu_id, mu_name, updated_at) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(user_id) DO UPDATE SET "
+                "mu_id = excluded.mu_id, "
+                "mu_name = excluded.mu_name, "
+                "updated_at = excluded.updated_at",
+                (user_id, country_id, mu_id, mu_name, now_iso),
+            )
+        else:
+            await self._conn.execute(
+                "UPDATE citizen_levels SET mu_id = ?, mu_name = ? WHERE user_id = ?",
+                (mu_id, mu_name, user_id),
+            )
 
     async def clear_citizen_mus_for_country(self, country_id: str) -> None:
         """Clear military unit information for all citizens in a specific country."""

@@ -214,7 +214,7 @@ class CitizenCache:
             # Tag this MU as belonging to country_id in the known_mus registry
             await self._db.upsert_known_mu(mu_id, effective_name, now_iso, country_id)
             for uid in member_ids:
-                await self._db.update_citizen_mu(uid, mu_id, effective_name)
+                await self._db.update_citizen_mu(uid, mu_id, effective_name, country_id)
                 updated += 1
             await self._db.flush_citizen_levels()
             logger.debug(
@@ -268,7 +268,7 @@ class CitizenCache:
 
                 # Update citizen_levels.mu_id for every known member
                 for uid in member_ids:
-                    await self._db.update_citizen_mu(uid, mu_id, effective_name)
+                    await self._db.update_citizen_mu(uid, mu_id, effective_name, inferred_country_id)
                     citizens_updated += 1
                 await self._db.flush_citizen_levels()
 

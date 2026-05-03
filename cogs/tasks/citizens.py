@@ -106,13 +106,20 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
     async def _do_nl_refresh(self, nl_country_id: str) -> None:
         """Refresh citizen level cache for NL only."""
         logger.info("citizen_refresh: refreshing NL citizens")
+        # Look up the display name, but don't let a failed getAllCountries call
+        # abort the entire NL refresh — fall back to "Netherlands" if needed.
+        name = "Netherlands"
         try:
             all_countries = await self._client.get("/country.getAllCountries")
             country_list = extract_country_list(all_countries)
             nl_country = next(
                 (c for c in country_list if cid_of(c) == nl_country_id), None
             )
-            name = nl_country.get("name", "NL") if nl_country else "NL"
+            if nl_country:
+                name = nl_country.get("name", name)
+        except Exception:
+            logger.warning("citizen_refresh: could not fetch country list, using fallback name '%s'", name)
+        try:
             async with self._heavy_api_lock:
                 await self._citizen_cache.refresh_country(nl_country_id, name)
             logger.info("citizen_refresh: NL done")
