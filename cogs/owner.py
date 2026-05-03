@@ -589,6 +589,12 @@ class Owner(commands.Cog, name="owner"):
                     "Probeer het later opnieuw."
                 )
             )
+        except Exception as exc:
+            await status_msg.edit(
+                embed=_status_embed(
+                    f"❌ Onverwachte fout: `{type(exc).__name__}: {exc}`"
+                )
+            )
 
     # @commands.hybrid_command(
     #     name="embed",
