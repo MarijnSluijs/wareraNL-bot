@@ -314,6 +314,18 @@ CREATE TABLE IF NOT EXISTS citizen_pill_tracking (
 );
 CREATE INDEX IF NOT EXISTS idx_pill_tracking_country ON citizen_pill_tracking(country_id);
 
+-- ── Level-5 notifications ─────────────────────────────────────────────────────
+
+-- lvl5_tracker: hourly threshold tracker — records the last-seen level for every
+--   NL citizen so we can detect the <5 → ≥5 crossing.  notified=1 means we
+--   already posted this citizen in the admin channel; notified stays 1 forever.
+CREATE TABLE IF NOT EXISTS lvl5_tracker (
+    user_id          TEXT PRIMARY KEY,
+    last_seen_level  INTEGER NOT NULL,
+    notified         INTEGER NOT NULL DEFAULT 0,  -- 0 = not yet posted, 1 = already posted
+    updated_at       TEXT NOT NULL
+);
+
 -- ── Article tips ──────────────────────────────────────────────────────────────
 
 -- article_tips: individual article tip transactions (outgoing from the tipper's perspective)

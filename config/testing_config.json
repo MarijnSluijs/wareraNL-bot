@@ -40,7 +40,15 @@
         "events": 1474452856584011929,
         "mu_aanmelden": 1474452856584011929,
         "bounties": 1474452856584011929,
-        "embassy_categories": [1474454272228982955, 1496021477638672496, 1496021541669044319]
+        "embassy_categories": [
+            1474454272228982955,
+            1496021477638672496,
+            1496021541669044319
+        ],
+        "lvl5_notificaties": 1456287198780457134,
+        "congres": 1474452856584011929,
+        "debat": 1474452856584011929,
+        "stembureau": 1474452856584011929
     },
     "welcome_message": "# Welcome to the Official Nederland War Era Server!\n\nGreetings, traveler! You have arrived at the gates of Nederland.\n\nPlease select your status below to proceed with verification:",
     "colors": {
@@ -58,5 +66,8 @@
         "695579c03f0cff6efb694b3a"
     ],
     "guild_id": 1474416241769844941,
-    "owner_ids": [565626197048819731, 230386541690748929]
+    "owner_ids": [
+        565626197048819731,
+        230386541690748929
+    ]
 }

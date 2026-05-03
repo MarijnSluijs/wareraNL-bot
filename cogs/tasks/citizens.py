@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import aiosqlite
 import discord
-from discord.ext import tasks
+from discord.ext import commands, tasks
 
 from cogs.tasks._base import TaskCogBase
 from services.country_utils import country_id as cid_of
@@ -21,6 +21,12 @@ logger = logging.getLogger("discord_bot")
 _ALL_COUNTRIES_INTERVAL_H = 6
 _MU_ROLE_SYNC_INTERVAL_H = 24
 _PILL_BUFF_CODE = "cocain"
+
+# Channel / role IDs for level-5 notifications.
+_LVL5_PROD_CHANNEL_ID  = 1456287198780457134
+_LVL5_PROD_ROLE_ID     = 1500453028392861746
+_LVL5_TEST_CHANNEL_ID  = 1474452856584011929
+_LVL5_TEST_ROLE_ID     = 1494431123391119531
 
 
 class CitizenTasks(TaskCogBase, name="citizen_tasks"):
@@ -83,6 +89,11 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
             discord.NotFound,
         ):
             logger.exception("citizen_refresh: daily MU role sync failed")
+
+        try:
+            await self._do_level5_notify()
+        except Exception:
+            logger.exception("citizen_refresh: hourly level-5 scan failed")
 
     @citizen_refresh.before_loop
     async def before_citizen_refresh(self):
@@ -477,6 +488,210 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
             skipped,
             failed,
         )
+
+    # ------------------------------------------------------------------ #
+    # Level-5 hourly threshold detection                                   #
+    # ------------------------------------------------------------------ #
+
+    _LVL5_NEW_ACCOUNT_DAYS: int = 7  # accounts younger than N days are "new players"
+
+    async def _do_level5_notify(self) -> None:
+        """Detect NL citizens who crossed the ≥5 level threshold since the last scan.
+
+        Runs every hour.  Uses ``lvl5_tracker`` to remember each citizen's last
+        seen level so we fire exactly once when they cross from <5 to ≥5.
+
+        Citizens who appear at ≥5 without a prior record are checked against their
+        account creation date (``dates.createdAt`` from getUserLite).  Accounts
+        younger than ``_LVL5_NEW_ACCOUNT_DAYS`` days are treated as fast-levelers
+        and included in the notification.  Older accounts are treated as immigrants
+        (already high-level before joining NL) and silently skipped.
+        """
+        testing: bool = bool(getattr(self.bot, "testing", False))
+
+        nl_country_id = self.config.get("nl_country_id")
+        if not nl_country_id:
+            logger.warning("level5_notify: nl_country_id not set in config — skipping")
+            return
+
+        now_utc = datetime.now(timezone.utc)
+        updated_at = now_utc.isoformat()
+
+        # 1. Current levels for all NL citizens.
+        try:
+            async with self._db._conn.execute(
+                "SELECT user_id, COALESCE(citizen_name, user_id), level"
+                " FROM citizen_levels WHERE country_id = ?",
+                (nl_country_id,),
+            ) as cur:
+                nl_citizens: list[tuple[str, str, int]] = [
+                    (str(r[0]), str(r[1]), int(r[2]) if r[2] is not None else 0)
+                    for r in await cur.fetchall()
+                ]
+        except Exception:
+            logger.exception("level5_notify: DB query for NL citizens failed")
+            return
+
+        if not nl_citizens:
+            logger.info("level5_notify: no NL citizens found — skipping")
+            return
+
+        # 2. Load tracker snapshot.
+        try:
+            tracker = await self._db.get_lvl5_tracker()
+        except Exception:
+            logger.exception("level5_notify: failed to load lvl5_tracker")
+            return
+
+        notify_candidates: list[tuple[str, str]] = []  # (user_id, citizen_name)
+        tracker_updates: list[tuple[str, int, int, str]] = []  # (uid, level, notified, updated_at)
+
+        # Citizens not yet in the tracker who are already at ≥5 — need API age check.
+        new_high_level: list[tuple[str, str, int]] = []  # (user_id, name, level)
+
+        for uid, name, level in nl_citizens:
+            row = tracker.get(uid)
+            if row is not None:
+                # Known player — detect threshold crossing.
+                was_below = row["last_seen_level"] < 5
+                already_notified = row["notified"] == 1
+                if was_below and not already_notified and level >= 5:
+                    notify_candidates.append((uid, name))
+                    tracker_updates.append((uid, level, 1, updated_at))
+                else:
+                    tracker_updates.append((uid, level, row["notified"], updated_at))
+            else:
+                # First time we see this citizen.
+                if level >= 5:
+                    new_high_level.append((uid, name, level))
+                else:
+                    tracker_updates.append((uid, level, 0, updated_at))
+
+        # 3. For new-to-tracker citizens at ≥5: check account creation date via API.
+        if new_high_level:
+            new_ids = [uid for uid, _, _ in new_high_level]
+            logger.info(
+                "level5_notify: %d new high-level citizens — checking account age",
+                len(new_ids),
+            )
+            try:
+                api_results = await self._client.batch_get(
+                    "user.getUserLite",
+                    [{"userId": uid} for uid in new_ids],
+                )
+            except Exception:
+                logger.exception("level5_notify: batch getUserLite for account age failed")
+                api_results = [None] * len(new_ids)
+
+            cutoff = now_utc - timedelta(days=self._LVL5_NEW_ACCOUNT_DAYS)
+            for (uid, name, lvl), data in zip(new_high_level, api_results):
+                is_new_account = False
+                if isinstance(data, dict):
+                    created_str = (
+                        (data.get("dates") or {}).get("createdAt")
+                        or data.get("createdAt")
+                    )
+                    if created_str:
+                        try:
+                            created_dt = datetime.fromisoformat(
+                                created_str.replace("Z", "+00:00")
+                            )
+                            is_new_account = created_dt >= cutoff
+                        except (ValueError, TypeError):
+                            pass
+                if is_new_account:
+                    notify_candidates.append((uid, name))
+                # Mark notified=1 regardless: immigrant or fast-leveler, we've
+                # evaluated this citizen and won't re-evaluate at ≥5 again.
+                tracker_updates.append((uid, lvl, 1, updated_at))
+
+        # 4. Persist updated tracker rows.
+        try:
+            await self._db.bulk_upsert_lvl5_tracker(tracker_updates)
+        except Exception:
+            logger.exception("level5_notify: failed to persist lvl5_tracker updates")
+            return
+
+        if not notify_candidates:
+            logger.info("level5_notify: no new level-5 threshold crossers this hour")
+            return
+
+        # 5. Build Discord display names and post notification.
+        guild_id_cfg = self.config.get("guild_id")
+        guild = self.bot.get_guild(int(guild_id_cfg)) if guild_id_cfg else None
+        discord_map: dict[str, str] = {}
+        if guild:
+            try:
+                in_game_ids = [uid for uid, _ in notify_candidates]
+                id_to_discord = await self._db.get_discord_ids_by_ingame_user_ids(
+                    guild_id=str(guild.id),
+                    in_game_user_ids=in_game_ids,
+                )
+                for ig_id, disc_id in id_to_discord.items():
+                    if disc_id and disc_id.isdigit():
+                        member = guild.get_member(int(disc_id))
+                        if member:
+                            discord_map[ig_id] = member.display_name
+            except Exception:
+                logger.exception("level5_notify: failed to look up Discord names")
+
+        lines: list[str] = []
+        for uid, name in notify_candidates:
+            disc_name = discord_map.get(uid)
+            if disc_name:
+                lines.append(f"• **{name}** (Discord: {disc_name})")
+            else:
+                lines.append(f"• **{name}**")
+
+        channel_id = (
+            self.config.get("channels", {}).get("lvl5_notificaties")
+            or (_LVL5_TEST_CHANNEL_ID if testing else _LVL5_PROD_CHANNEL_ID)
+        )
+        role_id = _LVL5_TEST_ROLE_ID if testing else _LVL5_PROD_ROLE_ID
+        today_str = now_utc.strftime("%Y-%m-%d")
+
+        channel = self.bot.get_channel(int(channel_id))
+        if channel is None:
+            logger.warning(
+                "level5_notify: channel %d not found — cannot post", channel_id
+            )
+            return
+
+        embed = discord.Embed(
+            title="🎉 Nieuwe level-5 spelers!",
+            description="\n".join(lines),
+            colour=self._embed_colour("success"),
+        )
+        embed.set_footer(text=f"Gedetecteerd op {today_str}")
+        try:
+            await channel.send(
+                content=f"<@&{role_id}>",
+                embed=embed,
+            )
+            logger.info(
+                "level5_notify: posted %d new level-5 citizens", len(notify_candidates)
+            )
+        except discord.HTTPException:
+            logger.exception("level5_notify: failed to send message")
+
+    # ------------------------------------------------------------------ #
+    # Manual trigger command                                               #
+    # ------------------------------------------------------------------ #
+
+    @commands.command(name="lvl5-scan")
+    @commands.is_owner()
+    async def lvl5_scan(self, ctx: commands.Context) -> None:
+        """Trigger the level-5 notification scan immediately (owner only)."""
+        if not self._db:
+            await ctx.send("❌ Database not ready.")
+            return
+        await ctx.send("🔍 Scanning voor nieuwe level-5 spelers…")
+        try:
+            await self._do_level5_notify()
+            await ctx.send("✅ Scan klaar.")
+        except Exception as exc:
+            logger.exception("lvl5_scan: manual trigger failed")
+            await ctx.send(f"❌ Fout tijdens scan: {exc}")
 
 
 async def setup(bot) -> None:

@@ -31,6 +31,7 @@ Usage::
 
 from .article_tips import ArticleTipsMixin
 from .base import DatabaseBase
+from .level5_notified import Level5NotifiedMixin
 from .gems import GemsMixin
 from .discord_allies import DiscordAlliesMixin
 from .battle_drops import BattleDropsMixin
@@ -56,6 +57,7 @@ from .wealth import WealthMixin
 class Database(
     GemsMixin,
     DiscordAlliesMixin,
+    Level5NotifiedMixin,
     StateMixin,
     ProductionMixin,
     CitizensMixin,

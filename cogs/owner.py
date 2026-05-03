@@ -589,6 +589,12 @@ class Owner(commands.Cog, name="owner"):
                     "Probeer het later opnieuw."
                 )
             )
+        except Exception as exc:
+            await status_msg.edit(
+                embed=_status_embed(
+                    f"❌ Onverwachte fout: `{type(exc).__name__}: {exc}`"
+                )
+            )
 
     # @commands.hybrid_command(
     #     name="embed",
@@ -704,6 +710,28 @@ class Owner(commands.Cog, name="owner"):
         await interaction.followup.send(chunks[0])
         for chunk in chunks[1:]:
             await interaction.followup.send(chunk)
+
+    @commands.command(
+        name="logs",
+        description="Stuur de laatste N regels van het logbestand (standaard 30).",
+    )
+    @commands.is_owner()
+    async def logs(self, context: Context, lines: int = 30) -> None:
+        """Send the last N lines of logs/discord.log as a Discord message."""
+        lines = max(1, min(lines, 200))
+        log_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "discord.log")
+        try:
+            with open(log_path, "r", encoding="utf-8") as f:
+                all_lines = f.readlines()
+        except FileNotFoundError:
+            await context.send(f"❌ Logbestand niet gevonden op `{log_path}`.")
+            return
+
+        tail = "".join(all_lines[-lines:])
+        # Split into ≤1990-char chunks to stay within Discord's 2000-char limit
+        chunk_size = 1990
+        for i in range(0, len(tail), chunk_size):
+            await context.send(f"```\n{tail[i:i + chunk_size]}\n```")
 
     @commands.command(
         name="apioffline",
