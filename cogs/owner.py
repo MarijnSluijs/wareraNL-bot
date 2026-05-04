@@ -659,6 +659,163 @@ class Owner(commands.Cog, name="owner"):
                 )
             )
 
+    @app_commands.command(
+        name="wakkerdam-analyse",
+        description="Analyseer het aantal woorden per speler in het wakkerdam-kanaal.",
+    )
+    @app_commands.describe(
+        start="Startdatum en -tijd (formaat: DD-MM-JJJJ HH:MM), bijv. 01-05-2026 09:00",
+        eind="Einddatum en -tijd (formaat: DD-MM-JJJJ HH:MM), bijv. 04-05-2026 23:59",
+    )
+    @has_privileged_role()
+    async def wakkerdam_analyse(
+        self,
+        interaction: discord.Interaction,
+        start: str,
+        eind: str,
+    ) -> None:
+        """Count words per player in the wakkerdam channel between start and end datetime."""
+        _WAKKERDAM_CHANNEL_ID = 1499377427460263946
+
+        def _parse_dt(s: str) -> datetime | None:
+            for fmt in (
+                "%d-%m-%Y %H:%M",
+                "%d-%m-%Y %H:%M:%S",
+                "%Y-%m-%d %H:%M",
+                "%Y-%m-%d %H:%M:%S",
+                "%d/%m/%Y %H:%M",
+            ):
+                try:
+                    return datetime.strptime(s.strip(), fmt).replace(tzinfo=timezone.utc)
+                except ValueError:
+                    continue
+            return None
+
+        start_dt = _parse_dt(start)
+        if start_dt is None:
+            await interaction.response.send_message(
+                f"❌ Ongeldig startdatumformaat `{start}`. Gebruik DD-MM-JJJJ HH:MM, bijv. `01-05-2026 09:00`.",
+                ephemeral=True,
+            )
+            return
+
+        end_dt = _parse_dt(eind)
+        if end_dt is None:
+            await interaction.response.send_message(
+                f"❌ Ongeldig einddatumformaat `{eind}`. Gebruik DD-MM-JJJJ HH:MM, bijv. `04-05-2026 23:59`.",
+                ephemeral=True,
+            )
+            return
+
+        if end_dt <= start_dt:
+            await interaction.response.send_message(
+                "❌ Einddatum moet na de startdatum liggen.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        channel = self.bot.get_channel(_WAKKERDAM_CHANNEL_ID)
+        if channel is None:
+            await interaction.followup.send(
+                f"❌ Kanaal `{_WAKKERDAM_CHANNEL_ID}` niet gevonden.", ephemeral=True
+            )
+            return
+
+        def _status_embed(description: str) -> discord.Embed:
+            return discord.Embed(description=description, color=self.color)
+
+        assert interaction.channel is not None
+        status_msg = await interaction.followup.send(
+            embed=_status_embed("⏳ Wakkerdam-kanaal wordt geanalyseerd..."),
+            wait=True,
+        )
+
+        try:
+            from collections import Counter
+
+            user_words: Counter[int] = Counter()
+            user_names: dict[int, str] = {}
+
+            async for message in channel.history(limit=None, after=start_dt, before=end_dt):
+                if message.author.bot:
+                    continue
+                word_count = len(message.content.split())
+                if word_count == 0:
+                    continue
+                uid = message.author.id
+                user_words[uid] += word_count
+                if uid not in user_names:
+                    user_names[uid] = message.author.display_name
+
+            # Batch-resolve Discord IDs → in-game names
+            _db = getattr(self.bot, "_ext_db", None)
+            ingame_names: dict[str, str] = {}
+            if _db and user_words:
+                try:
+                    ingame_names = await _db.get_citizen_names_by_discord_ids(
+                        list(user_words.keys())
+                    )
+                except Exception:
+                    pass
+
+            start_label = start_dt.strftime("%-d %b %Y %H:%M")
+            end_label = end_dt.strftime("%-d %b %Y %H:%M")
+
+            if not user_words:
+                await interaction.channel.send(embed=discord.Embed(  # type: ignore[union-attr]
+                    title="📊 Wakkerdam Analyse",
+                    description=f"*Geen berichten gevonden tussen {start_label} en {end_label}.*",
+                    color=self.color,
+                ))
+                await status_msg.edit(embed=_status_embed("✅ Analyse voltooid (geen berichten)."))
+                return
+
+            lines: list[str] = []
+            for uid, words in user_words.most_common():
+                ingame = ingame_names.get(str(uid))
+                display = user_names.get(uid, str(uid))
+                mention = f"<@{uid}>" + (f" ({ingame})" if ingame else f" ({display})")
+                lines.append(f"{mention} — **{words}** woorden")
+
+            _MAX = 3800
+            embed_chunks: list[str] = []
+            current_chunk = ""
+            for line in lines:
+                segment = ("\n" if current_chunk else "") + line
+                if len(current_chunk) + len(segment) > _MAX:
+                    embed_chunks.append(current_chunk)
+                    current_chunk = line
+                else:
+                    current_chunk += segment
+            if current_chunk:
+                embed_chunks.append(current_chunk)
+
+            for i, chunk in enumerate(embed_chunks):
+                title = f"📊 Wakkerdam Analyse — {start_label} t/m {end_label}"
+                if len(embed_chunks) > 1:
+                    title += f" ({i + 1}/{len(embed_chunks)})"
+                await interaction.channel.send(embed=discord.Embed(  # type: ignore[union-attr]
+                    title=title,
+                    description=chunk,
+                    color=self.color,
+                ))
+
+            await status_msg.edit(embed=_status_embed("✅ Analyse voltooid!"))
+
+        except discord.HTTPException as exc:
+            await status_msg.edit(
+                embed=_status_embed(
+                    f"❌ Discord API tijdelijk niet beschikbaar (HTTP {exc.status}). "
+                    "Probeer het later opnieuw."
+                )
+            )
+        except Exception as exc:
+            await status_msg.edit(
+                embed=_status_embed(f"❌ Onverwachte fout: `{type(exc).__name__}: {exc}`")
+            )
+
     # @commands.hybrid_command(
     #     name="embed",
     #     description="The bot will say anything you want, but within embeds.",
