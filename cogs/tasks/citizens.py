@@ -23,7 +23,7 @@ _MU_ROLE_SYNC_INTERVAL_H = 24
 _PILL_BUFF_CODE = "cocain"
 
 # Channel / role IDs for level-5 notifications.
-_LVL5_PROD_CHANNEL_ID  = 1456287198780457134
+_LVL5_PROD_CHANNEL_ID  = 1500927730517147890
 _LVL5_PROD_ROLE_ID     = 1500453028392861746
 _LVL5_TEST_CHANNEL_ID  = 1474452856584011929
 _LVL5_TEST_ROLE_ID     = 1494431123391119531
@@ -503,12 +503,12 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
     _LVL5_NEW_ACCOUNT_DAYS: int = 7  # accounts younger than N days are "new players"
 
     async def _do_level5_notify(self) -> None:
-        """Detect NL citizens who crossed the ≥5 level threshold since the last scan.
+        """Detect NL citizens who crossed the ≥4 level threshold since the last scan.
 
         Runs every hour.  Uses ``lvl5_tracker`` to remember each citizen's last
-        seen level so we fire exactly once when they cross from <5 to ≥5.
+        seen level so we fire exactly once when they cross from <4 to ≥4.
 
-        Citizens who appear at ≥5 without a prior record are checked against their
+        Citizens who appear at ≥4 without a prior record are checked against their
         account creation date (``dates.createdAt`` from getUserLite).  Accounts
         younger than ``_LVL5_NEW_ACCOUNT_DAYS`` days are treated as fast-levelers
         and included in the notification.  Older accounts are treated as immigrants
@@ -560,16 +560,16 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
             row = tracker.get(uid)
             if row is not None:
                 # Known player — detect threshold crossing.
-                was_below = row["last_seen_level"] < 5
+                was_below = row["last_seen_level"] < 4
                 already_notified = row["notified"] == 1
-                if was_below and not already_notified and level >= 5:
+                if was_below and not already_notified and level >= 4:
                     notify_candidates.append((uid, name))
                     tracker_updates.append((uid, level, 1, updated_at))
                 else:
                     tracker_updates.append((uid, level, row["notified"], updated_at))
             else:
                 # First time we see this citizen.
-                if level >= 5:
+                if level >= 4:
                     new_high_level.append((uid, name, level))
                 else:
                     tracker_updates.append((uid, level, 0, updated_at))
@@ -620,7 +620,7 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
             return
 
         if not notify_candidates:
-            logger.info("level5_notify: no new level-5 threshold crossers this hour")
+            logger.info("level5_notify: no new level-4 threshold crossers this hour")
             return
 
         # 5. Build Discord display names and post notification.
@@ -644,11 +644,12 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
 
         lines: list[str] = []
         for uid, name in notify_candidates:
+            profile_url = f"https://app.warera.io/user/{uid}"
             disc_name = discord_map.get(uid)
             if disc_name:
-                lines.append(f"• **{name}** (Discord: {disc_name})")
+                lines.append(f"• **[{name}]({profile_url})** (Discord: {disc_name})")
             else:
-                lines.append(f"• **{name}**")
+                lines.append(f"• **[{name}]({profile_url})**")
 
         channel_id = (
             self.config.get("channels", {}).get("lvl5_notificaties")
@@ -665,7 +666,7 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
             return
 
         embed = discord.Embed(
-            title="🎉 Nieuwe level-5 spelers!",
+            title="🎉 Nieuwe level-4 spelers!",
             description="\n".join(lines),
             colour=self._embed_colour("success"),
         )
@@ -676,7 +677,7 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
                 embed=embed,
             )
             logger.info(
-                "level5_notify: posted %d new level-5 citizens", len(notify_candidates)
+                "level5_notify: posted %d new level-4 citizens", len(notify_candidates)
             )
         except discord.HTTPException:
             logger.exception("level5_notify: failed to send message")
