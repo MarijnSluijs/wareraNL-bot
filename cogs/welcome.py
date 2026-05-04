@@ -506,6 +506,51 @@ class Welcome(commands.Cog, name="welcome"):
         self._embassy_locks: dict[str, asyncio.Lock] = {}
         self._approval_db = None
 
+    def cog_load(self) -> None:
+        """On (re)load, reschedule deletion for any approved ticket channels that survived a restart."""
+        asyncio.create_task(self._reschedule_pending_deletions())
+
+    async def _reschedule_pending_deletions(self) -> None:
+        """Find leftover approved citizen ticket channels and schedule their deletion."""
+        await self.bot.wait_until_ready()
+        ticket_lifetime = 3600  # seconds — must match the value in /approve
+        for guild in self.bot.guilds:
+            for channel in guild.text_channels:
+                if not channel.name.startswith("citizen-"):
+                    continue
+                # Only consider channels where the topic shows they are verified
+                # (i.e. the welcome message footer says "verwijderd over 1 uur").
+                # We use channel creation time as a proxy for approval time — any
+                # citizen- channel that is older than ticket_lifetime is overdue.
+                age = (discord.utils.utcnow() - channel.created_at).total_seconds()
+                remaining = ticket_lifetime - age
+                asyncio.create_task(
+                    self._delete_channel_after(
+                        channel,
+                        max(0.0, remaining),
+                        "Ticket verlopen (bot herstart)",
+                    )
+                )
+                self.bot.logger.info(
+                    "Welcome: rescheduled deletion for %s in %.0fs",
+                    channel.name,
+                    max(0.0, remaining),
+                )
+
+    @staticmethod
+    async def _delete_channel_after(
+        channel: discord.TextChannel,
+        delay: float,
+        reason: str,
+    ) -> None:
+        """Sleep for *delay* seconds then delete *channel*."""
+        if delay > 0:
+            await asyncio.sleep(delay)
+        try:
+            await channel.delete(reason=reason)
+        except (discord.NotFound, discord.Forbidden):
+            pass
+
     @property
     def _client(self):
         return getattr(self.bot, "_ext_client", None)
@@ -1235,19 +1280,18 @@ class Welcome(commands.Cog, name="welcome"):
             )
             await channel.send(content=member.mention, embed=welcome_embed)
 
-        # Delete the ticket channel after a delay
-        if not request_type == "citizen":
-            await asyncio.sleep(30)
-        else:
-            await asyncio.sleep(
-                3600
-            )  # Give new citizens more time to read the welcome message
-        try:
-            await channel.delete(
-                reason=f"Verificatie goedgekeurd door {interaction.user.name}"
+        # Delete the ticket channel after a delay — use create_task so the deletion
+        # survives even if the interaction coroutine finishes, but note that a full
+        # bot restart will still cancel in-flight tasks.  cog_load handles that case
+        # by rescheduling deletion for any surviving citizen- channels on startup.
+        delay = 3600 if request_type == "citizen" else 30
+        asyncio.create_task(
+            self._delete_channel_after(
+                channel,
+                delay,
+                f"Verificatie goedgekeurd door {interaction.user.name}",
             )
-        except (discord.NotFound, discord.Forbidden) as e:
-            self.bot.logger.error(f"Could not delete channel: {e}")
+        )
 
     @app_commands.command(name="deny", description="Wijs een verificatieverzoek af")
     @app_commands.describe(
