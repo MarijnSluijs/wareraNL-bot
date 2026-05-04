@@ -20,6 +20,7 @@ import traceback
 import discord
 from discord import app_commands
 from discord.ext import commands
+
 from cogs.commands._base import country_autocomplete
 from utils.checks import has_privileged_role
 
@@ -511,37 +512,48 @@ class Welcome(commands.Cog, name="welcome"):
         asyncio.create_task(self._reschedule_pending_deletions())
 
     async def _reschedule_pending_deletions(self) -> None:
-        """Find leftover approved citizen ticket channels and schedule their deletion."""
+        """Re-schedule deletion for approved ticket channels that survived a restart."""
         await self.bot.wait_until_ready()
-        ticket_lifetime = 3600  # seconds — must match the value in /approve
-        for guild in self.bot.guilds:
-            for channel in guild.text_channels:
-                if not channel.name.startswith("citizen-"):
-                    continue
-                # Only consider channels where the topic shows they are verified
-                # (i.e. the welcome message footer says "verwijderd over 1 uur").
-                # We use channel creation time as a proxy for approval time — any
-                # citizen- channel that is older than ticket_lifetime is overdue.
-                age = (discord.utils.utcnow() - channel.created_at).total_seconds()
-                remaining = ticket_lifetime - age
-                asyncio.create_task(
-                    self._delete_channel_after(
-                        channel,
-                        max(0.0, remaining),
-                        "Ticket verlopen (bot herstart)",
-                    )
+        db = await self._get_approval_db()
+        records = await db.get_pending_ticket_deletions()
+        now = discord.utils.utcnow()
+        for rec in records:
+            guild = self.bot.get_guild(int(rec["guild_id"]))
+            if guild is None:
+                continue
+            channel = guild.get_channel(int(rec["channel_id"]))
+            if channel is None:
+                # Channel already gone — clean up the DB record
+                await db.remove_pending_ticket_deletion(rec["channel_id"])
+                continue
+            try:
+                delete_at = datetime.datetime.fromisoformat(rec["delete_at"])
+                if delete_at.tzinfo is None:
+                    delete_at = delete_at.replace(tzinfo=datetime.timezone.utc)
+            except ValueError:
+                delete_at = now  # malformed timestamp — delete immediately
+            remaining = max(0.0, (delete_at - now).total_seconds())
+            asyncio.create_task(
+                self._delete_channel_after(
+                    channel,
+                    remaining,
+                    "Ticket verlopen (bot herstart)",
+                    db=db,
                 )
-                self.bot.logger.info(
-                    "Welcome: rescheduled deletion for %s in %.0fs",
-                    channel.name,
-                    max(0.0, remaining),
-                )
+            )
+            self.bot.logger.info(
+                "Welcome: rescheduled deletion for %s in %.0fs",
+                channel.name,
+                remaining,
+            )
 
     @staticmethod
     async def _delete_channel_after(
         channel: discord.TextChannel,
         delay: float,
         reason: str,
+        *,
+        db=None,
     ) -> None:
         """Sleep for *delay* seconds then delete *channel*."""
         if delay > 0:
@@ -550,6 +562,11 @@ class Welcome(commands.Cog, name="welcome"):
             await channel.delete(reason=reason)
         except (discord.NotFound, discord.Forbidden):
             pass
+        if db is not None:
+            try:
+                await db.remove_pending_ticket_deletion(str(channel.id))
+            except Exception:
+                pass
 
     @property
     def _client(self):
@@ -1281,15 +1298,28 @@ class Welcome(commands.Cog, name="welcome"):
             await channel.send(content=member.mention, embed=welcome_embed)
 
         # Delete the ticket channel after a delay — use create_task so the deletion
-        # survives even if the interaction coroutine finishes, but note that a full
-        # bot restart will still cancel in-flight tasks.  cog_load handles that case
-        # by rescheduling deletion for any surviving citizen- channels on startup.
+        # survives even if the interaction coroutine finishes.  We also persist the
+        # deletion schedule to the DB so that a bot restart can reschedule it.
         delay = 3600 if request_type == "citizen" else 30
+        _now = datetime.datetime.now(datetime.timezone.utc)
+        _delete_at = _now + datetime.timedelta(seconds=delay)
+        try:
+            _db = await self._get_approval_db()
+            await _db.add_pending_ticket_deletion(
+                channel_id=str(channel.id),
+                guild_id=str(interaction.guild_id),
+                approved_at=_now.isoformat(),
+                delete_at=_delete_at.isoformat(),
+            )
+        except Exception as _e:
+            self.bot.logger.warning("approve: could not record pending deletion: %s", _e)
+            _db = None
         asyncio.create_task(
             self._delete_channel_after(
                 channel,
                 delay,
                 f"Verificatie goedgekeurd door {interaction.user.name}",
+                db=_db,
             )
         )
 
