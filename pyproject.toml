@@ -25,6 +25,7 @@ website = [
     "itsdangerous",
     "authlib",
     "jinja2",
+    "python-multipart",
 ]
 
 [tool.setuptools.packages.find]

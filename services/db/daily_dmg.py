@@ -76,8 +76,12 @@ class DailyDmgMixin:
     # Query helpers — NL citizen IDs
     # ------------------------------------------------------------------ #
 
-    async def get_nl_citizen_ids(self, country_id: str) -> list[str]:
-        """Return all user_ids from citizen_levels for the given country."""
+    async def get_country_user_ids(self, country_id: str) -> list[str]:
+        """Return all user_ids from citizen_levels for the given country.
+
+        Note: a separate :meth:`CitizensMixin.get_nl_citizen_ids` returns
+        ``[(user_id, citizen_name)]`` tuples; do not confuse the two.
+        """
         rows: list[str] = []
         async with self._conn.execute(
             "SELECT user_id FROM citizen_levels WHERE country_id = ?",

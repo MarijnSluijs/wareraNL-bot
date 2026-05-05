@@ -208,7 +208,7 @@ class DailyDmgTask(TaskCogBase, name="daily_dmg_task"):
         )
 
         # ── 3. Pre-load NL citizen IDs for filtering ──────────────────
-        nl_citizen_ids: set[str] = set(await db.get_nl_citizen_ids(nl_country_id))
+        nl_citizen_ids: set[str] = set(await db.get_country_user_ids(nl_country_id))
 
         # ── 4. Process finished battles (mark as done afterwards) ─────
         total_new_battles = 0
