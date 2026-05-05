@@ -114,6 +114,18 @@ CREATE INDEX IF NOT EXISTS idx_identity_links_ingame ON identity_links(in_game_u
 
 -- ── Events ────────────────────────────────────────────────────────────────────
 
+-- pending_ticket_deletions: tracks approved ticket channels that should be
+--   deleted after a delay.  Rows are inserted when /approve is called and
+--   removed once the channel has been deleted.  On bot restart only channels
+--   recorded here are rescheduled for deletion — open (unapproved) tickets are
+--   left untouched.
+CREATE TABLE IF NOT EXISTS pending_ticket_deletions (
+    channel_id  TEXT PRIMARY KEY,
+    guild_id    TEXT NOT NULL,
+    approved_at TEXT NOT NULL,  -- ISO-8601 UTC timestamp of /approve call
+    delete_at   TEXT NOT NULL   -- ISO-8601 UTC timestamp when deletion is due
+);
+
 -- seen_articles: deduplication for posted articles
 CREATE TABLE IF NOT EXISTS seen_articles (
     article_id TEXT PRIMARY KEY,
@@ -515,3 +527,43 @@ CREATE TABLE IF NOT EXISTS item_trades (
 );
 CREATE INDEX IF NOT EXISTS idx_item_trades_code_ts ON item_trades(item_code, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_item_trades_ts      ON item_trades(created_at DESC);
+
+-- ── Daily damage accumulator ─────────────────────────────────────────────────
+
+-- daily_dmg_hits: per-player damage per battle, populated hourly by daily_dmg_task.
+--   Uses battleLootSummary.getByBattleAndUser for NL citizens. Scope is limited to
+--   NL citizens; country/MU aggregation is derived by joining citizen_levels.
+CREATE TABLE IF NOT EXISTS daily_dmg_hits (
+    round_id     TEXT NOT NULL,
+    battle_id    TEXT NOT NULL,
+    user_id      TEXT NOT NULL,
+    total_damage REAL NOT NULL DEFAULT 0,
+    hits         INTEGER,
+    cases        INTEGER,
+    round_date   TEXT NOT NULL,   -- 'YYYY-MM-DD' derived from round ObjectId timestamp (UTC)
+    recorded_at  TEXT NOT NULL,
+    PRIMARY KEY (round_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_daily_dmg_hits_date ON daily_dmg_hits(round_date);
+CREATE INDEX IF NOT EXISTS idx_daily_dmg_hits_user ON daily_dmg_hits(user_id);
+
+-- daily_dmg_processed: deduplication log for the hourly daily_dmg_task.
+CREATE TABLE IF NOT EXISTS daily_dmg_processed (
+    battle_id    TEXT PRIMARY KEY,
+    battle_date  TEXT,
+    processed_at TEXT NOT NULL
+);
+
+-- ── Web data freshness ────────────────────────────────────────────────────────
+-- Tracks when each named dataset was last refreshed by a task or manual trigger.
+-- Used by the rijksoverheid-web website to display "Last updated" and to power
+-- the manual refresh queue.
+CREATE TABLE IF NOT EXISTS data_freshness (
+    dataset           TEXT PRIMARY KEY,
+    last_started_at   TEXT,
+    last_finished_at  TEXT,
+    last_status       TEXT,        -- 'ok' | 'error' | 'running'
+    last_error        TEXT,
+    source            TEXT,        -- 'task' | 'manual_web' | 'manual_discord'
+    duration_ms       INTEGER
+);

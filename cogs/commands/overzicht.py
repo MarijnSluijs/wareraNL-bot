@@ -11,7 +11,6 @@ from discord.ext import commands
 from cogs.commands._base import CommandCogBase
 from services.subscription_registry import SubscriptionEntry, all_entries, get_entry
 
-
 # ── Embed builder ──────────────────────────────────────────────────────────────
 
 async def _build(

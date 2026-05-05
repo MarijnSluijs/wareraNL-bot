@@ -23,7 +23,7 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
 
-from utils.checks import has_privileged_role, PRIVILEGED_ROLE_IDS
+from utils.checks import PRIVILEGED_ROLE_IDS, has_privileged_role
 
 
 async def _owner_or_privileged(ctx: Context) -> bool:

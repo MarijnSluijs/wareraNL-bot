@@ -10,15 +10,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils.checks import has_privileged_role
-
-from cogs.role_selection.roles import (
-    RoleToggleView,
-    load_roles_template,
-    mu_roles_path,
-)
-
+from cogs.role_selection.roles import RoleToggleView, load_roles_template, mu_roles_path
 from cogs.welcome import Welcome
+from utils.checks import has_privileged_role
 
 
 def mus_json_path(testing: bool = False) -> str:

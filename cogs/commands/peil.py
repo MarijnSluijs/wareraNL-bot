@@ -50,6 +50,8 @@ class PeilCog(CommandCogBase, name="peil"):
             app_commands.Choice(name="geluk", value="geluk"),
             app_commands.Choice(name="globalluck", value="globalluck"),
             app_commands.Choice(name="slagveld", value="slagveld"),
+            app_commands.Choice(name="dagschade", value="dagschade"),
+            app_commands.Choice(name="dagschade-backfill", value="dagschade-backfill"),
             app_commands.Choice(name="artikelen", value="artikelen"),
             app_commands.Choice(name="wealth", value="wealth"),
             app_commands.Choice(name="backfill", value="backfill"),
@@ -101,6 +103,10 @@ class PeilCog(CommandCogBase, name="peil"):
             await self._peil_globalluck(ctx)
         if onderdeel in ("slagveld", "alles"):
             await self._peil_slagveld(ctx)
+        if onderdeel in ("dagschade", "alles"):
+            await self._peil_dagschade(ctx)
+        if onderdeel == "dagschade-backfill":
+            await self._peil_dagschade_backfill(ctx, land)
         if onderdeel in ("wealth", "alles"):
             await self._peil_wealth(ctx)
         if onderdeel == "artikelen":
@@ -403,6 +409,65 @@ class PeilCog(CommandCogBase, name="peil"):
         except Exception as exc:
             logger.exception("peil slagveld: error")
             await status_msg.edit(content=f"❌ Slagveld sweep mislukt: {exc}")
+
+    # ------------------------------------------------------------------ #
+    # Dagelijkse schade subsystem                                          #
+    # ------------------------------------------------------------------ #
+
+    async def _peil_dagschade(self, ctx: Context) -> None:
+        task_cog = self.bot.get_cog("daily_dmg_task")
+        if not task_cog:
+            await ctx.send("❌ Daily damage task cog niet geladen.", ephemeral=True)
+            return
+        status_msg = await ctx.send("🔄 Dagschade sweep gestart…", ephemeral=True)
+        try:
+            new_battles, new_hits = await task_cog.run_sweep_once()
+            await status_msg.edit(
+                content=f"✅ Dagschade sweep klaar — {new_battles} nieuwe gevechten, {new_hits} NL treffers opgeslagen."
+            )
+        except Exception as exc:
+            logger.exception("peil dagschade: error")
+            await status_msg.edit(content=f"❌ Dagschade sweep mislukt: {exc}")
+
+    # ------------------------------------------------------------------ #
+    # Dagschade backfill subsystem                                        #
+    # ------------------------------------------------------------------ #
+
+    async def _peil_dagschade_backfill(self, ctx: Context, land: str | None) -> None:
+        """Backfill daily damage for the last N days (land arg = number of days, default 30)."""
+        task_cog = self.bot.get_cog("daily_dmg_task")
+        if not task_cog:
+            await ctx.send("❌ Daily damage task cog niet geladen.", ephemeral=True)
+            return
+
+        # Parse optional days argument from the 'land' parameter
+        days_back = 30
+        if land:
+            try:
+                days_back = max(1, min(int(land), 365))
+            except ValueError:
+                await ctx.send(
+                    f"❌ Ongeldige waarde `{land}`. Geef een aantal dagen op (bijv. `30`).",
+                    ephemeral=True,
+                )
+                return
+
+        status_msg = await ctx.send(
+            f"🔄 Dagschade backfill gestart voor de laatste **{days_back} dagen**… "
+            f"(dit kan lang duren)",
+            ephemeral=True,
+        )
+        try:
+            new_battles, new_hits = await task_cog.run_backfill(days_back)
+            await status_msg.edit(
+                content=(
+                    f"✅ Dagschade backfill klaar — {new_battles} gevechten verwerkt, "
+                    f"{new_hits} NL treffers opgeslagen (laatste {days_back} dagen)."
+                )
+            )
+        except Exception as exc:
+            logger.exception("peil dagschade-backfill: error")
+            await status_msg.edit(content=f"❌ Dagschade backfill mislukt: {exc}")
 
     # ------------------------------------------------------------------ #
     # Artikel tips subsystem                                               #

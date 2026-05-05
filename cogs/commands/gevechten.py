@@ -26,6 +26,7 @@ from typing import Optional
 
 import discord
 from discord import app_commands
+
 from cogs.commands._base import CommandCogBase
 
 logger = logging.getLogger("discord_bot")

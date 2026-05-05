@@ -6,8 +6,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from cogs.commands.bedrijvenbonuscheck import BedrijvenBonusCheckView, _load_state, _save_state
-from cogs.commands.pillreminder import PillReminderView, _load_state as _pill_load_state, _save_state as _pill_save_state
+from cogs.commands.bedrijvenbonuscheck import (
+    BedrijvenBonusCheckView,
+    _load_state,
+    _save_state,
+)
+from cogs.commands.pillreminder import PillReminderView
+from cogs.commands.pillreminder import _load_state as _pill_load_state
+from cogs.commands.pillreminder import _save_state as _pill_save_state
 from utils.checks import has_privileged_role
 
 from .roles import RoleToggleView, general_roles_path, load_roles_template

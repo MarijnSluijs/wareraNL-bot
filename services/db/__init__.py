@@ -31,30 +31,33 @@ Usage::
 
 from .article_tips import ArticleTipsMixin
 from .base import DatabaseBase
-from .level5_notified import Level5NotifiedMixin
-from .gems import GemsMixin
-from .discord_allies import DiscordAlliesMixin
 from .battle_drops import BattleDropsMixin
 from .battle_rankings import BattleRankingsMixin
 from .citizens import CitizensMixin
 from .company_bonus import CompanyBonusMixin
 from .company_move_advice import CompanyMoveAdviceMixin
-from .pill_reminders import PillRemindersMixin
-from .pill_tracking import PillTrackingMixin
-from .trades import TradesMixin
-from .tx_cache import TxCacheMixin
+from .daily_dmg import DailyDmgMixin
+from .discord_allies import DiscordAlliesMixin
 from .events import EventsMixin
+from .freshness import FreshnessMixin
+from .gems import GemsMixin
 from .giveaways_db import GiveawaysMixin
 from .identities import IdentityLinksMixin
+from .level5_notified import Level5NotifiedMixin
 from .luck import LuckMixin
 from .mus_registry import MusRegistryMixin
+from .pill_reminders import PillRemindersMixin
+from .pill_tracking import PillTrackingMixin
 from .production import ProductionMixin
 from .resistance import ResistanceMixin
 from .state import StateMixin
+from .trades import TradesMixin
+from .tx_cache import TxCacheMixin
 from .wealth import WealthMixin
 
 
 class Database(
+    DailyDmgMixin,
     GemsMixin,
     DiscordAlliesMixin,
     Level5NotifiedMixin,
@@ -77,6 +80,7 @@ class Database(
     TxCacheMixin,
     TradesMixin,
     WealthMixin,
+    FreshnessMixin,
     DatabaseBase,
 ):
     """Async SQLite database for the WarEra Discord bot.

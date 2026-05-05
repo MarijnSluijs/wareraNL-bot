@@ -175,8 +175,9 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
             logger.exception("pill_scan: batch API call failed")
             return
 
-        from datetime import datetime as _dt, timezone as _tz
         import time as _time
+        from datetime import datetime as _dt
+        from datetime import timezone as _tz
         now_ts = int(_time.time())
         updated_at = datetime.now(timezone.utc).isoformat()
 

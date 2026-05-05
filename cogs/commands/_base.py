@@ -14,7 +14,11 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
 
-from services.country_utils import ALL_COUNTRY_NAMES, _COUNTRY_ALIASES, extract_country_list
+from services.country_utils import (
+    _COUNTRY_ALIASES,
+    ALL_COUNTRY_NAMES,
+    extract_country_list,
+)
 
 
 async def citizen_autocomplete(
