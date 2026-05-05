@@ -270,10 +270,14 @@ async def create_verification_channel(
 
     username_slug = user.name.lower().replace(" ", "-")
     known_prefixes = ("citizen-", "belgian-", "foreigner-", "embassy-")
+    # Only block if there's already a ticket of the *same* type.
+    type_prefix = f"{request_type}-"
     existing_channel = None
     for channel in channels_to_check:
         topic = channel.topic or ""
         name = channel.name.lower()
+        if not name.startswith(type_prefix):
+            continue
         # Prefer exact user-id match in topic; fallback to username pattern in channel name
         if f"User ID: {user.id}" in topic or (
             name.endswith(f"-{username_slug}") and name.startswith(known_prefixes)
