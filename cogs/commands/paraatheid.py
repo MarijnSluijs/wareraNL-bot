@@ -12,7 +12,8 @@ import json
 import logging
 import re
 import time as _t
-from datetime import datetime as _dt, timezone as _tz
+from datetime import datetime as _dt
+from datetime import timezone as _tz
 
 import discord
 from discord import app_commands
@@ -202,12 +203,13 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                     buffs = (user_data or {}).get("buffs") or {}
                     buff_codes: list = buffs.get("buffCodes") or []
                     buff_end_at: str | None = buffs.get("buffEndAt")
-                    import time as _t
                     import math
+                    import time as _t
                     now_ts = _t.time()
                     if "cocain" in buff_codes and buff_end_at:
                         try:
-                            from datetime import datetime as _dt, timezone as _tz
+                            from datetime import datetime as _dt
+                            from datetime import timezone as _tz
                             end_ts = _dt.fromisoformat(buff_end_at.replace("Z", "+00:00")).timestamp()
                             secs_left = max(0.0, end_ts - now_ts)
                             pill_val = f"💊 In buff — nog {_fmt_hm(secs_left)}"
@@ -217,7 +219,8 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                         debuff_duration = 16 * 3600
                         if buff_end_at:
                             try:
-                                from datetime import datetime as _dt, timezone as _tz
+                                from datetime import datetime as _dt
+                                from datetime import timezone as _tz
                                 end_ts = _dt.fromisoformat(buff_end_at.replace("Z", "+00:00")).timestamp()
                                 debuff_left = max(0.0, end_ts + debuff_duration - now_ts)
                                 if debuff_left > 0:

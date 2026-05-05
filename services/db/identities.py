@@ -349,3 +349,42 @@ class IdentityLinksMixin:
                 )
         return results
 
+
+    # ── Pending ticket deletions ─────────────────────────────────────── #
+
+    async def add_pending_ticket_deletion(
+        self, channel_id: str, guild_id: str, approved_at: str, delete_at: str
+    ) -> None:
+        """Record a ticket channel that should be deleted at *delete_at*."""
+        await self._conn.execute(
+            "INSERT OR REPLACE INTO pending_ticket_deletions "
+            "(channel_id, guild_id, approved_at, delete_at) VALUES (?, ?, ?, ?)",
+            (channel_id, guild_id, approved_at, delete_at),
+        )
+        await self._conn.commit()
+
+    async def remove_pending_ticket_deletion(self, channel_id: str) -> None:
+        """Remove a pending deletion record (called once the channel is gone)."""
+        await self._conn.execute(
+            "DELETE FROM pending_ticket_deletions WHERE channel_id = ?",
+            (channel_id,),
+        )
+        await self._conn.commit()
+
+    async def get_pending_ticket_deletions(self) -> list[dict]:
+        """Return all pending deletion records as list of dicts."""
+        results: list[dict] = []
+        async with self._conn.execute(
+            "SELECT channel_id, guild_id, approved_at, delete_at "
+            "FROM pending_ticket_deletions"
+        ) as cur:
+            async for row in cur:
+                results.append(
+                    {
+                        "channel_id": row[0],
+                        "guild_id": row[1],
+                        "approved_at": row[2],
+                        "delete_at": row[3],
+                    }
+                )
+        return results

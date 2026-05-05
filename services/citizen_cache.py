@@ -641,7 +641,7 @@ class CitizenCache:
 
         Returns ``(citizens_scanned, tips_stored)``.
         """
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
 
         RESCAN_DAYS = 7  # skip zero-tip citizens re-scanned within this many days
 
