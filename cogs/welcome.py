@@ -1290,7 +1290,7 @@ class Welcome(commands.Cog, name="welcome"):
             )
             welcome_embed.set_thumbnail(url=member.display_avatar.url)
             welcome_embed.set_footer(
-                text="Dit kanaal zal worden verwijderd over 1 uur."
+                text="Dit kanaal zal worden verwijderd over 8 uur."
             )
             self.bot.logger.info(
                 f"Sending welcome message to {member.name} in {interaction.guild.name}"
@@ -1300,7 +1300,7 @@ class Welcome(commands.Cog, name="welcome"):
         # Delete the ticket channel after a delay — use create_task so the deletion
         # survives even if the interaction coroutine finishes.  We also persist the
         # deletion schedule to the DB so that a bot restart can reschedule it.
-        delay = 3600 if request_type == "citizen" else 30
+        delay = 8 * 3600 if request_type == "citizen" else 30
         _now = datetime.datetime.now(datetime.timezone.utc)
         _delete_at = _now + datetime.timedelta(seconds=delay)
         try:
