@@ -9,6 +9,14 @@ services:
     volumes:
       - ./database:/bot/database   # shared SQLite database
       - ./logs:/bot/logs           # persistent log files
-    command: ["python", "bot.py"]
+      - ./templates:/bot/templates # mus.json + role/embed templates (live edits via /verwijdermu must persist)
+    # --testing makes bot.py read TOKEN_TEST and load testing_config.json,
+    # matching the Discord application whose client_id is wired up in .env
+    # for the /admin OAuth flow.
+    command: ["python", "bot.py", "--testing"]
+
+  # NOTE: the hourly all-countries data-fetcher service has been moved to
+  # docker-compose.data-fetcher.yml so it can be enabled/disabled
+  # independently and is not committed to git (see .gitignore).
 
 

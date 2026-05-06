@@ -400,22 +400,6 @@ class MURequest(commands.Cog, name="murequest"):
             code.lower()
         )
 
-        # put the emoji in the channel name
-        if channel:
-            base_name = channel.name
-            # remove old emoji if exists
-            for emoji in ["🔴", "🟠", "🟡", "🟢"]:
-                if base_name.startswith(emoji):
-                    base_name = base_name[1:].strip()
-                    break
-            new_name = f"{circle_emoji}|{base_name}"
-            try:
-                await channel.edit(name=new_name)
-            except Exception as e:
-                logger.error(
-                    f"Error updating channel name with emoji: {e}", exc_info=True
-                )
-
         if not bericht:
             description = TEMPLATES.get(code.lower())
         else:
