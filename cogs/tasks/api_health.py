@@ -34,7 +34,7 @@ class ApiHealthTasks(TaskCogBase, name="api_health_tasks"):
     def cog_unload(self) -> None:
         self.api_health_loop.cancel()
 
-    @tasks.loop(hours=1)
+    @tasks.loop(minutes=5)
     async def api_health_loop(self) -> None:
         try:
             await self._check_api_health()
@@ -62,6 +62,9 @@ class ApiHealthTasks(TaskCogBase, name="api_health_tasks"):
 
         prev = self._last_known_available
         self._last_known_available = now_available
+        logger.debug(
+            "api_health: check available=%s (prev=%s)", now_available, prev
+        )
 
         if now_available == prev:
             # No state change — nothing to report
