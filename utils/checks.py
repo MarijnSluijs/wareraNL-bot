@@ -22,9 +22,11 @@ def has_privileged_role() -> app_commands.check:
         # In test mode everyone is allowed
         if getattr(bot, "testing", False):
             return True
-        # Bot owner is always allowed
-        app_info = await bot.application_info()
-        if interaction.user.id == app_info.owner.id:
+        # Bot owner is always allowed (cache owner id to avoid HTTP round-trip on every check)
+        if not getattr(bot, "_owner_id_cached", None):
+            app_info = await bot.application_info()
+            bot._owner_id_cached = app_info.owner.id
+        if interaction.user.id == bot._owner_id_cached:
             return True
         if interaction.guild and isinstance(interaction.user, discord.Member):
             user_role_ids = {r.id for r in interaction.user.roles}
