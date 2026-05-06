@@ -159,6 +159,18 @@ class Users(CommandCogBase, name="users"):
         if not mu_to_role_id:
             return stats
 
+        # Refresh MU memberships from the API first so the DB reflects the
+        # current state (catches players who recently switched MUs).
+        citizen_cache = getattr(self.bot, "_ext_citizen_cache", None)
+        nl_country_id = self.config.get("nl_country_id")
+        if citizen_cache and nl_country_id:
+            try:
+                await citizen_cache.refresh_mu_memberships(
+                    nl_country_id, str(mus_path)
+                )
+            except Exception:
+                logger.warning("sync_mu_roles: refresh_mu_memberships failed, continuing with cached data", exc_info=True)
+
         citizen_mus = await db.get_citizen_mus()
         in_game_to_current_mu = {
             in_game_id: mu_id for in_game_id, mu_id in citizen_mus if in_game_id
