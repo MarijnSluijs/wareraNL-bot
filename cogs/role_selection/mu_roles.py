@@ -358,10 +358,29 @@ class MuRoles(commands.Cog, name="mu_roles"):
                 )
                 return
 
-        await interaction.followup.send(
-            f"✅ MU **{mu_name}** toegevoegd (id: `{mu_id}`, rol: {rol.mention}) en MU-lijst herplaatst in {target_channel.mention}.",
-            ephemeral=True,
-        )
+        # Trigger an immediate MU role sync so members get the new role right away
+        citizen_tasks_cog = self.bot.cogs.get("citizen_tasks")
+        if citizen_tasks_cog:
+            try:
+                sync_stats = await citizen_tasks_cog._sync_mu_roles_for_all_guilds()
+                assigned = sync_stats.get("assigned", 0)
+                await interaction.followup.send(
+                    f"✅ MU **{mu_name}** toegevoegd (id: `{mu_id}`, rol: {rol.mention}) en MU-lijst herplaatst in {target_channel.mention}.\n"
+                    f"🪖 MU-rollen gesynchroniseerd: **{assigned}** leden kregen de rol.",
+                    ephemeral=True,
+                )
+            except Exception as e:
+                logger.warning("voegmu: MU role sync failed: %s", e)
+                await interaction.followup.send(
+                    f"✅ MU **{mu_name}** toegevoegd (id: `{mu_id}`, rol: {rol.mention}) en MU-lijst herplaatst in {target_channel.mention}.\n"
+                    f"⚠️ MU-rollen synchronisatie mislukt: {e}",
+                    ephemeral=True,
+                )
+        else:
+            await interaction.followup.send(
+                f"✅ MU **{mu_name}** toegevoegd (id: `{mu_id}`, rol: {rol.mention}) en MU-lijst herplaatst in {target_channel.mention}.",
+                ephemeral=True,
+            )
 
     @app_commands.command(
         name="verwijdermu",
