@@ -816,6 +816,209 @@ class Owner(commands.Cog, name="owner"):
                 embed=_status_embed(f"❌ Onverwachte fout: `{type(exc).__name__}: {exc}`")
             )
 
+    @commands.command(name="rollen_check", hidden=True)
+    @commands.is_owner()
+    async def rollen_check(self, context: Context) -> None:
+        """Compare in-game government/congress with Discord role holders and report discrepancies."""
+        db = getattr(self.bot, "_ext_db", None)
+        client = getattr(self.bot, "_ext_client", None)
+        guild = context.guild
+
+        if not db or not client or not guild:
+            await context.send("❌ DB, API-client of guild niet beschikbaar.")
+            return
+
+        status = await context.send("⏳ Ophalen van overheidsdata…")
+
+        nl_country_id: str = self.bot.config.get("nl_country_id", "6813b6d446e731854c7ac7a0")
+        roles_cfg: dict = self.bot.config.get("roles", {})
+
+        # ── Role IDs ──────────────────────────────────────────────────────────
+        ROLE_PRESIDENT         = int(roles_cfg.get("president", 0))
+        ROLE_VICE_PRESIDENT    = int(roles_cfg.get("vice_president", 0))
+        ROLE_GOVERNMENT        = int(roles_cfg.get("government", 0))
+        ROLE_MIN_FA            = int(roles_cfg.get("minister_foreign_affairs", 0))
+        ROLE_CONGRESLID        = int(roles_cfg.get("congreslid", 0))
+
+        # ── Step 1: fetch in-game government ─────────────────────────────────
+        try:
+            gov_data = await client.post(
+                "/government.getByCountryId",
+                json={"countryId": nl_country_id},
+            )
+        except Exception as exc:
+            await status.edit(content=f"❌ API-fout: {exc}")
+            return
+
+        # Normalise: the API may return the full tRPC envelope or just data
+        if isinstance(gov_data, dict) and "data" in gov_data:
+            gov = gov_data["data"]
+        else:
+            gov = gov_data
+
+        ingame_president    = gov.get("president") or ""
+        ingame_vp           = gov.get("vicePresident") or ""
+        ingame_min_def      = gov.get("minOfDefense") or ""
+        ingame_min_eco      = gov.get("minOfEconomy") or ""
+        ingame_min_fa       = gov.get("minOfForeignAffairs") or ""
+        ingame_congress_ids: list[str] = gov.get("congressMembers") or []
+
+        all_ingame_ids = list({
+            id_ for id_ in [
+                ingame_president, ingame_vp,
+                ingame_min_def, ingame_min_eco, ingame_min_fa,
+                *ingame_congress_ids,
+            ] if id_
+        })
+
+        # ── Step 2: resolve in-game IDs → Discord IDs + citizen names ────────
+        guild_id_str = str(guild.id)
+        ingame_to_discord: dict[str, str] = await db.get_discord_ids_by_ingame_user_ids(
+            guild_id_str, all_ingame_ids
+        )
+
+        # citizen names: join identity_links → citizen_levels
+        discord_ids_for_names = list(ingame_to_discord.values())
+        discord_to_citizen: dict[str, str] = {}
+        if discord_ids_for_names:
+            discord_to_citizen = await db.get_citizen_names_by_discord_ids(discord_ids_for_names)
+
+        def _resolve(ingame_id: str) -> str:
+            """Return 'CitizenName (<@discord_id>)' or 'CitizenName (geen Discord-link)' or ingame_id."""
+            if not ingame_id:
+                return "—"
+            discord_id = ingame_to_discord.get(ingame_id)
+            citizen_name = discord_to_citizen.get(discord_id, "") if discord_id else ""
+            label = citizen_name or ingame_id
+            if discord_id:
+                return f"{label} (<@{discord_id}>)"
+            return f"{label} *(geen Discord-link)*"
+
+        # ── Step 3: collect Discord members with relevant roles ───────────────
+        def _members_with_role(role_id: int) -> list[discord.Member]:
+            role = guild.get_role(role_id)
+            return role.members if role else []
+
+        discord_presidents   = _members_with_role(ROLE_PRESIDENT)
+        discord_vps          = _members_with_role(ROLE_VICE_PRESIDENT)
+        discord_governments  = _members_with_role(ROLE_GOVERNMENT)
+        discord_min_fas      = _members_with_role(ROLE_MIN_FA)
+        discord_congresleden = _members_with_role(ROLE_CONGRESLID)
+
+        # Map discord_id → in-game user id for role holders
+        async def _discord_to_ingame(member: discord.Member) -> str | None:
+            link = await db.get_identity_link_by_discord(str(member.id), guild_id_str)
+            return link["in_game_user_id"] if link else None
+
+        # ── Step 4: build the report ──────────────────────────────────────────
+        lines: list[str] = []
+
+        def _check_single(
+            title: str, ingame_id: str, discord_members: list[discord.Member]
+        ) -> list[str]:
+            out = [f"**{title}**"]
+            out.append(f"  In-game: {_resolve(ingame_id)}")
+            expected_discord = ingame_to_discord.get(ingame_id)
+            holder_ids = {str(m.id) for m in discord_members}
+            if not discord_members:
+                out.append("  Discord-rol: *niemand*")
+            else:
+                names = ", ".join(
+                    f"{discord_to_citizen.get(str(m.id), m.display_name)} (<@{m.id}>)"
+                    for m in discord_members
+                )
+                out.append(f"  Discord-rol: {names}")
+            if expected_discord and expected_discord not in holder_ids:
+                out.append("  ⚠️ In-game speler heeft de rol **niet**")
+            extra = holder_ids - ({expected_discord} if expected_discord else set())
+            if extra:
+                extra_mentions = ", ".join(f"<@{i}>" for i in extra)
+                out.append(f"  ⚠️ Extra rolhouder(s): {extra_mentions}")
+            if expected_discord and expected_discord in holder_ids and not extra:
+                out.append("  ✅ Klopt")
+            return out
+
+        lines += _check_single("President", ingame_president, discord_presidents)
+        lines.append("")
+        lines += _check_single("Vice-president", ingame_vp, discord_vps)
+        lines.append("")
+        lines += _check_single("Minister van Buitenlandse Zaken", ingame_min_fa, discord_min_fas)
+        lines.append("")
+
+        # Government role: should cover VP + all ministers
+        ingame_gov_ids = {id_ for id_ in [ingame_vp, ingame_min_def, ingame_min_eco, ingame_min_fa] if id_}
+        expected_gov_discord = {ingame_to_discord[i] for i in ingame_gov_ids if i in ingame_to_discord}
+        gov_holder_ids = {str(m.id) for m in discord_governments}
+        lines.append("**Rol 'Government' (VP + ministers)**")
+        lines.append(f"  Verwacht in-game: Minister Defensie={_resolve(ingame_min_def)}, "
+                     f"Economie={_resolve(ingame_min_eco)}")
+        missing_gov = expected_gov_discord - gov_holder_ids
+        extra_gov   = gov_holder_ids - expected_gov_discord
+        if missing_gov:
+            lines.append("  ⚠️ Mist rol: " + ", ".join(f"<@{i}>" for i in missing_gov))
+        if extra_gov:
+            lines.append("  ⚠️ Extra: " + ", ".join(f"<@{i}>" for i in extra_gov))
+        if not missing_gov and not extra_gov:
+            lines.append("  ✅ Klopt")
+        lines.append("")
+
+        # Congress comparison
+        ingame_congress_set = set(ingame_congress_ids)
+        expected_congress_discord = {
+            ingame_to_discord[i] for i in ingame_congress_set if i in ingame_to_discord
+        }
+        congress_holder_ids = {str(m.id) for m in discord_congresleden}
+        missing_congress = expected_congress_discord - congress_holder_ids
+        extra_congress   = congress_holder_ids - expected_congress_discord
+
+        lines.append(f"**Congresleden** — {len(ingame_congress_ids)} in-game, "
+                     f"{len(discord_congresleden)} op Discord")
+
+        if missing_congress:
+            lines.append("  ⚠️ Missen Discord-rol:")
+            for discord_id in missing_congress:
+                citizen = discord_to_citizen.get(discord_id, discord_id)
+                lines.append(f"    • {citizen} (<@{discord_id}>)")
+        if extra_congress:
+            lines.append("  ⚠️ Hebben Discord-rol maar zijn geen congresleden:")
+            for discord_id in extra_congress:
+                citizen = discord_to_citizen.get(discord_id, discord_id)
+                lines.append(f"    • {citizen} (<@{discord_id}>)")
+
+        unlinked_congress = [
+            i for i in ingame_congress_ids if i not in ingame_to_discord
+        ]
+        if unlinked_congress:
+            lines.append(f"  ℹ️ {len(unlinked_congress)} congresleden zonder Discord-link (niet traceerbaar)")
+
+        if not missing_congress and not extra_congress:
+            lines.append("  ✅ Congresrollen kloppen")
+
+        # ── Send in chunks ────────────────────────────────────────────────────
+        _MAX = 3800
+        chunks: list[str] = []
+        current = ""
+        for line in lines:
+            segment = ("\n" if current else "") + line
+            if len(current) + len(segment) > _MAX:
+                chunks.append(current)
+                current = line
+            else:
+                current += segment
+        if current:
+            chunks.append(current)
+
+        await status.edit(content="✅ Rollen-check klaar:")
+        for i, chunk in enumerate(chunks):
+            title = "🔍 Rollen-check NL"
+            if len(chunks) > 1:
+                title += f" ({i + 1}/{len(chunks)})"
+            await context.send(embed=discord.Embed(
+                title=title,
+                description=chunk,
+                color=self.color,
+            ))
+
     # @commands.hybrid_command(
     #     name="embed",
     #     description="The bot will say anything you want, but within embeds.",
