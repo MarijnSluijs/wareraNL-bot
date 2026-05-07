@@ -837,7 +837,6 @@ class Owner(commands.Cog, name="owner"):
         ROLE_PRESIDENT         = int(roles_cfg.get("president", 0))
         ROLE_VICE_PRESIDENT    = int(roles_cfg.get("vice_president", 0))
         ROLE_GOVERNMENT        = int(roles_cfg.get("government", 0))
-        ROLE_MIN_FA            = int(roles_cfg.get("minister_foreign_affairs", 0))
         ROLE_CONGRESLID        = int(roles_cfg.get("congreslid", 0))
 
         # ── Step 1: fetch in-game government ─────────────────────────────────
@@ -901,7 +900,6 @@ class Owner(commands.Cog, name="owner"):
         discord_presidents   = _members_with_role(ROLE_PRESIDENT)
         discord_vps          = _members_with_role(ROLE_VICE_PRESIDENT)
         discord_governments  = _members_with_role(ROLE_GOVERNMENT)
-        discord_min_fas      = _members_with_role(ROLE_MIN_FA)
         discord_congresleden = _members_with_role(ROLE_CONGRESLID)
 
         # Map discord_id → in-game user id for role holders
@@ -941,16 +939,38 @@ class Owner(commands.Cog, name="owner"):
         lines.append("")
         lines += _check_single("Vice-president", ingame_vp, discord_vps)
         lines.append("")
-        lines += _check_single("Minister van Buitenlandse Zaken", ingame_min_fa, discord_min_fas)
+
+        # Individual minister sections (no separate Discord role — show government-rol status)
+        gov_holder_ids = {str(m.id) for m in discord_governments}
+
+        def _minister_section(title: str, ingame_id: str) -> list[str]:
+            out = [f"**{title}**"]
+            out.append(f"  In-game: {_resolve(ingame_id)}")
+            if ingame_id:
+                discord_id = ingame_to_discord.get(ingame_id)
+                if discord_id:
+                    if discord_id in gov_holder_ids:
+                        out.append("  Government-rol: ✅")
+                    else:
+                        out.append("  Government-rol: ⚠️ Mist rol")
+                else:
+                    out.append("  Government-rol: *(geen Discord-link)*")
+            return out
+
+        lines += _minister_section("Minister van Defensie", ingame_min_def)
+        lines.append("")
+        lines += _minister_section("Minister van Economie", ingame_min_eco)
+        lines.append("")
+        lines += _minister_section("Minister van Buitenlandse Zaken", ingame_min_fa)
         lines.append("")
 
-        # Government role: should cover VP + all ministers
-        ingame_gov_ids = {id_ for id_ in [ingame_vp, ingame_min_def, ingame_min_eco, ingame_min_fa] if id_}
+        # Government role: president + VP + all ministers should have it
+        ingame_gov_ids = {
+            id_ for id_ in [ingame_president, ingame_vp, ingame_min_def, ingame_min_eco, ingame_min_fa]
+            if id_
+        }
         expected_gov_discord = {ingame_to_discord[i] for i in ingame_gov_ids if i in ingame_to_discord}
-        gov_holder_ids = {str(m.id) for m in discord_governments}
-        lines.append("**Rol 'Government' (VP + ministers)**")
-        lines.append(f"  Verwacht in-game: Minister Defensie={_resolve(ingame_min_def)}, "
-                     f"Economie={_resolve(ingame_min_eco)}")
+        lines.append("**Rol 'Government' (president + VP + ministers)**")
         missing_gov = expected_gov_discord - gov_holder_ids
         extra_gov   = gov_holder_ids - expected_gov_discord
         if missing_gov:
