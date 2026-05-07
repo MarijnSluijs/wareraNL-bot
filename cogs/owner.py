@@ -842,19 +842,18 @@ class Owner(commands.Cog, name="owner"):
 
         # ── Step 1: fetch in-game government ─────────────────────────────────
         try:
-            gov_data = await client.post(
-                "/government.getByCountryId",
-                json={"countryId": nl_country_id},
+            results = await client.batch_get(
+                "government.getByCountryId",
+                [{"countryId": nl_country_id}],
             )
+            gov = results[0] if results else None
         except Exception as exc:
             await status.edit(content=f"❌ API-fout: {exc}")
             return
 
-        # Normalise: the API may return the full tRPC envelope or just data
-        if isinstance(gov_data, dict) and "data" in gov_data:
-            gov = gov_data["data"]
-        else:
-            gov = gov_data
+        if not isinstance(gov, dict):
+            await status.edit(content="❌ API gaf geen geldige data terug.")
+            return
 
         ingame_president    = gov.get("president") or ""
         ingame_vp           = gov.get("vicePresident") or ""
