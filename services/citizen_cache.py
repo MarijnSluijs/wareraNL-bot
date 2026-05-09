@@ -121,6 +121,8 @@ class CitizenCache:
         )
 
         now = datetime.now(timezone.utc)
+        now_ts = now.timestamp()
+        debuff_duration = 16 * 3600  # seconds
         players: list[dict] = []
         for obj in results:
             if not isinstance(obj, dict):
@@ -138,6 +140,37 @@ class CitizenCache:
                     can_reset = days_ago >= 7
                 except Exception:
                     pass
+
+            # Health and hunger current values
+            skills = obj.get("skills") or {}
+            health_cur: float | None = None
+            health_max: float | None = None
+            hunger_cur: float | None = None
+            hunger_max: float | None = None
+            _h = skills.get("health")
+            if isinstance(_h, dict):
+                health_cur = _h.get("currentBarValue")
+                health_max = _h.get("total")
+            _hu = skills.get("hunger")
+            if isinstance(_hu, dict):
+                hunger_cur = _hu.get("currentBarValue")
+                hunger_max = _hu.get("total")
+
+            # Pill / debuff status
+            buffs = obj.get("buffs") or {}
+            buff_codes = buffs.get("buffCodes") or []
+            buff_end_at = buffs.get("buffEndAt")
+            if "cocain" in buff_codes:
+                pill_icon = "💊"
+            elif buff_end_at:
+                try:
+                    end_ts = datetime.fromisoformat(buff_end_at.replace("Z", "+00:00")).timestamp()
+                    pill_icon = "⏳" if end_ts + debuff_duration > now_ts else "❌"
+                except Exception:
+                    pill_icon = "❌"
+            else:
+                pill_icon = "❌"
+
             players.append(
                 {
                     "citizen_name": name or "?",
@@ -145,6 +178,11 @@ class CitizenCache:
                     "skill_mode": mode,
                     "days_ago": days_ago,
                     "can_reset": can_reset,
+                    "health_cur": health_cur,
+                    "health_max": health_max,
+                    "hunger_cur": hunger_cur,
+                    "hunger_max": hunger_max,
+                    "pill_icon": pill_icon,
                 }
             )
 

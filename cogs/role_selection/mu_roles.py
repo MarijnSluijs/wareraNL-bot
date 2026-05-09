@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -13,6 +14,8 @@ from discord.ext import commands
 from cogs.role_selection.roles import RoleToggleView, load_roles_template, mu_roles_path
 from cogs.welcome import Welcome
 from utils.checks import has_privileged_role
+
+logger = logging.getLogger(__name__)
 
 
 def mus_json_path(testing: bool = False) -> str:
@@ -357,6 +360,17 @@ class MuRoles(commands.Cog, name="mu_roles"):
                     ephemeral=True,
                 )
                 return
+
+        # Refresh MU memberships so the new MU's members land in the DB before the sync
+        citizen_cache = getattr(self.bot, "_ext_citizen_cache", None)
+        nl_country_id = self.bot.config.get("nl_country_id")
+        testing = getattr(self.bot, "testing", False)
+        mus_path_str = "templates/mus.testing.json" if testing else "templates/mus.json"
+        if citizen_cache and nl_country_id:
+            try:
+                await citizen_cache.refresh_mu_memberships(nl_country_id, mus_path_str)
+            except Exception as _e:
+                logger.warning("voegmu: refresh_mu_memberships failed: %s", _e)
 
         # Trigger an immediate MU role sync so members get the new role right away
         citizen_tasks_cog = self.bot.cogs.get("citizen_tasks")
