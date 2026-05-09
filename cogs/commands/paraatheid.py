@@ -279,15 +279,29 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
             )
             war_pct = war_count / total_mu * 100 if total_mu else 0.0
 
-            embed_limit_MU = 3900
-            name_w = 16
-            lvl_w = 2
-            num_w = len(str(total_mu))
+            # Average remaining cooldown for eco players still waiting
+            eco_waiting = [
+                max(0.0, 7 - p["days_ago"])
+                for p in players
+                if p["skill_mode"] == "eco" and not p["can_reset"] and p["days_ago"] is not None
+            ]
+            avg_eco_cd_str = (
+                f"{sum(eco_waiting) / len(eco_waiting):.1f}d"
+                if eco_waiting else None
+            )
 
             summary_line = (
                 f"⚔️ **{war_count}** paraat ({war_pct:.0f}%)  •  "
                 f"✅ **{can_reset_count}** kunnen resetten"
             )
+
+            # Detect whether live data includes health/hunger (live fetch path)
+            has_live_stats = any(p.get("health_cur") is not None for p in players)
+
+            embed_limit_MU = 3900
+            name_w = 14 if has_live_stats else 16
+            lvl_w = 2
+            num_w = len(str(total_mu))
 
             is_first_chunk = True
 
@@ -305,24 +319,36 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                     embed = discord.Embed(description=block, colour=colour)
                 await ctx.send(embed=embed)
 
-            header = f"{'#':>{num_w}}  {'naam':<{name_w}}  {'lv':>{lvl_w}}  cooldown"
-            sep = "─" * (num_w + 2 + name_w + 2 + lvl_w + 2 + 16)
+            if has_live_stats:
+                # 3-space prefix matches: emoji (2 visual cols) + 1 space for all mode icons
+                header = f"   {'#':>{num_w}}  {'naam':<{name_w}}  {'lv':>{lvl_w}}  {'hp':>3}  {'hu':>2}  💊  cd"
+                sep = "─" * (3 + num_w + 2 + name_w + 2 + lvl_w + 2 + 3 + 2 + 2 + 2 + 1 + 2 + 5)
+            else:
+                header = f"   {'#':>{num_w}}  {'naam':<{name_w}}  {'lv':>{lvl_w}}  cooldown"
+                sep = "─" * (3 + num_w + 2 + name_w + 2 + lvl_w + 2 + 16)
             pending: list[str] = [header, sep]
             for i, p in enumerate(players, start=1):
                 mode = p["skill_mode"]
-                mode_icon = "🌾" if mode == "eco" else ("⚔️" if mode == "war" else "❓")
+                # ⚔️ and 🌾 are both 2 display columns wide → consistent alignment
+                mode_char = "🌾" if mode == "eco" else ("⚔️" if mode == "war" else "❓")
                 num = str(i).rjust(num_w)
                 name = str(p["citizen_name"] or "?")[:name_w].ljust(name_w)
                 lvl = str(p["level"] or "?").rjust(lvl_w)
                 if mode == "war":
-                    cd = "paraat"
+                    cd = "par"
                 elif p["can_reset"]:
-                    cd = "kan nu resetten"
+                    cd = "reset"
                 elif p["days_ago"] is not None:
-                    cd = f"nog {max(0.0, 7 - p['days_ago']):.1f}d"
+                    cd = f"{max(0.0, 7 - p['days_ago']):.1f}d"
                 else:
-                    cd = "kan nu resetten"
-                line = f"{mode_icon} {num}  {name}  {lvl}  {cd}"
+                    cd = "reset"
+                if has_live_stats:
+                    hp_str = str(int(p["health_cur"])) if p.get("health_cur") is not None else "  ?"
+                    hu_str = str(int(p["hunger_cur"])) if p.get("hunger_cur") is not None else " ?"
+                    pill = p.get("pill_icon", "❌")
+                    line = f"{mode_char} {num}  {name}  {lvl}  {hp_str:>3}  {hu_str:>2}  {pill}  {cd}"
+                else:
+                    line = f"{mode_char} {num}  {name}  {lvl}  {cd}"
                 candidate = "\n".join(pending + [line])
                 if len(candidate) > embed_limit_MU and len(pending) > 2:
                     await _flush_mu(pending)
@@ -331,18 +357,44 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                     pending.append(line)
             if len(pending) > 2:
                 await _flush_mu(pending)
-            # Pill buff/debuff section (from hourly tracking DB)
+
+            # Stats embed: tracking DB for pill/debuff (more reliable), live data for health/hunger/eco-cd
+            stats_parts: list[str] = []
             if self._db:
                 try:
                     pill_stats = await self._db.get_pill_stats_from_tracking(mu_names=[mu_name])
-                    pill_emb = discord.Embed(
-                        title=f"💊 Pill status — {mu_name}",
-                        description=_pill_field_value(pill_stats),
-                        colour=colour,
-                    )
-                    await ctx.send(embed=pill_emb)
+                    buff_n = pill_stats["buff"]
+                    debuff_n = pill_stats["debuff"]
+                    none_n = pill_stats["none"]
+                    buff_line = f"💊 Pil actief: **{buff_n}**"
+                    if buff_n and pill_stats.get("avg_buff_secs"):
+                        buff_line += f" (gem. {_fmt_hm(pill_stats['avg_buff_secs'])} over)"
+                    stats_parts.append(buff_line)
+                    debuff_line = f"⏳ In debuff: **{debuff_n}**"
+                    if debuff_n and pill_stats.get("avg_debuff_secs"):
+                        debuff_line += f" (gem. {_fmt_hm(pill_stats['avg_debuff_secs'])} over)"
+                    stats_parts.append(debuff_line)
+                    stats_parts.append(f"❌ Geen pil: **{none_n}**")
                 except Exception:
                     pass
+            if has_live_stats:
+                health_vals = [p["health_cur"] for p in players if p.get("health_cur") is not None]
+                hunger_vals = [p["hunger_cur"] for p in players if p.get("hunger_cur") is not None]
+                if health_vals:
+                    stats_parts.append(f"❤️ Gem. health: **{sum(health_vals) / len(health_vals):.0f}**")
+                if hunger_vals:
+                    stats_parts.append(f"🍞 Gem. hunger: **{sum(hunger_vals) / len(hunger_vals):.1f}**")
+            if avg_eco_cd_str:
+                stats_parts.append(
+                    f"⏱️ Gem. eco-cd: **{avg_eco_cd_str}** ({len(eco_waiting)} eco-spelers wachtend)"
+                )
+            if stats_parts:
+                pill_emb = discord.Embed(
+                    title=f"📊 Stats — {mu_name}",
+                    description="\n".join(stats_parts),
+                    colour=colour,
+                )
+                await ctx.send(embed=pill_emb)
             return
 
         # ══ Mode 3: NL MUs ════════════════════════════════════════════════
