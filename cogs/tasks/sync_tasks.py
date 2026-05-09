@@ -27,7 +27,7 @@ logger = logging.getLogger("discord_bot")
 # ── Cooldown intervals ──────────────────────────────────────────────────────
 _DAILY_H = 24
 _WEEKLY_H = 168  # 7 days
-_INACTIVITY_DAYS = 5  # days without login → flagged in audit
+_INACTIVITY_DAYS = 3  # days without login → flagged in audit (≈72 h)
 
 # Marijn's Discord user ID (receives the weekly audit DM)
 _MARIJN_DISCORD_ID = 565626197048819731

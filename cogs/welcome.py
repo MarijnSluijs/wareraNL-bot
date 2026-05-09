@@ -1200,7 +1200,7 @@ class Welcome(commands.Cog, name="welcome"):
                     name="Role Granted", value=role_to_give.mention, inline=False
                 )
 
-            user_embed.set_footer(text="This channel will be deleted in 30 seconds.")
+            user_embed.set_footer(text="Dit kanaal zal worden verwijderd over 8 uur.")
 
             await channel.send(content=member.mention, embed=user_embed)
 
@@ -1304,7 +1304,7 @@ class Welcome(commands.Cog, name="welcome"):
         # Delete the ticket channel after a delay — use create_task so the deletion
         # survives even if the interaction coroutine finishes.  We also persist the
         # deletion schedule to the DB so that a bot restart can reschedule it.
-        delay = 8 * 3600 if request_type == "citizen" else 30
+        delay = 8 * 3600
         _now = datetime.datetime.now(datetime.timezone.utc)
         _delete_at = _now + datetime.timedelta(seconds=delay)
         try:
@@ -1812,14 +1812,29 @@ class Welcome(commands.Cog, name="welcome"):
                     except (discord.Forbidden, discord.HTTPException) as e:
                         self.bot.logger.error(f"Failed to post to log channel: {e}")
 
-            # Delete the ticket channel after a delay
-            await asyncio.sleep(30)
+            # Delete the ticket channel after a delay — persist so restarts survive
+            _emb_delay = 8 * 3600
+            _emb_now = datetime.datetime.now(datetime.timezone.utc)
+            _emb_delete_at = _emb_now + datetime.timedelta(seconds=_emb_delay)
             try:
-                await interaction.channel.delete(
-                    reason=f"Embassy request approved by {interaction.user.name}"
+                _emb_db = await self._get_approval_db()
+                await _emb_db.add_pending_ticket_deletion(
+                    channel_id=str(interaction.channel.id),
+                    guild_id=str(interaction.guild_id),
+                    approved_at=_emb_now.isoformat(),
+                    delete_at=_emb_delete_at.isoformat(),
                 )
-            except (discord.NotFound, discord.Forbidden) as e:
-                self.bot.logger.error(f"Could not delete channel: {e}")
+            except Exception as _emb_e:
+                self.bot.logger.warning("embassyapprove: could not record pending deletion: %s", _emb_e)
+                _emb_db = None
+            asyncio.create_task(
+                self._delete_channel_after(
+                    interaction.channel,
+                    _emb_delay,
+                    f"Embassy request approved by {interaction.user.name}",
+                    db=_emb_db,
+                )
+            )
 
         except Exception as e:
             traceback.print_exception(type(e), e, e.__traceback__)

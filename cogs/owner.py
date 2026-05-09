@@ -817,7 +817,7 @@ class Owner(commands.Cog, name="owner"):
             )
 
     @commands.command(name="rollen_check", hidden=True)
-    @commands.is_owner()
+    @commands.check(_owner_or_privileged)
     async def rollen_check(self, context: Context) -> None:
         """Compare in-game government/congress with Discord role holders and report discrepancies."""
         db = getattr(self.bot, "_ext_db", None)
