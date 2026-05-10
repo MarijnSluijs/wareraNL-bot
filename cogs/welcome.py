@@ -1389,7 +1389,7 @@ class Welcome(commands.Cog, name="welcome"):
             description=f"Your {request_type} verification request has been denied.",
             color=discord.Color.red(),
         )
-        user_embed.set_footer(text="This channel will be deleted in 30 seconds.")
+        user_embed.set_footer(text="Dit kanaal zal worden verwijderd over 8 uur.")
 
         if member:
             await channel.send(content=member.mention, embed=user_embed)
@@ -1444,14 +1444,29 @@ class Welcome(commands.Cog, name="welcome"):
 
         await interaction.response.send_message(embed=mod_embed, ephemeral=True)
 
-        # Delete the ticket channel after a delay
-        await asyncio.sleep(30)
+        # Delete the ticket channel after 8 hours — persisted to DB for restart recovery.
+        _deny_delay = 8 * 3600
+        _deny_now = datetime.datetime.now(datetime.timezone.utc)
+        _deny_delete_at = _deny_now + datetime.timedelta(seconds=_deny_delay)
         try:
-            await channel.delete(
-                reason=f"Verificatie afgewezen door {interaction.user.name}"
+            _deny_db = await self._get_approval_db()
+            await _deny_db.add_pending_ticket_deletion(
+                channel_id=str(channel.id),
+                guild_id=str(interaction.guild_id),
+                approved_at=_deny_now.isoformat(),
+                delete_at=_deny_delete_at.isoformat(),
             )
-        except (discord.NotFound, discord.Forbidden) as e:
-            self.bot.logger.error(f"Could not delete channel: {e}")
+        except Exception as _deny_e:
+            self.bot.logger.warning("deny: could not record pending deletion: %s", _deny_e)
+            _deny_db = None
+        asyncio.create_task(
+            self._delete_channel_after(
+                channel,
+                _deny_delay,
+                f"Verificatie afgewezen door {interaction.user.name}",
+                db=_deny_db,
+            )
+        )
 
     @app_commands.command(
         name="embassyapprove", description="Keur een ambassadeverzoek goed"
