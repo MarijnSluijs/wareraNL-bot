@@ -547,14 +547,14 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
         lines.append("")
         lines.append("### 🌍 Geen Nederlander in-game (land veranderd)")
         lines.append(
-            "*Heeft de Discord-rol maar is in-game verhuisd — verwijder de rol of vraag hen terug te verhuizen.*"
+            "*Heeft de Discord-rol maar is in-game verhuisd.*"
         )
         lines.extend(wrong_country if wrong_country else ["*Geen problemen gevonden.*"])
 
         lines.append("")
         lines.append(f"### 💤 Inactief ({_INACTIVITY_DAYS}+ dagen)")
         lines.append(
-            f"*Al {_INACTIVITY_DAYS}+ dagen niet ingelogd — overweeg een berichtje of rolverwijdering.*"
+            f"*Al {_INACTIVITY_DAYS}+ dagen niet ingelogd — overweeg een bericht of rolverwijdering.*"
         )
         lines.extend(too_inactive if too_inactive else ["*Geen problemen gevonden.*"])
 
@@ -589,7 +589,7 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
             if channel is not None:
                 try:
                     for chunk in chunks:
-                        await channel.send(chunk)
+                        await channel.send(chunk, suppress_embeds=True)
                     logger.info(
                         "citizenship_audit: report sent to channel %d (%d sections)",
                         int(channel_id), len(chunks),
