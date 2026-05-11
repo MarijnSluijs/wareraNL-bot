@@ -389,8 +389,9 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                 profile = f"https://app.warera.io/user/{in_game_id}"
                 d = details.get(in_game_id)
                 if not d:
-                    # Citizen_levels has no entry — try to get the username via API
+                    # citizen_levels has no entry — fetch username + lastConnectionAt via API
                     display_name = in_game_id
+                    api_last_conn: str | None = None
                     if self._client:
                         try:
                             raw = await self._client.get(
@@ -400,9 +401,19 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                             data = _unwrap_trpc(raw)
                             if isinstance(data, dict):
                                 display_name = data.get("username") or in_game_id
+                                api_last_conn = (
+                                    (data.get("dates") or {}).get("lastConnectionAt")
+                                )
                         except Exception:
                             pass
                     not_in_db.append(f"• {member.mention} ([{display_name}]({profile}))")
+                    # Also check inactivity via the API date even when not in DB
+                    api_days = _days_since(api_last_conn)
+                    if api_days is not None and api_days > _INACTIVITY_DAYS:
+                        too_inactive.append(
+                            f"• {member.mention} ([{display_name}]({profile}))"
+                            f" — {int(api_days)} dagen inactief"
+                        )
                     continue
 
                 citizen_name = d["citizen_name"] or in_game_id
@@ -443,6 +454,44 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                         f"• {member.mention} ([{citizen_name or user_id}]({profile}))"
                     )
 
+        # ── Load previous snapshot & compute delta ───────────────────────────
+        _SNAPSHOT_KEY = "citizenship_audit_snapshot"
+        prev_snapshot: dict[str, list[str]] = {}
+        if self._db:
+            try:
+                raw_snap = await self._db.get_poll_state(_SNAPSHOT_KEY)
+                if raw_snap:
+                    prev_snapshot = json.loads(raw_snap)
+            except Exception:
+                logger.exception("citizenship_audit: failed loading previous snapshot")
+
+        current_snapshot: dict[str, list[str]] = {
+            "no_link": no_link,
+            "not_in_db": not_in_db,
+            "wrong_country": wrong_country,
+            "too_inactive": too_inactive,
+            "missing_role": missing_role,
+        }
+
+        def _mention_key(line: str) -> str:
+            """Extract the mention/identifier from a bullet line for comparison."""
+            # lines look like "• @mention ..." or "• @mention ([name](url)) ..."
+            return line.split(" ")[1] if " " in line else line
+
+        def _delta(section_key: str) -> tuple[list[str], list[str]]:
+            prev = {_mention_key(l) for l in prev_snapshot.get(section_key, [])}
+            curr = {_mention_key(l) for l in current_snapshot.get(section_key, [])}
+            new_entries = [l for l in current_snapshot[section_key] if _mention_key(l) not in prev]
+            resolved = [l for l in prev_snapshot.get(section_key, []) if _mention_key(l) not in curr]
+            return new_entries, resolved
+
+        # Save current snapshot
+        if self._db:
+            try:
+                await self._db.set_poll_state(_SNAPSHOT_KEY, json.dumps(current_snapshot))
+            except Exception:
+                logger.exception("citizenship_audit: failed saving snapshot")
+
         # ── Build report ─────────────────────────────────────────────────────
         date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         ping = f"<@{_CAPTAINWYVERN_DISCORD_ID}>"
@@ -452,23 +501,68 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
             "",
         ]
 
+        # ── Delta section ────────────────────────────────────────────────────
+        if prev_snapshot:
+            all_new: list[str] = []
+            all_resolved: list[str] = []
+            _section_labels = {
+                "no_link": "Geen identity koppeling",
+                "not_in_db": "Niet gevonden in citizen DB",
+                "wrong_country": "Land veranderd",
+                "too_inactive": "Inactief",
+                "missing_role": "Mist Nederlander-rol",
+            }
+            for key, label in _section_labels.items():
+                new_e, resolved_e = _delta(key)
+                for e in new_e:
+                    all_new.append(f"• **[{label}]** {e.lstrip('• ')}")
+                for e in resolved_e:
+                    all_resolved.append(f"• **[{label}]** {e.lstrip('• ')}")
+
+            lines.append("### 🔄 Wijzigingen t.o.v. vorige audit")
+            if not all_new and not all_resolved:
+                lines.append("*Geen wijzigingen.*")
+            else:
+                if all_new:
+                    lines.append("**Nieuw:**")
+                    lines.extend(all_new)
+                if all_resolved:
+                    lines.append("**Opgelost:**")
+                    lines.extend(all_resolved)
+            lines.append("")
+
         lines.append("### ❌ Geen identity koppeling")
+        lines.append(
+            "*Nederlander-rol maar geen in-game koppeling — gebruik `/approve` of `/identitylink`.*"
+        )
         lines.extend(no_link if no_link else ["*Geen problemen gevonden.*"])
 
         lines.append("")
         lines.append("### 🔍 Niet gevonden in citizen DB")
+        lines.append(
+            "*Staat niet in de citizen DB — waarschijnlijk geen NL in-game burger, of inactief.*"
+        )
         lines.extend(not_in_db if not_in_db else ["*Geen problemen gevonden.*"])
 
         lines.append("")
         lines.append("### 🌍 Geen Nederlander in-game (land veranderd)")
+        lines.append(
+            "*Heeft de Discord-rol maar is in-game verhuisd — verwijder de rol of vraag hen terug te verhuizen.*"
+        )
         lines.extend(wrong_country if wrong_country else ["*Geen problemen gevonden.*"])
 
         lines.append("")
         lines.append(f"### 💤 Inactief ({_INACTIVITY_DAYS}+ dagen)")
+        lines.append(
+            f"*Al {_INACTIVITY_DAYS}+ dagen niet ingelogd — overweeg een berichtje of rolverwijdering.*"
+        )
         lines.extend(too_inactive if too_inactive else ["*Geen problemen gevonden.*"])
 
         lines.append("")
         lines.append("### 🎭 In-game Nederlanders zonder Discord rol")
+        lines.append(
+            "*In-game Nederlander maar mist de Discord-rol — controleer hun ticket en gebruik `/approve`.*"
+        )
         lines.extend(missing_role if missing_role else ["*Geen problemen gevonden.*"])
 
         report = "\n".join(lines)
