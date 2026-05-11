@@ -27,7 +27,7 @@ logger = logging.getLogger("discord_bot")
 # ── Cooldown intervals ──────────────────────────────────────────────────────
 _DAILY_H = 24
 _WEEKLY_H = 168  # 7 days
-_INACTIVITY_DAYS = 5  # days without login → flagged in audit
+_INACTIVITY_DAYS = 3  # days without login → flagged in audit (≈72 h)
 
 # Marijn's Discord user ID (receives the weekly audit DM)
 _MARIJN_DISCORD_ID = 565626197048819731
@@ -58,6 +58,13 @@ def _unwrap_mu_getbyid(resp: Any) -> dict | None:
             if isinstance(data, dict) and "_id" in data:
                 return data
     return None
+
+
+def _unwrap_trpc(resp: object) -> object:
+    """Unwrap a generic tRPC response: {result: {data: ...}} → data."""
+    if isinstance(resp, dict):
+        return resp.get("result", {}).get("data", resp)
+    return resp
 
 
 def _days_since(iso_str: str | None) -> float | None:
@@ -379,11 +386,26 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                     no_link.append(f"• {member.mention}")
                     continue
 
+                profile = f"https://app.warera.io/user/{in_game_id}"
                 d = details.get(in_game_id)
                 if not d:
-                    not_in_db.append(f"• {member.mention}")
+                    # Citizen_levels has no entry — try to get the username via API
+                    display_name = in_game_id
+                    if self._client:
+                        try:
+                            raw = await self._client.get(
+                                "/user.getUserLite",
+                                params={"input": json.dumps({"userId": in_game_id})},
+                            )
+                            data = _unwrap_trpc(raw)
+                            if isinstance(data, dict):
+                                display_name = data.get("username") or in_game_id
+                        except Exception:
+                            pass
+                    not_in_db.append(f"• {member.mention} ([{display_name}]({profile}))")
                     continue
 
+                citizen_name = d["citizen_name"] or in_game_id
                 country = d["country_id"]
                 last_login = d["last_login_at"]
                 days_inactive = _days_since(last_login)
@@ -391,12 +413,12 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                 if country != nl_country_id:
                     country_label = country_names.get(country, country)
                     wrong_country.append(
-                        f"• {member.mention} — land **{country_label}**"
+                        f"• {member.mention} ([{citizen_name}]({profile})) — land **{country_label}**"
                     )
 
                 if days_inactive is not None and days_inactive > _INACTIVITY_DAYS:
                     too_inactive.append(
-                        f"• {member.mention} — {int(days_inactive)} dagen inactief"
+                        f"• {member.mention} ([{citizen_name}]({profile})) — {int(days_inactive)} dagen inactief"
                     )
 
             # ── Section B: In-game Dutch citizens without 'nederlander' role ─
@@ -416,30 +438,10 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                     continue
 
                 if nederlander_role not in member.roles:
+                    profile = f"https://app.warera.io/user/{user_id}"
                     missing_role.append(
-                        f"• {member.mention} — in-game: **{citizen_name or user_id}**"
+                        f"• {member.mention} ([{citizen_name or user_id}]({profile}))"
                     )
-
-        # ── Section C: All in-game NL citizens who are inactive
-        # Shows Discord mention when an identity link exists, otherwise in-game name only.
-        inactive_ingame: list[str] = []
-        try:
-            ingame_inactive_rows = await self._db.get_inactive_citizens_in_country(
-                nl_country_id, _INACTIVITY_DAYS
-            )
-            for uid, name, days, discord_id in ingame_inactive_rows:
-                profile = f"https://app.warera.io/user/{uid}"
-                display_name = name or uid
-                if discord_id:
-                    inactive_ingame.append(
-                        f"• <@{discord_id}> ([{display_name}]({profile})) — {days} dagen inactief"
-                    )
-                else:
-                    inactive_ingame.append(
-                        f"• [{display_name}]({profile}) — {days} dagen inactief"
-                    )
-        except Exception:
-            logger.exception("citizenship_audit: failed querying in-game inactive citizens")
 
         # ── Build report ─────────────────────────────────────────────────────
         date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -468,10 +470,6 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
         lines.append("")
         lines.append("### 🎭 In-game Nederlanders zonder Discord rol")
         lines.extend(missing_role if missing_role else ["*Geen problemen gevonden.*"])
-
-        lines.append("")
-        lines.append(f"### 💤 In-game inactief ({_INACTIVITY_DAYS}+ dagen)")
-        lines.extend(inactive_ingame if inactive_ingame else ["*Geen problemen gevonden.*"])
 
         report = "\n".join(lines)
 
