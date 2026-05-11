@@ -164,7 +164,7 @@ class ProfielCog(CommandCogBase, name="profiel"):
         speler: str,
     ) -> None:
         """Fetch and display hidden player stats from getUserLite."""
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True)
 
         client = self._client
         if not client or client.is_available is False:
@@ -175,7 +175,7 @@ class ProfielCog(CommandCogBase, name="profiel"):
 
         if not profile:
             await interaction.followup.send(
-                f"❌ Speler **{speler}** niet gevonden.", ephemeral=True
+                f"❌ Speler **{speler}** niet gevonden."
             )
             return
 
@@ -232,6 +232,40 @@ class ProfielCog(CommandCogBase, name="profiel"):
         bounty_val = (rankings.get("userBounty") or {}).get("value")
         bounty_str = f"{bounty_val:,.2f} CC" if isinstance(bounty_val, (int, float)) else "onbekend"
 
+        # ── MU ────────────────────────────────────────────────────────
+        mu_str = "Geen"
+        mu_id_resolved: str | None = None
+        mu_name_resolved: str | None = None
+
+        # First try the DB (has cached mu_id + mu_name from periodic sync)
+        if self._db is not None and user_id:
+            try:
+                async with self._db._conn.execute(
+                    "SELECT mu_id, mu_name FROM citizen_levels WHERE user_id = ?",
+                    (user_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+                    if row and row[0]:
+                        mu_id_resolved = str(row[0])
+                        mu_name_resolved = str(row[1]) if row[1] else None
+            except Exception:
+                pass
+
+        # Fall back to the raw profile field (may be a string ID or a dict)
+        if not mu_id_resolved:
+            mu_raw = profile.get("mu")
+            if isinstance(mu_raw, str) and mu_raw:
+                mu_id_resolved = mu_raw
+            elif isinstance(mu_raw, dict):
+                mu_id_resolved = mu_raw.get("_id") or mu_raw.get("id") or mu_raw.get("muId")
+                mu_name_resolved = mu_raw.get("name") or mu_raw.get("title")
+                if mu_id_resolved:
+                    mu_id_resolved = str(mu_id_resolved)
+
+        if mu_id_resolved:
+            label = mu_name_resolved or mu_id_resolved
+            mu_str = f"[{label}](https://app.warera.io/military-unit/{mu_id_resolved})"
+
         # ── Embed ─────────────────────────────────────────────────────
         color = self._embed_colour()
         embed = discord.Embed(
@@ -264,10 +298,13 @@ class ProfielCog(CommandCogBase, name="profiel"):
         embed.add_field(name="📦 Cases geopend", value=cases_str, inline=True)
         embed.add_field(name="💎 Gems gekocht", value=gems_str, inline=True)
         embed.add_field(name="🎯 Bounty ontvangen", value=bounty_str, inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=False)  # spacer
+
+        embed.add_field(name="⚔️ Military Unit", value=mu_str, inline=False)
 
         embed.set_footer(text=f"ID: {user_id}")
 
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed)
 
 
 async def setup(bot) -> None:
