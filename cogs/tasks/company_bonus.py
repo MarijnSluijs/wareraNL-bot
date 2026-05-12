@@ -689,10 +689,9 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
             )
         except discord.Forbidden:
             logger.warning(
-                "company_move_advice: DM blocked for user %s, trying guild fallback",
+                "company_move_advice: DM blocked for user %s, skipping",
                 discord_user_id,
             )
-            await self._notify_via_guild(discord_user_id, guild_id, embed)
         except Exception as exc:
             logger.warning(
                 "company_move_advice: failed to DM user %s: %s", discord_user_id, exc
@@ -741,12 +740,10 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
                 company_id,
             )
         except discord.Forbidden:
-            # User has DMs disabled — try to find a fallback channel in the guild
             logger.warning(
-                "company_bonus_scan: DM blocked for user %s, trying guild fallback",
+                "company_bonus_scan: DM blocked for user %s, skipping",
                 discord_user_id,
             )
-            await self._notify_via_guild(discord_user_id, guild_id, embed)
         except Exception as exc:
             logger.warning(
                 "company_bonus_scan: failed to DM user %s: %s",
