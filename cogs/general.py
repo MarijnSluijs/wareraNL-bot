@@ -399,7 +399,25 @@ class General(commands.Cog, name="general"):
             if data:
                 emoji = self._COG_EMOJI.get(cog_name.lower(), "▪️")
                 header = f"{emoji} {cog_name.capitalize()}"
-                fields.append((header, "\n".join(data)))
+                # Discord embed field values are capped at 1024 characters.
+                # Split into multiple fields if needed.
+                chunk: list[str] = []
+                chunk_len = 0
+                part = 0
+                for line in data:
+                    # +1 for the newline separator
+                    if chunk and chunk_len + len(line) + 1 > 1024:
+                        part += 1
+                        field_name = f"{header} ({part})" if part > 1 else header
+                        fields.append((field_name, "\n".join(chunk)))
+                        chunk = []
+                        chunk_len = 0
+                    chunk.append(line)
+                    chunk_len += len(line) + 1
+                if chunk:
+                    part += 1
+                    field_name = f"{header} ({part})" if part > 1 else header
+                    fields.append((field_name, "\n".join(chunk)))
 
         if not fields:
             await context.send("Geen beschikbare commands gevonden.")
