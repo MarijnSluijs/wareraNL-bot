@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import discord
-from discord.ext import tasks
+from discord.ext import commands, tasks
 
 from cogs.tasks._base import TaskCogBase
 
@@ -421,6 +421,17 @@ class WarGuildStatusCog(TaskCogBase, name="war_guild_status"):
             text=f"Bijgewerkt: {now_str} UTC  •  Automatisch elk uur vernieuwd"
         )
         return emb
+
+
+    # ── Manual refresh command ────────────────────────────────────────────────
+
+    @commands.command(name="refreshdashboard", aliases=["rfd"])
+    @commands.is_owner()
+    async def refresh_dashboard(self, ctx: commands.Context) -> None:
+        """Force-refresh the war-guild dashboard right now (owner only)."""
+        async with ctx.typing():
+            await self._update_dashboard()
+        await ctx.message.add_reaction("✅")
 
 
 # ── Extension entry point ─────────────────────────────────────────────────────
