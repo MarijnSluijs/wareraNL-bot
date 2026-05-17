@@ -53,6 +53,8 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
         self._protected_ids: set[str] = set()  # NL + allies
         self._enemy_ids: set[str] = set()
         self._country_names: dict[str, str] = {}
+        # battle_id → (region_name | None, attacker_country_id | None, defender_country_id | None)
+        self._battle_cache: dict[str, tuple[str | None, str | None, str | None]] = {}
 
     def cog_load(self) -> None:
         self._contracts_poll.start()
@@ -77,6 +79,43 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
     # ------------------------------------------------------------------ #
     # Internals                                                            #
     # ------------------------------------------------------------------ #
+
+    async def _get_battle_info(
+        self, battle_id: str
+    ) -> tuple[str | None, str | None, str | None]:
+        """Return (region_name, attacker_country_id, defender_country_id)."""
+        if battle_id in self._battle_cache:
+            return self._battle_cache[battle_id]
+        try:
+            resp = await self._client.post(
+                "/battle.getById", json={"battleId": battle_id}
+            )
+            inner = resp.get("result", resp) if isinstance(resp, dict) else {}
+            data = inner.get("data", inner) if isinstance(inner, dict) else {}
+            if not isinstance(data, dict):
+                data = {}
+            defender = data.get("defender") or {}
+            attacker = data.get("attacker") or {}
+            region_id = str(defender.get("region") or "")
+            attacker_id = str(attacker.get("country") or "")
+            defender_id = str(defender.get("country") or "")
+            region_name: str | None = None
+            if region_id:
+                try:
+                    r_resp = await self._client.post(
+                        "/region.getById", json={"regionId": region_id}
+                    )
+                    r_inner = r_resp.get("result", r_resp) if isinstance(r_resp, dict) else {}
+                    r_data = r_inner.get("data", r_inner) if isinstance(r_inner, dict) else {}
+                    if isinstance(r_data, dict):
+                        region_name = r_data.get("name") or None
+                except Exception:
+                    pass
+            result = (region_name, attacker_id or None, defender_id or None)
+            self._battle_cache[battle_id] = result
+            return result
+        except Exception:
+            return (None, None, None)
 
     async def _preload_known_from_channel(self) -> None:
         """Scan recent channel messages and pre-populate _known so existing
@@ -275,6 +314,7 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
 
             # Skip re-post if nothing meaningful changed AND message still exists
             prev = self._known.get(auction_id)
+            is_new = prev is None  # only ping on the very first send
             if prev is not None:
                 prev_per_k, prev_budget, _prev_msg_id = prev
                 if abs(per_k - prev_per_k) < 0.01 and abs(budget - prev_budget) < 1:
@@ -311,10 +351,25 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
                 else ("verdediger" if for_side == "defender" else for_side or "?")
             )
 
+            # ── Fetch battle info (region + enemy) ────────────────────
+            region_name: str | None = None
+            enemy_id: str | None = None
+            if battle_id:
+                b_region, b_atk, b_def = await self._get_battle_info(battle_id)
+                region_name = b_region
+                if for_side == "attacker":
+                    enemy_id = b_def
+                elif for_side == "defender":
+                    enemy_id = b_atk
+
             lines: list[str] = [f"**Geplaatst door:** {placer_name}"]
             if for_country_id != placer_id:
                 lines.append(f"**Voor:** {for_country_name}")
             lines.append(f"**Zijde:** {side_nl}")
+            if region_name:
+                lines.append(f"**Regio:** {region_name}")
+            if enemy_id:
+                lines.append(f"**Tegenstander:** {_cname(enemy_id)}")
             if per_k > 0:
                 lines.append(f"**Vergoeding:** {per_k:g} CC per 1k schade")
             if budget > 0:
@@ -345,7 +400,8 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
                     ping_parts.append(r_all.mention)
                 if is_nl and r_nl:
                     ping_parts.append(r_nl.mention)
-            content = " ".join(ping_parts) if ping_parts else None
+            # Only ping on the very first send — not on edits or re-posts
+            content = " ".join(ping_parts) if (ping_parts and is_new) else None
 
             # ── Edit existing message or send new ─────────────────────
             if prev is not None and prev[2] is not None:
