@@ -429,9 +429,77 @@ class WarGuildStatusCog(TaskCogBase, name="war_guild_status"):
     @commands.is_owner()
     async def refresh_dashboard(self, ctx: commands.Context) -> None:
         """Force-refresh the war-guild dashboard right now (owner only)."""
+        try:
+            await ctx.message.delete()
+        except discord.Forbidden:
+            pass
         async with ctx.typing():
             await self._update_dashboard()
-        await ctx.message.add_reaction("✅")
+
+    # ── War status list command ───────────────────────────────────────────────
+
+    @commands.command(name="warstatus", aliases=["ws"])
+    @commands.is_owner()
+    async def war_status_list(self, ctx: commands.Context) -> None:
+        """Show everyone who clicked a war-status button (owner only)."""
+        try:
+            await ctx.message.delete()
+        except discord.Forbidden:
+            pass
+
+        rows = await self._db.get_all_war_statuses()
+        if not rows:
+            await ctx.send("Niemand heeft nog een status ingesteld.", delete_after=30)
+            return
+
+        ready_lines: list[str] = []
+        eco_lines: list[str] = []
+        for row in rows:
+            mention = f"<@{row['discord_user_id']}>"
+            ts = row["updated_at"][:16].replace("T", " ")  # "YYYY-MM-DD HH:MM"
+            line = f"{mention} `{ts}`"
+            if row["choice"] == "ready":
+                ready_lines.append(line)
+            else:
+                eco_lines.append(line)
+
+        embed = discord.Embed(title="⚔️ War Status — overzicht", colour=discord.Colour(0xFFB612))
+        embed.description = (
+            f"✅ **{len(ready_lines)} ready**  •  🌾 **{len(eco_lines)} eco**  "
+            f"*(totaal: {len(rows)})*"
+        )
+        if ready_lines:
+            # Split into 1024-char chunks
+            chunk, chunks = [], []
+            for line in ready_lines:
+                chunk.append(line)
+                if sum(len(l) + 1 for l in chunk) > 950:
+                    chunks.append(chunk)
+                    chunk = []
+            if chunk:
+                chunks.append(chunk)
+            for i, c in enumerate(chunks):
+                embed.add_field(
+                    name="✅ Ready" if i == 0 else "✅ Ready (vervolg)",
+                    value="\n".join(c),
+                    inline=False,
+                )
+        if eco_lines:
+            chunk, chunks = [], []
+            for line in eco_lines:
+                chunk.append(line)
+                if sum(len(l) + 1 for l in chunk) > 950:
+                    chunks.append(chunk)
+                    chunk = []
+            if chunk:
+                chunks.append(chunk)
+            for i, c in enumerate(chunks):
+                embed.add_field(
+                    name="🌾 Eco nodig" if i == 0 else "🌾 Eco nodig (vervolg)",
+                    value="\n".join(c),
+                    inline=False,
+                )
+        await ctx.send(embed=embed, delete_after=120)
 
 
 # ── Extension entry point ─────────────────────────────────────────────────────
