@@ -576,6 +576,17 @@ CREATE TABLE IF NOT EXISTS war_status_choices (
     updated_at      TEXT NOT NULL
 );
 
+-- citizen_mu_membership: authoritative user→MU mapping from the war-guild MU scan.
+-- Populated/replaced each scan cycle; used as fallback when citizen_levels.mu_name is null
+-- (e.g. for MU owners who don't follow daily orders and thus have no mu_name in the API).
+CREATE TABLE IF NOT EXISTS citizen_mu_membership (
+    in_game_user_id TEXT PRIMARY KEY,
+    mu_id           TEXT NOT NULL,
+    mu_name         TEXT NOT NULL,
+    role_type       TEXT NOT NULL,    -- 'owner' | 'commander' | 'member'
+    updated_at      TEXT NOT NULL
+);
+
 -- ── Web data freshness ────────────────────────────────────────────────────────
 -- Tracks when each named dataset was last refreshed by a task or manual trigger.
 -- Used by the rijksoverheid-web website to display "Last updated" and to power

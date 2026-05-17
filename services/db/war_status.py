@@ -37,17 +37,20 @@ class WarStatusMixin:
         """Per-MU war-status counts, joined with identity_links + citizen_levels.
 
         Returns a list of dicts with keys: mu_name, choice, count.
-        MU name falls back to '(geen MU)' when the player has no known MU.
+        Uses citizen_mu_membership (from MU scan) as fallback when
+        citizen_levels.mu_name is null (e.g. for MU owners who don't follow daily orders).
+        MU name falls back to '(geen MU)' when no MU can be determined.
         Players without a verified identity_link show up as '(onbekend)'.
         """
         sql = """
             SELECT
-                COALESCE(cl.mu_name, '(geen MU)') AS mu_name,
+                COALESCE(cl.mu_name, cmm.mu_name, '(geen MU)') AS mu_name,
                 wsc.choice,
                 COUNT(*) AS cnt
             FROM war_status_choices wsc
             LEFT JOIN identity_links il ON il.discord_user_id = wsc.discord_user_id
             LEFT JOIN citizen_levels cl ON cl.user_id = il.in_game_user_id
+            LEFT JOIN citizen_mu_membership cmm ON cmm.in_game_user_id = il.in_game_user_id
             GROUP BY mu_name, wsc.choice
             ORDER BY mu_name, wsc.choice
         """

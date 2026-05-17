@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 
 from cogs.tasks._base import TaskCogBase
@@ -424,6 +425,14 @@ class WarGuildStatusCog(TaskCogBase, name="war_guild_status"):
 
 
     # ── Manual refresh command ────────────────────────────────────────────────
+
+    @app_commands.command(name="rfd", description="Refresh het war-guild dashboard.")
+    @app_commands.default_permissions(administrator=True)
+    async def rfd_slash(self, interaction: discord.Interaction) -> None:
+        """Force-refresh the war-guild dashboard (admin only, ephemeral)."""
+        await interaction.response.defer(ephemeral=True)
+        await self._update_dashboard()
+        await interaction.followup.send("✅ Dashboard ververst.", ephemeral=True)
 
     @commands.command(name="refreshdashboard", aliases=["rfd"])
     @commands.is_owner()
