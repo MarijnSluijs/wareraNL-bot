@@ -51,8 +51,8 @@ class WarStatusMixin:
             LEFT JOIN identity_links il ON il.discord_user_id = wsc.discord_user_id
             LEFT JOIN citizen_levels cl ON cl.user_id = il.in_game_user_id
             LEFT JOIN citizen_mu_membership cmm ON cmm.in_game_user_id = il.in_game_user_id
-            GROUP BY mu_name, wsc.choice
-            ORDER BY mu_name, wsc.choice
+            GROUP BY 1, 2
+            ORDER BY 1, 2
         """
         rows: list[dict] = []
         async with self._conn.execute(sql) as cur:
