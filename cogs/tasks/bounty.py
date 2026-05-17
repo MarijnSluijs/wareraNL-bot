@@ -560,6 +560,11 @@ class BountyTasks(TaskCogBase, name="bounty_tasks"):
                 if msg.author != self.bot.user or not msg.embeds:
                     continue
                 embed = msg.embeds[0]
+                # Skip non-bounty messages (e.g. contract embeds) to avoid
+                # accidentally deleting them during bounty cleanup
+                footer_text = embed.footer.text if embed.footer else ""
+                if not footer_text.startswith("WarEra — bounty"):
+                    continue
                 url = embed.url or ""
                 m = _battle_url_re.search(url)
                 if not m:

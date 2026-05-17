@@ -48,11 +48,13 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
 
     def __init__(self, bot) -> None:
         self.bot = bot
-        # auction_id → (currentPerK, currentPayout, message_id | None)
-        self._known: dict[str, tuple[float, float, int | None]] = {}
+        # auction_id → (currentPerK, currentPayout, message_id | None, expires_ts | None)
+        self._known: dict[str, tuple[float, float, int | None, int | None]] = {}
         self._protected_ids: set[str] = set()  # NL + allies
         self._enemy_ids: set[str] = set()
         self._country_names: dict[str, str] = {}
+        # battle_id → (region_name | None, attacker_country_id | None, defender_country_id | None)
+        self._battle_cache: dict[str, tuple[str | None, str | None, str | None]] = {}
 
     def cog_load(self) -> None:
         self._contracts_poll.start()
@@ -78,6 +80,43 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
     # Internals                                                            #
     # ------------------------------------------------------------------ #
 
+    async def _get_battle_info(
+        self, battle_id: str
+    ) -> tuple[str | None, str | None, str | None]:
+        """Return (region_name, attacker_country_id, defender_country_id)."""
+        if battle_id in self._battle_cache:
+            return self._battle_cache[battle_id]
+        try:
+            resp = await self._client.post(
+                "/battle.getById", json={"battleId": battle_id}
+            )
+            inner = resp.get("result", resp) if isinstance(resp, dict) else {}
+            data = inner.get("data", inner) if isinstance(inner, dict) else {}
+            if not isinstance(data, dict):
+                data = {}
+            defender = data.get("defender") or {}
+            attacker = data.get("attacker") or {}
+            region_id = str(defender.get("region") or "")
+            attacker_id = str(attacker.get("country") or "")
+            defender_id = str(defender.get("country") or "")
+            region_name: str | None = None
+            if region_id:
+                try:
+                    r_resp = await self._client.post(
+                        "/region.getById", json={"regionId": region_id}
+                    )
+                    r_inner = r_resp.get("result", r_resp) if isinstance(r_resp, dict) else {}
+                    r_data = r_inner.get("data", r_inner) if isinstance(r_inner, dict) else {}
+                    if isinstance(r_data, dict):
+                        region_name = r_data.get("name") or None
+                except Exception:
+                    pass
+            result = (region_name, attacker_id or None, defender_id or None)
+            self._battle_cache[battle_id] = result
+            return result
+        except Exception:
+            return (None, None, None)
+
     async def _preload_known_from_channel(self) -> None:
         """Scan recent channel messages and pre-populate _known so existing
         contract posts are not re-sent after a bot restart."""
@@ -101,7 +140,7 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
                 if m:
                     auction_id = m.group(1)
                     if auction_id not in self._known:
-                        self._known[auction_id] = (0.0, 0.0, msg.id)
+                        self._known[auction_id] = (0.0, 0.0, msg.id, None)
         except Exception as exc:
             logger.warning("contracts_poll: could not preload channel history: %s", exc)
 
@@ -198,18 +237,21 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
             logger.warning("contracts_poll: channel %s not found in cache", channel_id)
             return
 
-        # ── Remove stale entries (auctions no longer in active response) ─
-        active_ids = {str(a.get("_id") or "") for a in auctions if a.get("_id")}
-        stale = {k: v for k, v in self._known.items() if k not in active_ids}
-        for stale_val in stale.values():
-            if stale_val[2]:
-                try:
-                    await _unping_and_delete(channel.get_partial_message(stale_val[2]))
-                except Exception:
-                    pass
-        self._known = {k: v for k, v in self._known.items() if k in active_ids}
-
         now = datetime.now(timezone.utc)
+        now_ts = int(now.timestamp())
+
+        # ── Remove contracts whose stored expiresAt has passed ────────
+        # (Don't remove based on API absence alone — contracts can briefly
+        # disappear from the response without actually being cancelled.)
+        for _exp_id, _exp_val in list(self._known.items()):
+            _exp_ts = _exp_val[3]
+            if _exp_ts is not None and _exp_ts <= now_ts:
+                if _exp_val[2]:
+                    try:
+                        await _unping_and_delete(channel.get_partial_message(_exp_val[2]))
+                    except Exception:
+                        pass
+                del self._known[_exp_id]
 
         # ── Process each auction ──────────────────────────────────────
         for auction in auctions:
@@ -275,16 +317,24 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
 
             # Skip re-post if nothing meaningful changed AND message still exists
             prev = self._known.get(auction_id)
+            is_new = prev is None  # only ping on the very first send
             if prev is not None:
-                prev_per_k, prev_budget, _prev_msg_id = prev
+                prev_per_k, prev_budget, _prev_msg_id, _prev_expires_ts = prev
                 if abs(per_k - prev_per_k) < 0.01 and abs(budget - prev_budget) < 1:
                     if _prev_msg_id is not None:
                         try:
                             await channel.fetch_message(_prev_msg_id)
+                            # Keep expires_ts fresh — a MU bid can extend the timer,
+                            # so the stored expiry must stay current or the expiry-
+                            # based cleanup will falsely remove the entry and re-ping.
+                            if expires_ts != _prev_expires_ts:
+                                self._known[auction_id] = (
+                                    prev_per_k, prev_budget, _prev_msg_id, expires_ts
+                                )
                             continue  # prices unchanged and message still present
                         except discord.NotFound:
                             # message was deleted externally; fall through to re-post
-                            prev = (prev_per_k, prev_budget, None)
+                            prev = (prev_per_k, prev_budget, None, _prev_expires_ts)
                             self._known[auction_id] = prev
                         except Exception:
                             continue  # unknown error; assume message is fine
@@ -311,10 +361,25 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
                 else ("verdediger" if for_side == "defender" else for_side or "?")
             )
 
+            # ── Fetch battle info (region + enemy) ────────────────────
+            region_name: str | None = None
+            enemy_id: str | None = None
+            if battle_id:
+                b_region, b_atk, b_def = await self._get_battle_info(battle_id)
+                region_name = b_region
+                if for_side == "attacker":
+                    enemy_id = b_def
+                elif for_side == "defender":
+                    enemy_id = b_atk
+
             lines: list[str] = [f"**Geplaatst door:** {placer_name}"]
             if for_country_id != placer_id:
                 lines.append(f"**Voor:** {for_country_name}")
             lines.append(f"**Zijde:** {side_nl}")
+            if region_name:
+                lines.append(f"**Regio:** {region_name}")
+            if enemy_id:
+                lines.append(f"**Tegenstander:** {_cname(enemy_id)}")
             if per_k > 0:
                 lines.append(f"**Vergoeding:** {per_k:g} CC per 1k schade")
             if budget > 0:
@@ -345,14 +410,15 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
                     ping_parts.append(r_all.mention)
                 if is_nl and r_nl:
                     ping_parts.append(r_nl.mention)
-            content = " ".join(ping_parts) if ping_parts else None
+            # Only ping on the very first send — not on edits or re-posts
+            content = " ".join(ping_parts) if (ping_parts and is_new) else None
 
             # ── Edit existing message or send new ─────────────────────
             if prev is not None and prev[2] is not None:
                 try:
                     partial = channel.get_partial_message(prev[2])
                     await partial.edit(content=content, embed=embed)
-                    self._known[auction_id] = (per_k, budget, prev[2])
+                    self._known[auction_id] = (per_k, budget, prev[2], expires_ts)
                     logger.info(
                         "contracts_poll: edited message %s for auction %s",
                         prev[2],
@@ -361,7 +427,7 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
                     continue
                 except discord.NotFound:
                     # Message was deleted; clear msg_id and fall through to re-send
-                    self._known[auction_id] = (per_k, budget, None)
+                    self._known[auction_id] = (per_k, budget, None, expires_ts)
                     prev = self._known[auction_id]
                 except Exception as exc:
                     logger.warning(
@@ -373,7 +439,7 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
 
             try:
                 msg = await channel.send(content=content, embed=embed)
-                self._known[auction_id] = (per_k, budget, msg.id)
+                self._known[auction_id] = (per_k, budget, msg.id, expires_ts)
                 logger.info(
                     "contracts_poll: posted auction %s (per_k=%.2f, budget=%.0f)",
                     auction_id,
@@ -386,7 +452,7 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
                     auction_id,
                     exc,
                 )
-                self._known[auction_id] = (per_k, budget, None)
+                self._known[auction_id] = (per_k, budget, None, expires_ts)
 
 
 async def setup(bot) -> None:
