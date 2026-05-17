@@ -79,6 +79,17 @@ CREATE TABLE IF NOT EXISTS known_mus (
     updated_at TEXT
 );
 
+-- war_mu_roles: Discord role IDs created for Dutch-owned MUs in the war guild
+--   Only used by the war_sync cog; safe to exist on the production bot (empty).
+CREATE TABLE IF NOT EXISTS war_mu_roles (
+    mu_id           TEXT NOT NULL,
+    role_type       TEXT NOT NULL,  -- 'owner', 'commander', 'member'
+    discord_role_id TEXT NOT NULL,
+    guild_id        TEXT NOT NULL,
+    mu_name         TEXT,
+    PRIMARY KEY (mu_id, role_type, guild_id)
+);
+
 -- ── Citizens ──────────────────────────────────────────────────────────────────
 
 -- citizen_levels: hourly snapshot of level, skill mode, and MU per citizen
@@ -243,9 +254,11 @@ CREATE TABLE IF NOT EXISTS battle_hits (
     recorded_at       TEXT NOT NULL,
     PRIMARY KEY (battle_id, user_id, side)
 );
-CREATE INDEX IF NOT EXISTS idx_battle_hits_user    ON battle_hits(user_id);
-CREATE INDEX IF NOT EXISTS idx_battle_hits_created ON battle_hits(battle_created_at);
-CREATE INDEX IF NOT EXISTS idx_battle_hits_battle  ON battle_hits(battle_id);
+CREATE INDEX IF NOT EXISTS idx_battle_hits_user         ON battle_hits(user_id);
+CREATE INDEX IF NOT EXISTS idx_battle_hits_created      ON battle_hits(battle_created_at);
+CREATE INDEX IF NOT EXISTS idx_battle_hits_battle       ON battle_hits(battle_id);
+-- Covering index for list_available_weeks: allows week-per-user lookup without full row scan
+CREATE INDEX IF NOT EXISTS idx_battle_hits_user_created ON battle_hits(user_id, battle_created_at);
 
 -- processed_battles: deduplication tracker for the daily battle poller
 CREATE TABLE IF NOT EXISTS processed_battles (
@@ -552,6 +565,15 @@ CREATE TABLE IF NOT EXISTS daily_dmg_processed (
     battle_id    TEXT PRIMARY KEY,
     battle_date  TEXT,
     processed_at TEXT NOT NULL
+);
+
+-- ── War guild status ─────────────────────────────────────────────────────────
+
+-- war_status_choices: per-player war-readiness choice set via buttons in the war guild
+CREATE TABLE IF NOT EXISTS war_status_choices (
+    discord_user_id TEXT PRIMARY KEY,
+    choice          TEXT NOT NULL,    -- 'ready' | 'eco'
+    updated_at      TEXT NOT NULL
 );
 
 -- ── Web data freshness ────────────────────────────────────────────────────────
