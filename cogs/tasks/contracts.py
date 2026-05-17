@@ -324,6 +324,13 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
                     if _prev_msg_id is not None:
                         try:
                             await channel.fetch_message(_prev_msg_id)
+                            # Keep expires_ts fresh — a MU bid can extend the timer,
+                            # so the stored expiry must stay current or the expiry-
+                            # based cleanup will falsely remove the entry and re-ping.
+                            if expires_ts != _prev_expires_ts:
+                                self._known[auction_id] = (
+                                    prev_per_k, prev_budget, _prev_msg_id, expires_ts
+                                )
                             continue  # prices unchanged and message still present
                         except discord.NotFound:
                             # message was deleted externally; fall through to re-post
