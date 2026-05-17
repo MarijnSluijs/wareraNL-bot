@@ -384,6 +384,12 @@ class General(commands.Cog, name="general"):
                 if cmd.name not in seen:
                     cog_commands.append(cmd)
                     seen.add(cmd.name)
+            # In privileged mode, also include hidden prefix commands (e.g. !rollen_check)
+            if privileged:
+                for cmd in cog.__cog_commands__:
+                    if getattr(cmd, "hidden", False) and cmd.name not in seen:
+                        cog_commands.append(cmd)
+                        seen.add(cmd.name)
             data = []
             for command in cog_commands:
                 is_priv = self._is_privileged(command)
@@ -391,8 +397,11 @@ class General(commands.Cog, name="general"):
                 # In normal mode: show ONLY non-privileged commands.
                 if is_priv != privileged:
                     continue
-                description = (command.description or "").partition("\n")[0]
-                name_str = f"`/{command.name}`"
+                description = (command.description or getattr(command, "brief", None) or getattr(command.callback, "__doc__", None) or "").partition("\n")[0]
+                # Use ! prefix for hidden prefix-only commands, / for slash/hybrid
+                is_hidden_prefix = getattr(command, "hidden", False)
+                prefix = "!" if is_hidden_prefix else "/"
+                name_str = f"`{prefix}{command.name}`"
                 line = f"{name_str} — {description}" if description else name_str
                 data.append(line)
 
