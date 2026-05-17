@@ -48,8 +48,8 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
 
     def __init__(self, bot) -> None:
         self.bot = bot
-        # auction_id → (currentPerK, currentPayout, message_id | None)
-        self._known: dict[str, tuple[float, float, int | None]] = {}
+        # auction_id → (currentPerK, currentPayout, message_id | None, expires_ts | None)
+        self._known: dict[str, tuple[float, float, int | None, int | None]] = {}
         self._protected_ids: set[str] = set()  # NL + allies
         self._enemy_ids: set[str] = set()
         self._country_names: dict[str, str] = {}
@@ -140,7 +140,7 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
                 if m:
                     auction_id = m.group(1)
                     if auction_id not in self._known:
-                        self._known[auction_id] = (0.0, 0.0, msg.id)
+                        self._known[auction_id] = (0.0, 0.0, msg.id, None)
         except Exception as exc:
             logger.warning("contracts_poll: could not preload channel history: %s", exc)
 
@@ -237,18 +237,21 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
             logger.warning("contracts_poll: channel %s not found in cache", channel_id)
             return
 
-        # ── Remove stale entries (auctions no longer in active response) ─
-        active_ids = {str(a.get("_id") or "") for a in auctions if a.get("_id")}
-        stale = {k: v for k, v in self._known.items() if k not in active_ids}
-        for stale_val in stale.values():
-            if stale_val[2]:
-                try:
-                    await _unping_and_delete(channel.get_partial_message(stale_val[2]))
-                except Exception:
-                    pass
-        self._known = {k: v for k, v in self._known.items() if k in active_ids}
-
         now = datetime.now(timezone.utc)
+        now_ts = int(now.timestamp())
+
+        # ── Remove contracts whose stored expiresAt has passed ────────
+        # (Don't remove based on API absence alone — contracts can briefly
+        # disappear from the response without actually being cancelled.)
+        for _exp_id, _exp_val in list(self._known.items()):
+            _exp_ts = _exp_val[3]
+            if _exp_ts is not None and _exp_ts <= now_ts:
+                if _exp_val[2]:
+                    try:
+                        await _unping_and_delete(channel.get_partial_message(_exp_val[2]))
+                    except Exception:
+                        pass
+                del self._known[_exp_id]
 
         # ── Process each auction ──────────────────────────────────────
         for auction in auctions:
@@ -316,7 +319,7 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
             prev = self._known.get(auction_id)
             is_new = prev is None  # only ping on the very first send
             if prev is not None:
-                prev_per_k, prev_budget, _prev_msg_id = prev
+                prev_per_k, prev_budget, _prev_msg_id, _prev_expires_ts = prev
                 if abs(per_k - prev_per_k) < 0.01 and abs(budget - prev_budget) < 1:
                     if _prev_msg_id is not None:
                         try:
@@ -324,7 +327,7 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
                             continue  # prices unchanged and message still present
                         except discord.NotFound:
                             # message was deleted externally; fall through to re-post
-                            prev = (prev_per_k, prev_budget, None)
+                            prev = (prev_per_k, prev_budget, None, _prev_expires_ts)
                             self._known[auction_id] = prev
                         except Exception:
                             continue  # unknown error; assume message is fine
@@ -408,7 +411,7 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
                 try:
                     partial = channel.get_partial_message(prev[2])
                     await partial.edit(content=content, embed=embed)
-                    self._known[auction_id] = (per_k, budget, prev[2])
+                    self._known[auction_id] = (per_k, budget, prev[2], expires_ts)
                     logger.info(
                         "contracts_poll: edited message %s for auction %s",
                         prev[2],
@@ -417,7 +420,7 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
                     continue
                 except discord.NotFound:
                     # Message was deleted; clear msg_id and fall through to re-send
-                    self._known[auction_id] = (per_k, budget, None)
+                    self._known[auction_id] = (per_k, budget, None, expires_ts)
                     prev = self._known[auction_id]
                 except Exception as exc:
                     logger.warning(
@@ -429,7 +432,7 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
 
             try:
                 msg = await channel.send(content=content, embed=embed)
-                self._known[auction_id] = (per_k, budget, msg.id)
+                self._known[auction_id] = (per_k, budget, msg.id, expires_ts)
                 logger.info(
                     "contracts_poll: posted auction %s (per_k=%.2f, budget=%.0f)",
                     auction_id,
@@ -442,7 +445,7 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
                     auction_id,
                     exc,
                 )
-                self._known[auction_id] = (per_k, budget, None)
+                self._known[auction_id] = (per_k, budget, None, expires_ts)
 
 
 async def setup(bot) -> None:
