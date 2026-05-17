@@ -115,7 +115,7 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
         try:
             resp = await self._client.post(
                 "/mercenaryContractAuction.getPaginatedAuctions",
-                json={"status": "active", "limit": 100, "page": 1},
+                json={"status": "active", "limit": 50, "page": 1},
             )
             inner = resp.get("result", resp) if isinstance(resp, dict) else {}
             data = inner.get("data", inner) if isinstance(inner, dict) else resp
