@@ -115,7 +115,7 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
         try:
             resp = await self._client.post(
                 "/mercenaryContractAuction.getPaginatedAuctions",
-                json={"status": "active", "limit": 100, "page": 1},
+                json={"status": "active", "limit": 50, "page": 1},
             )
             inner = resp.get("result", resp) if isinstance(resp, dict) else {}
             data = inner.get("data", inner) if isinstance(inner, dict) else resp
@@ -273,12 +273,22 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
                 auction.get("currentPayout") or auction.get("budget") or 0
             )
 
-            # Skip re-post if nothing meaningful changed
+            # Skip re-post if nothing meaningful changed AND message still exists
             prev = self._known.get(auction_id)
             if prev is not None:
                 prev_per_k, prev_budget, _prev_msg_id = prev
                 if abs(per_k - prev_per_k) < 0.01 and abs(budget - prev_budget) < 1:
-                    continue
+                    if _prev_msg_id is not None:
+                        try:
+                            await channel.fetch_message(_prev_msg_id)
+                            continue  # prices unchanged and message still present
+                        except discord.NotFound:
+                            # message was deleted externally; fall through to re-post
+                            prev = (prev_per_k, prev_budget, None)
+                            self._known[auction_id] = prev
+                        except Exception:
+                            continue  # unknown error; assume message is fine
+                    # _prev_msg_id is None: no current message, fall through to post
 
             # ── Build embed ───────────────────────────────────────────
             battle_id = str(auction.get("battle") or "")
@@ -349,6 +359,10 @@ class ContractsCog(TaskCogBase, name="contracts_tasks"):
                         auction_id,
                     )
                     continue
+                except discord.NotFound:
+                    # Message was deleted; clear msg_id and fall through to re-send
+                    self._known[auction_id] = (per_k, budget, None)
+                    prev = self._known[auction_id]
                 except Exception as exc:
                     logger.warning(
                         "contracts_poll: failed to edit message for auction %s, "

@@ -41,7 +41,7 @@
         "bot_mededelingen": 1474472809215299706,
         "mu_aanmelden": 1474452856584011929,
         "bounties": 1474452856584011929,
-        "contracts": 1493179198884548688,
+        "contracts": 1474452856584011929,
         "embassy_categories": [
             1474454272228982955,
             1496021477638672496,
@@ -71,5 +71,14 @@
     "owner_ids": [
         565626197048819731,
         230386541690748929
-    ]
+    ],
+    "war_guild": {
+        "guild_id":                    1505216404285030410,
+        "source_guild_id":             1401530718223335496,
+        "source_nederlander_role_id":  1456281070722093058,
+        "nederlander_role_id":         0,
+        "verify_channel_id":           1505218633431912710,
+        "admin_role_id":               1505218068861685840,
+        "verifier_url":                "http://wareranl-bot-verifier-bot-1:8765"
+    }
 }
