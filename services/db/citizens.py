@@ -1015,6 +1015,14 @@ class CitizensMixin:
                 rows.append(row[0])
         return rows
 
+    async def citizen_exists_in_country(self, user_id: str, country_id: str) -> bool:
+        """Return True if *user_id* appears in citizen_levels with *country_id*."""
+        async with self._conn.execute(
+            "SELECT 1 FROM citizen_levels WHERE user_id = ? AND country_id = ? LIMIT 1",
+            (user_id, country_id),
+        ) as cur:
+            return await cur.fetchone() is not None
+
     async def get_citizens_in_country(
         self, country_id: str
     ) -> list[tuple[str, str, Optional[str]]]:

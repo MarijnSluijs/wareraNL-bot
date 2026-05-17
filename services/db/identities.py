@@ -310,6 +310,31 @@ class IdentityLinksMixin:
                 )
         return results
     
+    async def get_all_identity_links(self) -> list[dict]:
+        """Return every row in identity_links across all guilds."""
+        sql = (
+            "SELECT discord_user_id, guild_id, in_game_user_id, nationality, request_type, "
+            "embassy_country, approved_by_discord_id, approved_at, updated_at "
+            "FROM identity_links"
+        )
+        results: list[dict] = []
+        async with self._conn.execute(sql) as cur:
+            async for row in cur:
+                results.append(
+                    {
+                        "discord_user_id": row[0],
+                        "guild_id": row[1],
+                        "in_game_user_id": row[2],
+                        "nationality": row[3],
+                        "request_type": row[4],
+                        "embassy_country": row[5],
+                        "approved_by_discord_id": row[6],
+                        "approved_at": row[7],
+                        "updated_at": row[8],
+                    }
+                )
+        return results
+
     async def delete_identity_link(self, discord_user_id: str) -> None:
         """Delete an identity mapping by Discord user ID."""
         await self._conn.execute(
