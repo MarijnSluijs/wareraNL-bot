@@ -203,6 +203,7 @@
       "title": "⚔️ Mercenary contracten",
       "color": "0xe67e22",
       "description": "Abonneer je op meldingen wanneer er een nieuw mercenary contract beschikbaar komt.\n\n**Contracten**: Alle contracten, zolang ze niet geplaatst zijn door een vijand van Nederland.\n**NL Contracten**: Alleen contracten direct geplaatst door Nederland of een bondgenoot.",
+      "exclusive": true,
       "buttons": [
         {
           "label": "Contracten",
