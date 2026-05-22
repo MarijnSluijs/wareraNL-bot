@@ -81,6 +81,20 @@ class PillTrackingMixin:
             )
         await self._conn.commit()
 
+    async def get_pill_tracking_bulk(self, user_ids: list[str]) -> dict[str, int | None]:
+        """Return {user_id: buff_expires_at} for the given user IDs."""
+        if not user_ids:
+            return {}
+        placeholders = ",".join("?" * len(user_ids))
+        result: dict[str, int | None] = {}
+        async with self._conn.execute(
+            f"SELECT user_id, buff_expires_at FROM citizen_pill_tracking WHERE user_id IN ({placeholders})",
+            tuple(user_ids),
+        ) as cur:
+            async for row_uid, expires_at in cur:
+                result[row_uid] = expires_at
+        return result
+
     async def get_pill_stats_from_tracking(
         self,
         *,

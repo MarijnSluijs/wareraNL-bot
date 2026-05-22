@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import discord
 from discord import app_commands
+from discord.ext import tasks
 
 from cogs.tasks._base import TaskCogBase
 
@@ -16,6 +17,26 @@ logger = logging.getLogger("discord_bot")
 class ResistanceCog(TaskCogBase, name="resistance"):
     def __init__(self, bot) -> None:
         self.bot = bot
+
+    def cog_load(self) -> None:
+        self.resistance_refresh.start()
+
+    def cog_unload(self) -> None:
+        self.resistance_refresh.cancel()
+
+    # ------------------------------------------------------------------ #
+    # Periodic auto-refresh (every 6 hours)                               #
+    # ------------------------------------------------------------------ #
+
+    @tasks.loop(hours=6)
+    async def resistance_refresh(self) -> None:
+        """Silently refresh the resistance state DB every 6 hours."""
+        await self.build_resistance_embed()
+
+    @resistance_refresh.before_loop
+    async def _before_resistance_refresh(self) -> None:
+        await self.bot.wait_until_ready()
+
 
     # ------------------------------------------------------------------ #
     # Slash command                                                        #

@@ -305,6 +305,7 @@ class BattleRankingsTask(TaskCogBase, name="battle_rankings_task"):
             hits_added = 0
             for side in ("attacker", "defender"):
                 entries = await self._fetch_battle_ranking(bid, side)
+                await asyncio.sleep(0.2)
                 for entry in entries:
                     uid = entry.get("user")
                     if not isinstance(uid, str) or not uid:
@@ -324,6 +325,7 @@ class BattleRankingsTask(TaskCogBase, name="battle_rankings_task"):
 
                 # Also fetch MU-level rankings to populate battle_mu_hits
                 mu_entries = await self._fetch_battle_ranking(bid, side, rtype="mu")
+                await asyncio.sleep(0.2)
                 for entry in mu_entries:
                     mu_raw = (
                         entry.get("mu")
@@ -354,6 +356,7 @@ class BattleRankingsTask(TaskCogBase, name="battle_rankings_task"):
                 # Fetch country-level rankings to populate battle_country_hits
                 # (credits damage to each player's home country — matches the game's own ranking)
                 country_entries = await self._fetch_battle_ranking(bid, side, rtype="country")
+                await asyncio.sleep(0.2)
                 for entry in country_entries:
                     cid_raw = (
                         entry.get("country")

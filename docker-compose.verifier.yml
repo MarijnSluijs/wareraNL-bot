@@ -1,0 +1,22 @@
+services:
+
+  # ── Verifier bot ─────────────────────────────────────────────────────────────
+  # Sits read-only in the production Discord server (members intent only,
+  # no slash commands).  Exposes a local HTTP API on VERIFIER_PORT (default 8765)
+  # so any process on the same host can call /check/{id} and /nederlanders.
+  #
+  # Run on the server where the production/staging Discord bot also runs:
+  #   docker compose -f docker-compose.verifier.yml up -d
+  #
+  # Required .env values: TOKEN_VERIFIER, VERIFIER_SECRET,
+  #                        VERIFIER_GUILD_ID, VERIFIER_ROLE_ID
+  verifier-bot:
+    build: .
+    image: warera-nl:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${VERIFIER_PORT:-8765}:8765"   # bind to all interfaces so remote clients can reach it
+    environment:
+      VERIFIER_BIND: "0.0.0.0"   # listen inside the container; port binding above restricts to localhost on the host
+    command: ["python", "verification_bot/main.py"]

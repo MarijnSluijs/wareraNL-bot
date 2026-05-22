@@ -248,7 +248,8 @@ class APIClient:
                                     "Bad request to %s with status 400 and non-JSON response",
                                     url,
                                 )
-                            continue
+                            self._record_failure(f"HTTP {status}", status=status)
+                            resp.raise_for_status()
 
                         # otherwise raise the status error
                         self._record_failure(f"HTTP {status}", status=status)

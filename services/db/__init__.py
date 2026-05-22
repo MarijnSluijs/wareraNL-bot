@@ -53,6 +53,8 @@ from .resistance import ResistanceMixin
 from .state import StateMixin
 from .trades import TradesMixin
 from .tx_cache import TxCacheMixin
+from .war_guild import WarGuildMixin
+from .war_status import WarStatusMixin
 from .wealth import WealthMixin
 
 
@@ -79,6 +81,8 @@ class Database(
     PillTrackingMixin,
     TxCacheMixin,
     TradesMixin,
+    WarGuildMixin,
+    WarStatusMixin,
     WealthMixin,
     FreshnessMixin,
     DatabaseBase,

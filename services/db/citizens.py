@@ -1092,4 +1092,39 @@ class CitizensMixin:
         ) as cur:
             async for row in cur:
                 rows.append((str(row[0]), row[1] or "", int(row[2] or 0), str(row[3]) if row[3] else None))
+
+    async def any_citizen_in_country(self, user_ids: list[str], country_id: str) -> bool:
+        """Return True if ANY of *user_ids* appears in citizen_levels with *country_id*.
+
+        Uses a single query with an IN clause; safe for large lists via chunking.
+        Returns False for an empty list.
+        """
+        if not user_ids:
+            return False
+        # SQLite supports up to ~999 bound parameters; chunk defensively.
+        chunk_size = 500
+        for i in range(0, len(user_ids), chunk_size):
+            chunk = user_ids[i : i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            async with self._conn.execute(
+                f"SELECT 1 FROM citizen_levels WHERE user_id IN ({placeholders})"
+                " AND country_id = ? LIMIT 1",
+                (*chunk, country_id),
+            ) as cur:
+                if await cur.fetchone() is not None:
+                    return True
+        return False
+
+    async def get_citizen_mu_from_levels(self, user_id: str) -> tuple[str, str] | None:
+        """Return (mu_id, mu_name) from citizen_levels for *user_id*, or None.
+
+        Used as a fallback when citizen_mu_membership has no row for this user.
+        """
+        async with self._conn.execute(
+            "SELECT mu_id, mu_name FROM citizen_levels"
+            " WHERE user_id = ? AND mu_id IS NOT NULL AND mu_name IS NOT NULL",
+            (user_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return (str(row[0]), str(row[1])) if row else None
         return rows
