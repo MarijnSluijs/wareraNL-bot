@@ -47,15 +47,15 @@ def _pill_field_value(stats: dict) -> str:
     parts: list[str] = []
     if buff:
         avg_str = _fmt_hm(stats["avg_buff_secs"])
-        parts.append(f"💊 In buff: **{buff}** (gem. {avg_str} over)")
+        parts.append(f"🟢 In buff: **{buff}** (gem. {avg_str} over)")
     else:
-        parts.append("💊 In buff: **0**")
+        parts.append("🟢 In buff: **0**")
     if debuff:
         avg_str = _fmt_hm(stats["avg_debuff_secs"])
-        parts.append(f"⏳ In debuff: **{debuff}** (gem. {avg_str} over)")
+        parts.append(f"🔴 In debuff: **{debuff}** (gem. {avg_str} over)")
     else:
-        parts.append("⏳ In debuff: **0**")
-    parts.append(f"❌ Geen actieve pil: **{none_}**")
+        parts.append("🔴 In debuff: **0**")
+    parts.append(f"⚪ Geen actieve pil: **{none_}**")
     parts.append(f"*(Totaal: {total} spelers)*")
     return "\n".join(parts)
 
@@ -203,8 +203,6 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                     buffs = (user_data or {}).get("buffs") or {}
                     buff_codes: list = buffs.get("buffCodes") or []
                     buff_end_at: str | None = buffs.get("buffEndAt")
-                    import math
-                    import time as _t
                     now_ts = _t.time()
                     if "cocain" in buff_codes and buff_end_at:
                         try:
@@ -212,9 +210,9 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                             from datetime import timezone as _tz
                             end_ts = _dt.fromisoformat(buff_end_at.replace("Z", "+00:00")).timestamp()
                             secs_left = max(0.0, end_ts - now_ts)
-                            pill_val = f"💊 In buff — nog {_fmt_hm(secs_left)}"
+                            pill_val = f"🟢 In buff — nog {_fmt_hm(secs_left)}"
                         except Exception:
-                            pill_val = "💊 In buff"
+                            pill_val = "🟢 In buff"
                     else:
                         debuff_duration = 16 * 3600
                         if buff_end_at:
@@ -224,13 +222,13 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                                 end_ts = _dt.fromisoformat(buff_end_at.replace("Z", "+00:00")).timestamp()
                                 debuff_left = max(0.0, end_ts + debuff_duration - now_ts)
                                 if debuff_left > 0:
-                                    pill_val = f"⏳ In debuff — nog {_fmt_hm(debuff_left)}"
+                                    pill_val = f"🔴 In debuff — nog {_fmt_hm(debuff_left)}"
                                 else:
-                                    pill_val = "❌ Geen actieve pil"
+                                    pill_val = "⚪ Geen actieve pil"
                             except Exception:
-                                pill_val = "❌ Geen actieve pil"
+                                pill_val = "⚪ Geen actieve pil"
                         else:
-                            pill_val = "❌ Geen actieve pil"
+                            pill_val = "⚪ Geen actieve pil"
                     embed.add_field(name="💊 Pill status", value=pill_val, inline=False)
                 except Exception:
                     pass
@@ -305,9 +303,13 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
 
             is_first_chunk = True
 
+            _GRN = "\033[32m"
+            _RED = "\033[31m"
+            _RST = "\033[0m"
+
             async def _flush_mu(lines: list[str]) -> None:
                 nonlocal is_first_chunk
-                block = "```\n" + "\n".join(lines) + "\n```"
+                block = "```ansi\n" + "\n".join(lines) + "\n```"
                 if is_first_chunk:
                     embed = discord.Embed(
                         title=f"Paraatheid — {mu_name}",
@@ -321,8 +323,8 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
 
             if has_live_stats:
                 # 3-space prefix matches: emoji (2 visual cols) + 1 space for all mode icons
-                header = f"   {'#':>{num_w}}  {'naam':<{name_w}}  {'lv':>{lvl_w}}  {'hp':>3}  {'hu':>2}  💊  cd"
-                sep = "─" * (3 + num_w + 2 + name_w + 2 + lvl_w + 2 + 3 + 2 + 2 + 2 + 1 + 2 + 5)
+                header = f"   {'#':>{num_w}}  {'naam':<{name_w}}  {'lv':>{lvl_w}}  {'hp':>3}  {'hu':>2}  💊  {'tijd':>7}"
+                sep = "─" * (3 + num_w + 2 + name_w + 2 + lvl_w + 2 + 3 + 2 + 2 + 2 + 1 + 2 + 7)
             else:
                 header = f"   {'#':>{num_w}}  {'naam':<{name_w}}  {'lv':>{lvl_w}}  cooldown"
                 sep = "─" * (3 + num_w + 2 + name_w + 2 + lvl_w + 2 + 16)
@@ -334,20 +336,36 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                 num = str(i).rjust(num_w)
                 name = str(p["citizen_name"] or "?")[:name_w].ljust(name_w)
                 lvl = str(p["level"] or "?").rjust(lvl_w)
-                if mode == "war":
-                    cd = "par"
-                elif p["can_reset"]:
-                    cd = "reset"
-                elif p["days_ago"] is not None:
-                    cd = f"{max(0.0, 7 - p['days_ago']):.1f}d"
-                else:
-                    cd = "reset"
                 if has_live_stats:
                     hp_str = str(int(p["health_cur"])) if p.get("health_cur") is not None else "  ?"
                     hu_str = str(int(p["hunger_cur"])) if p.get("hunger_cur") is not None else " ?"
-                    pill = p.get("pill_icon", "❌")
-                    line = f"{mode_char} {num}  {name}  {lvl}  {hp_str:>3}  {hu_str:>2}  {pill}  {cd}"
+                    pill_icon = p.get("pill_icon", "⚪")
+                    if pill_icon == "🟢":
+                        pill_str = f"{_GRN}●{_RST}"
+                    elif pill_icon == "🔴":
+                        pill_str = f"{_RED}●{_RST}"
+                    else:
+                        pill_str = "○"
+                    exp_ts = p.get("pill_expires_ts")
+                    if exp_ts is not None:
+                        secs_left = max(0.0, exp_ts - _t.time())
+                        raw_tijd = _fmt_hm(secs_left)
+                        if pill_icon == "🟢":
+                            tijd_str = f"{_GRN}{raw_tijd:>7}{_RST}"
+                        else:
+                            tijd_str = f"{_RED}{raw_tijd:>7}{_RST}"
+                    else:
+                        tijd_str = f"{'—':>7}"
+                    line = f"{mode_char} {num}  {name}  {lvl}  {hp_str:>3}  {hu_str:>2}  {pill_str}  {tijd_str}"
                 else:
+                    if mode == "war":
+                        cd = "par"
+                    elif p["can_reset"]:
+                        cd = "reset"
+                    elif p["days_ago"] is not None:
+                        cd = f"{max(0.0, 7 - p['days_ago']):.1f}d"
+                    else:
+                        cd = "reset"
                     line = f"{mode_char} {num}  {name}  {lvl}  {cd}"
                 candidate = "\n".join(pending + [line])
                 if len(candidate) > embed_limit_MU and len(pending) > 2:
@@ -358,23 +376,42 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
             if len(pending) > 2:
                 await _flush_mu(pending)
 
-            # Stats embed: tracking DB for pill/debuff (more reliable), live data for health/hunger/eco-cd
+            # Stats embed: pill from live data (any MU, incl. non-Dutch), health/hunger/eco-cd from live data
             stats_parts: list[str] = []
-            if self._db:
+            if has_live_stats:
+                # Compute pill stats directly from live player data — works for any MU
+                buff_players = [p for p in players if p.get("pill_icon") == "🟢"]
+                debuff_players = [p for p in players if p.get("pill_icon") == "🔴"]
+                buff_n = len(buff_players)
+                debuff_n = len(debuff_players)
+                none_n = len(players) - buff_n - debuff_n
+                now_live = _t.time()
+                buff_secs_l = [p["pill_expires_ts"] - now_live for p in buff_players if p.get("pill_expires_ts")]
+                debuff_secs_l = [p["pill_expires_ts"] - now_live for p in debuff_players if p.get("pill_expires_ts")]
+                buff_line = f"🟢 Pil actief: **{buff_n}**"
+                if buff_secs_l:
+                    buff_line += f" (gem. {_fmt_hm(sum(buff_secs_l) / len(buff_secs_l))} over)"
+                stats_parts.append(buff_line)
+                debuff_line = f"🔴 In debuff: **{debuff_n}**"
+                if debuff_secs_l:
+                    debuff_line += f" (gem. {_fmt_hm(sum(debuff_secs_l) / len(debuff_secs_l))} over)"
+                stats_parts.append(debuff_line)
+                stats_parts.append(f"⚪ Geen pil: **{none_n}**")
+            elif self._db:
                 try:
                     pill_stats = await self._db.get_pill_stats_from_tracking(mu_names=[mu_name])
                     buff_n = pill_stats["buff"]
                     debuff_n = pill_stats["debuff"]
                     none_n = pill_stats["none"]
-                    buff_line = f"💊 Pil actief: **{buff_n}**"
+                    buff_line = f"🟢 Pil actief: **{buff_n}**"
                     if buff_n and pill_stats.get("avg_buff_secs"):
                         buff_line += f" (gem. {_fmt_hm(pill_stats['avg_buff_secs'])} over)"
                     stats_parts.append(buff_line)
-                    debuff_line = f"⏳ In debuff: **{debuff_n}**"
+                    debuff_line = f"🔴 In debuff: **{debuff_n}**"
                     if debuff_n and pill_stats.get("avg_debuff_secs"):
                         debuff_line += f" (gem. {_fmt_hm(pill_stats['avg_debuff_secs'])} over)"
                     stats_parts.append(debuff_line)
-                    stats_parts.append(f"❌ Geen pil: **{none_n}**")
+                    stats_parts.append(f"⚪ Geen pil: **{none_n}**")
                 except Exception:
                     pass
             if has_live_stats:
@@ -556,9 +593,19 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                 try:
                     _nl_mu_names = list(_mu_types.keys())
                     pill_stats = await self._db.get_pill_stats_from_tracking(mu_names=_nl_mu_names)
+                    _sp: list[str] = []
+                    _bl = f"🟢 Pil actief: **{pill_stats['buff']}**"
+                    if pill_stats['buff'] and pill_stats.get('avg_buff_secs'):
+                        _bl += f" (gem. {_fmt_hm(pill_stats['avg_buff_secs'])} over)"
+                    _sp.append(_bl)
+                    _dl = f"🔴 In debuff: **{pill_stats['debuff']}**"
+                    if pill_stats['debuff'] and pill_stats.get('avg_debuff_secs'):
+                        _dl += f" (gem. {_fmt_hm(pill_stats['avg_debuff_secs'])} over)"
+                    _sp.append(_dl)
+                    _sp.append(f"⚪ Geen pil: **{pill_stats['none']}**")
                     pill_emb = discord.Embed(
-                        title="💊 Pill status — NL MUs",
-                        description=_pill_field_value(pill_stats),
+                        title="📊 Stats — NL MUs",
+                        description="\n".join(_sp),
                         colour=discord.Color.gold(),
                     )
                     await ctx.send(embed=pill_emb)
@@ -700,9 +747,19 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
         if self._db and nl_country_id_cfg and cid == nl_country_id_cfg:
             try:
                 pill_stats = await self._db.get_pill_stats_from_tracking(country_id=cid)
+                _sp2: list[str] = []
+                _bl2 = f"🟢 Pil actief: **{pill_stats['buff']}**"
+                if pill_stats['buff'] and pill_stats.get('avg_buff_secs'):
+                    _bl2 += f" (gem. {_fmt_hm(pill_stats['avg_buff_secs'])} over)"
+                _sp2.append(_bl2)
+                _dl2 = f"🔴 In debuff: **{pill_stats['debuff']}**"
+                if pill_stats['debuff'] and pill_stats.get('avg_debuff_secs'):
+                    _dl2 += f" (gem. {_fmt_hm(pill_stats['avg_debuff_secs'])} over)"
+                _sp2.append(_dl2)
+                _sp2.append(f"⚪ Geen pil: **{pill_stats['none']}**")
                 pill_emb = discord.Embed(
-                    title=f"💊 Pill status — {country_name}",
-                    description=_pill_field_value(pill_stats),
+                    title=f"📊 Stats — {country_name}",
+                    description="\n".join(_sp2),
                     colour=colour,
                 )
                 await ctx.send(embed=pill_emb)

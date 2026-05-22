@@ -25,6 +25,16 @@ class DatabaseBase:
         """Open the SQLite connection, create all tables, and apply migrations."""
         self._conn = await aiosqlite.connect(self.path)
 
+        # Performance tuning: map the whole DB into the OS page cache (avoids
+        # the internal 8 MB page cache round-trip for reads).  2 GB limit is
+        # enough for the current 2.3 GB db; the OS maps only what it needs.
+        await self._conn.execute("PRAGMA mmap_size=2147483648")   # 2 GB
+        # Keep a 64 MB in-process page cache as well (fallback / write buffer).
+        await self._conn.execute("PRAGMA cache_size=-65536")       # 64 MB
+        # Checkpoint the WAL every 200 pages instead of 1000 — keeps the WAL
+        # small (currently 760 MB) so reads don't need to scan a huge WAL file.
+        await self._conn.execute("PRAGMA wal_autocheckpoint=200")
+
         # Run main schema (all CREATE TABLE IF NOT EXISTS)
         schema_path = Path("database/schema.sql")
         with schema_path.open("r", encoding="utf-8") as f:

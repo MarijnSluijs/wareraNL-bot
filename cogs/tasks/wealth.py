@@ -127,11 +127,6 @@ class WealthTasks(TaskCogBase, name="wealth_tasks"):
     # ------------------------------------------------------------------ #
 
     async def _run_wealth_refresh(self) -> dict:
-        nl_country_id = self.config.get("nl_country_id")
-        if not nl_country_id:
-            logger.warning("wealth_refresh: nl_country_id not configured")
-            return {"saved": 0}
-
         logger.info("wealth_refresh: starting")
 
         # ── 1. Fetch global userWealth ranking ─────────────────────────
@@ -156,13 +151,14 @@ class WealthTasks(TaskCogBase, name="wealth_tasks"):
             if uid:
                 wealth_map[uid] = (wealth, name)
 
-        # ── 2. Get all NL citizens from DB ─────────────────────────────
-        citizens = await self._db.get_nl_citizen_ids(nl_country_id)
-        if not citizens:
-            logger.warning("wealth_refresh: no NL citizens in DB")
+        # ── 2. Get ALL citizens from DB (all countries) ─────────────────
+        # get_all_citizens_for_tips_scan returns [(user_id, country_id, citizen_name)]
+        all_citizens = await self._db.get_all_citizens_for_tips_scan()
+        if not all_citizens:
+            logger.warning("wealth_refresh: no citizens in DB")
             return {"saved": 0}
 
-        logger.info("wealth_refresh: processing %d NL citizens", len(citizens))
+        logger.info("wealth_refresh: processing %d citizens across all countries", len(all_citizens))
 
         now_str = datetime.now(timezone.utc).isoformat()
         today_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -171,14 +167,14 @@ class WealthTasks(TaskCogBase, name="wealth_tasks"):
         _BATCH = 20
         sem = asyncio.Semaphore(_BATCH)
 
-        async def _process_citizen(user_id: str, citizen_name: Optional[str]) -> None:
+        async def _process_citizen(user_id: str, country_id: str, citizen_name: Optional[str]) -> None:
             async with sem:
                 wealth_active, api_name = wealth_map.get(user_id, (0.0, None))
                 resolved_name = api_name or citizen_name
                 wealth_total = wealth_active  # inactive companies are now included in active
                 await self._db.upsert_citizen_wealth(
                     user_id=user_id,
-                    country_id=nl_country_id,
+                    country_id=country_id,
                     citizen_name=resolved_name,
                     wealth_active=wealth_active,
                     wealth_inactive=0.0,
@@ -186,14 +182,14 @@ class WealthTasks(TaskCogBase, name="wealth_tasks"):
                 )
                 await self._db.insert_wealth_snapshot(
                     user_id=user_id,
-                    country_id=nl_country_id,
+                    country_id=country_id,
                     citizen_name=resolved_name,
                     wealth_total=wealth_total,
                     snapshot_date=today_date,
                 )
 
-        await asyncio.gather(*[_process_citizen(uid, name) for uid, name in citizens])
-        saved = len(citizens)
+        await asyncio.gather(*[_process_citizen(uid, cid, name) for uid, cid, name in all_citizens])
+        saved = len(all_citizens)
 
         await self._db.flush_citizen_wealth()
         await self._db.flush_wealth_history()

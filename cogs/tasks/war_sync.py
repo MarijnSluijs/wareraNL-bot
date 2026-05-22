@@ -104,6 +104,9 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
         self._user_mu_roles: dict[str, dict[str, str]] = {}
         # {mu_id: {'owner': discord_role_id, 'commander': ..., 'member': ...}}
         self._mu_discord_role_ids: dict[str, dict[str, int]] = {}
+        # Prevents concurrent scan_dutch_mus calls (e.g. before_hourly_sync +
+        # daily_mu_scan_task both firing at startup).
+        self._scan_lock = asyncio.Lock()
 
         # Resolved at startup — may differ from config when the bot created the role.
         self._resolved_ned_role_id: Optional[int] = None
@@ -317,9 +320,12 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
                 return
 
         # Link Discord identity → in-game user so MU roles can be synced
+        in_game_id: Optional[str] = None
         if nickname and self._db:
             existing = await self._db.get_identity_link_by_discord(str(member.id))
-            if not existing:
+            if existing:
+                in_game_id = existing["in_game_user_id"]
+            else:
                 in_game_id = await self._lookup_in_game_id(nickname)
                 if in_game_id:
                     try:
@@ -344,8 +350,18 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
                         nickname, member.name,
                     )
 
-        # Also assign any MU roles we know about
-        await self._assign_mu_roles_for_member(member)
+        # Set in-game nickname
+        if nickname:
+            try:
+                await member.edit(nick=nickname, reason="war_sync: verificatie")
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                logger.debug("war_sync: cannot set nickname for %s: %s", member.name, exc)
+
+        # Assign MU roles — use DB path so it works regardless of in-memory cache state
+        if in_game_id:
+            await self._assign_mu_roles_from_db(member, in_game_id)
+        else:
+            await self._assign_mu_roles_for_member(member)
 
         await interaction.followup.send(
             "✅ Je bent geverifieerd als **Nederlander**! Welkom op de server.",
@@ -362,7 +378,7 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
         if not war_guild or member.guild.id != war_guild.id:
             return
 
-        has_ned = await self._verifier_check(member.id)
+        has_ned, nickname = await self._verifier_check_member(member.id)
         if not has_ned:
             return
 
@@ -374,9 +390,112 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
             except discord.Forbidden:
                 logger.warning("war_sync: cannot add Nederlander to %s — missing perms", member.name)
 
-        await self._assign_mu_roles_for_member(member)
+        # Set in-game nickname
+        if nickname:
+            try:
+                await member.edit(nick=nickname, reason="war_sync: auto-verificatie bij joinen")
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                logger.debug("war_sync: cannot set nickname for %s on join: %s", member.name, exc)
+
+        # Link identity and assign MU roles
+        in_game_id: Optional[str] = None
+        if nickname and self._db:
+            existing = await self._db.get_identity_link_by_discord(str(member.id))
+            if existing:
+                in_game_id = existing["in_game_user_id"]
+            else:
+                in_game_id = await self._lookup_in_game_id(nickname)
+                if in_game_id:
+                    try:
+                        await self._db.upsert_identity_link(
+                            discord_user_id=str(member.id),
+                            guild_id=str(war_guild.id),
+                            in_game_user_id=in_game_id,
+                            nationality="nederlander",
+                            request_type="war_verify",
+                            approved_by_discord_id=str(self.bot.user.id) if self.bot.user else "0",
+                            approved_at=datetime.now(timezone.utc).isoformat(),
+                        )
+                        logger.info(
+                            "war_sync: linked %s (%d) → in_game_id %s on join (nickname=%r)",
+                            member.name, member.id, in_game_id, nickname,
+                        )
+                    except Exception as exc:
+                        logger.warning("war_sync: failed to store identity link on join: %s", exc)
+                else:
+                    logger.warning(
+                        "war_sync: could not find in-game user for nickname %r on join (member %s)",
+                        nickname, member.name,
+                    )
+
+        if in_game_id:
+            await self._assign_mu_roles_from_db(member, in_game_id)
+        else:
+            await self._assign_mu_roles_for_member(member)
 
     # ── MU role helpers ───────────────────────────────────────────────────────
+
+    async def _assign_mu_roles_from_db(
+        self, member: discord.Member, in_game_id: str
+    ) -> None:
+        """Assign MU Discord roles using DB data — works even when the in-memory
+        cache hasn't been populated yet (e.g. right after a bot restart).
+
+        Looks up the citizen's MU membership from citizen_mu_membership, then
+        resolves Discord role IDs via the war_mu_roles table or by role name.
+        """
+        if not self._db:
+            return
+        war_guild = self._war_guild
+        if not war_guild:
+            return
+        try:
+            memberships = await self._db.get_mu_memberships_for_citizen(in_game_id)
+        except Exception as exc:
+            logger.warning("war_sync: failed to get MU memberships for %s: %s", in_game_id, exc)
+            return
+
+        # Fallback: citizen_mu_membership only contains users seen in the latest
+        # scan_dutch_mus run.  For users in Dutch MUs that the scan missed (e.g.
+        # the MU owner is foreign but all members are Dutch), fall back to
+        # citizen_levels.mu_id / mu_name which the data-fetcher keeps up-to-date.
+        if not memberships:
+            try:
+                mu_row = await self._db.get_citizen_mu_from_levels(in_game_id)
+                if mu_row:
+                    memberships = [(mu_row[0], mu_row[1], "member")]
+                    logger.debug(
+                        "war_sync: MU fallback via citizen_levels for %s → %s",
+                        in_game_id, mu_row[1],
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "war_sync: citizen_levels MU fallback failed for %s: %s", in_game_id, exc
+                )
+
+        for mu_id, mu_name, role_type in memberships:
+            # role_type is the specific role; owner/commander also get the member role
+            role_types_to_grant = [role_type]
+            if role_type in ("owner", "commander"):
+                role_types_to_grant.append("member")
+            for rt in role_types_to_grant:
+                # Try in-memory map first (fast path)
+                role_id = self._mu_discord_role_ids.get(mu_id, {}).get(rt)
+                if role_id:
+                    role = war_guild.get_role(role_id)
+                else:
+                    # Fall back: look up in war_mu_roles DB table, then by name
+                    stored = await self._get_war_mu_role(mu_id, rt, str(war_guild.id))
+                    role = war_guild.get_role(stored) if stored else None
+                    if not role:
+                        role = discord.utils.get(war_guild.roles, name=f"{mu_name} {rt.capitalize()}")
+                if role and role not in member.roles:
+                    try:
+                        await member.add_roles(role, reason=f"war_sync: MU-rol {rt}")
+                    except discord.Forbidden:
+                        logger.warning(
+                            "war_sync: cannot add role %s to %s", role.name, member.name
+                        )
 
     async def _assign_mu_roles_for_member(self, member: discord.Member) -> None:
         """Assign MU Discord roles to a single war guild member based on cached data."""
@@ -575,6 +694,19 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
 
         Returns the number of Dutch MUs processed.
         """
+        if self._scan_lock.locked():
+            logger.debug("war_sync: scan_dutch_mus already running, skipping concurrent call")
+            async with self._scan_lock:  # wait for the running scan to finish
+                pass
+            return len(self._user_mu_roles)
+        await self._scan_lock.acquire()
+        try:
+            return await self._scan_dutch_mus_body()
+        finally:
+            self._scan_lock.release()
+
+    async def _scan_dutch_mus_body(self) -> int:
+        """Inner implementation of scan_dutch_mus, called under the scan lock."""
         if not self._client:
             logger.warning("war_sync: API client not available for MU scan")
             return 0
@@ -613,13 +745,34 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
                 continue
             # Primary check: owner is in Dutch citizen_levels
             is_dutch = await self._is_dutch_citizen(owner_id)
-            # Fallback: if citizen_levels is unreliable/empty, treat any MU whose
+            # Fallback 1: if citizen_levels is unreliable/empty, treat any MU whose
             # Discord roles already exist in the war guild as Dutch (they were
             # classified Dutch in a previous scan when the DB was populated).
             if not is_dutch and war_guild:
                 if discord.utils.get(war_guild.roles, name=f"{mu_name} Member") is not None:
                     is_dutch = True
                     fallback_count += 1
+            # Fallback 2: check if any member/commander listed in the API response
+            # is a Dutch citizen in citizen_levels.  Catches MUs whose owner is
+            # foreign but whose membership is predominantly Dutch.
+            if not is_dutch and self._db and self._nl_country_id:
+                all_candidate_ids: list[str] = (
+                    ([owner_id] if owner_id else [])
+                    + list((detail.get("roles") or {}).get("commanders", []))
+                    + (detail.get("members") or [])
+                )
+                if all_candidate_ids:
+                    try:
+                        if await self._db.any_citizen_in_country(
+                            all_candidate_ids, self._nl_country_id
+                        ):
+                            is_dutch = True
+                            fallback_count += 1
+                    except Exception as exc:
+                        logger.warning(
+                            "war_sync: any_citizen_in_country check failed for %s: %s",
+                            mu_name, exc,
+                        )
             if is_dutch:
                 dutch_mus.append({
                     "mu_id": mu_info["mu_id"],
@@ -632,7 +785,7 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
                 })
 
         logger.info(
-            "war_sync: %d Dutch-owned MUs found (%d via citizen_levels, %d via Discord fallback)",
+            "war_sync: %d Dutch-owned MUs found (%d via citizen_levels owner, %d via fallbacks)",
             len(dutch_mus), len(dutch_mus) - fallback_count, fallback_count,
         )
 
@@ -664,16 +817,36 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
 
         # Deduplicate: in eRepublik a player can only be in ONE MU.
         # If the API returns the same user as owner/manager of multiple MUs,
-        # keep the highest-priority role; tie-break by mu_id for determinism.
+        # keep the highest-priority role.  For same-priority ties (e.g. "owner"
+        # in both old and new MU because the old MU list is stale), prefer the
+        # MU that citizen_levels.mu_id points to — that value comes from the
+        # per-citizen profile or refresh_mu_memberships and is fresher than a
+        # stale MU member list.  Fall back to alphabetical mu_id order only when
+        # citizen_levels has no data for this user.
         _ROLE_PRIO = {"owner": 0, "commander": 1, "member": 2}
         deduped: dict[str, dict[str, str]] = {}
         for uid, mu_map in new_user_mu_roles.items():
             if len(mu_map) <= 1:
                 deduped[uid] = mu_map
                 continue
-            best_mu_id, best_role = min(
-                mu_map.items(), key=lambda kv: (_ROLE_PRIO.get(kv[1], 99), kv[0])
-            )
+            # Try citizen_levels.mu_id as tiebreaker first
+            cl_mu_id: str | None = None
+            if self._db:
+                try:
+                    cl_row = await self._db.get_citizen_mu_from_levels(uid)
+                    if cl_row:
+                        cl_mu_id = cl_row[0]
+                except Exception as exc:
+                    logger.debug(
+                        "war_sync: citizen_levels tiebreak lookup failed for %s: %s", uid, exc
+                    )
+            if cl_mu_id and cl_mu_id in mu_map:
+                best_mu_id = cl_mu_id
+                best_role = mu_map[cl_mu_id]
+            else:
+                best_mu_id, best_role = min(
+                    mu_map.items(), key=lambda kv: (_ROLE_PRIO.get(kv[1], 99), kv[0])
+                )
             deduped[uid] = {best_mu_id: best_role}
             dropped = {mid: r for mid, r in mu_map.items() if mid != best_mu_id}
             logger.warning(
@@ -824,9 +997,22 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
                     continue
                 # Role was deleted externally; fall through to re-create
 
-            # Try to find by name
-            existing = discord.utils.get(war_guild.roles, name=role_name)
-            if existing:
+            # Try to find by name — also cleans up any duplicates created by
+            # concurrent scans (keep the stored ID if known, else keep the first).
+            all_by_name = [r for r in war_guild.roles if r.name == role_name]
+            if all_by_name:
+                canonical = next(
+                    (r for r in all_by_name if stored_id and r.id == stored_id),
+                    all_by_name[0],
+                )
+                for dup in all_by_name:
+                    if dup.id != canonical.id:
+                        try:
+                            await dup.delete(reason="war_sync: duplicate role cleanup")
+                            logger.info("war_sync: deleted duplicate role '%s' (id=%d)", dup.name, dup.id)
+                        except discord.Forbidden:
+                            logger.warning("war_sync: no permission to delete duplicate '%s'", dup.name)
+                existing = canonical
                 if existing.colour != colour:
                     try:
                         await existing.edit(colour=colour, reason="war_sync: kleur update")

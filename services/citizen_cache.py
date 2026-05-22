@@ -47,10 +47,11 @@ class CitizenCache:
             "/user.getUserLite",
             inputs,
             batch_size=batch_size,
-            chunk_sleep=0.0,
+            chunk_sleep=0.15,
         )
 
         recorded = 0
+        pill_tracking_rows: list[tuple] = []
         for i, (uid, obj) in enumerate(zip(user_ids, results)):
             lvl = self._extract_level(obj)
             mode = self._extract_skill_mode(obj)
@@ -73,6 +74,18 @@ class CitizenCache:
                 )
                 recorded += 1
 
+            # Collect pill tracking data (only store non-null buffEndAt to preserve debuff detection)
+            if isinstance(obj, dict):
+                _buffs = obj.get("buffs") or {}
+                _buff_end_at = _buffs.get("buffEndAt")
+                _exp_ts: int | None = None
+                if _buff_end_at:
+                    try:
+                        _exp_ts = int(datetime.fromisoformat(_buff_end_at.replace("Z", "+00:00")).timestamp())
+                    except Exception:
+                        pass
+                pill_tracking_rows.append((uid, country_id, _exp_ts, updated_at))
+
             if (i + 1) % (batch_size * 2) == 0:
                 await self._db.flush_citizen_levels()
                 if progress_msg:
@@ -89,6 +102,11 @@ class CitizenCache:
                         pass
 
         await self._db.flush_citizen_levels()
+        if pill_tracking_rows:
+            try:
+                await self._db.bulk_upsert_pill_tracking(pill_tracking_rows)
+            except Exception:
+                logger.warning("refresh_country: failed to persist pill tracking for %s", country_id)
         # Remove any citizens not seen in this refresh (they left the country)
         pruned = await self._db.prune_stale_citizens(country_id, updated_at)
         if pruned:
@@ -122,10 +140,14 @@ class CitizenCache:
 
         now = datetime.now(timezone.utc)
         now_ts = now.timestamp()
+        now_utc_str = now.isoformat()
         debuff_duration = 16 * 3600  # seconds
         players: list[dict] = []
-        for obj in results:
+        tracking_rows: list[tuple] = []
+        no_pill_entries: list[tuple[int, str]] = []  # (player_list_index, user_id)
+        for uid, obj in zip(member_ids, results):
             if not isinstance(obj, dict):
+                tracking_rows.append((uid, "", None, now_utc_str))
                 continue
             level = self._extract_level(obj)
             mode = self._extract_skill_mode(obj) or "eco"
@@ -160,17 +182,30 @@ class CitizenCache:
             buffs = obj.get("buffs") or {}
             buff_codes = buffs.get("buffCodes") or []
             buff_end_at = buffs.get("buffEndAt")
+            pill_expires_ts: float | None = None
             if "cocain" in buff_codes:
-                pill_icon = "💊"
+                pill_icon = "🟢"
+                if buff_end_at:
+                    try:
+                        pill_expires_ts = datetime.fromisoformat(buff_end_at.replace("Z", "+00:00")).timestamp()
+                    except Exception:
+                        pass
             elif buff_end_at:
                 try:
                     end_ts = datetime.fromisoformat(buff_end_at.replace("Z", "+00:00")).timestamp()
-                    pill_icon = "⏳" if end_ts + debuff_duration > now_ts else "❌"
+                    debuff_end = end_ts + debuff_duration
+                    if debuff_end > now_ts:
+                        pill_icon = "🔴"
+                        pill_expires_ts = debuff_end
+                    else:
+                        pill_icon = "⚪"
                 except Exception:
-                    pill_icon = "❌"
+                    pill_icon = "⚪"
             else:
-                pill_icon = "❌"
+                pill_icon = "⚪"
 
+            if pill_icon == "⚪":
+                no_pill_entries.append((len(players), uid))
             players.append(
                 {
                     "citizen_name": name or "?",
@@ -183,8 +218,38 @@ class CitizenCache:
                     "hunger_cur": hunger_cur,
                     "hunger_max": hunger_max,
                     "pill_icon": pill_icon,
+                    "pill_expires_ts": pill_expires_ts,
                 }
             )
+            # Build tracking row (uses raw buff_end_at from API)
+            exp: int | None = None
+            if buff_end_at:
+                try:
+                    exp = int(datetime.fromisoformat(buff_end_at.replace("Z", "+00:00")).timestamp())
+                except Exception:
+                    pass
+            tracking_rows.append((uid, "", exp, now_utc_str))
+
+        # DB fallback: live API may not return buffEndAt once the buff has expired.
+        # Check stored buff_expires_at to detect players still in the 16h debuff window.
+        if no_pill_entries and self._db:
+            try:
+                check_uids = [uid for _, uid in no_pill_entries]
+                tracking_map = await self._db.get_pill_tracking_bulk(check_uids)
+                for player_idx, uid in no_pill_entries:
+                    exp_db = tracking_map.get(uid)
+                    if exp_db is not None and exp_db < now_ts and exp_db + debuff_duration > now_ts:
+                        players[player_idx]["pill_icon"] = "🔴"
+                        players[player_idx]["pill_expires_ts"] = float(exp_db) + debuff_duration
+            except Exception:
+                logger.warning("fetch_mu_players_live: DB debuff fallback failed")
+
+        # Persist pill tracking data to DB so non-Dutch MU members are also tracked.
+        if self._db and tracking_rows:
+            try:
+                await self._db.bulk_upsert_pill_tracking(tracking_rows)
+            except Exception:
+                logger.warning("fetch_mu_players_live: failed to persist pill tracking")
 
         players.sort(key=lambda p: -(p["level"] or 0))
         return effective_name, players

@@ -14,6 +14,8 @@ services:
     # matching the Discord application whose client_id is wired up in .env
     # for the /admin OAuth flow.
     command: ["python", "bot.py", "--testing"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # allows reaching host ports (e.g. verifier-bot on 8765)
 
   # NOTE: the hourly all-countries data-fetcher service has been moved to
   # docker-compose.data-fetcher.yml so it can be enabled/disabled

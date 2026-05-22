@@ -481,7 +481,7 @@
                   "roundId": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "The unique identifier of the round"
+                    "description": "MongoDB ObjectId van de ronde. Vind roundIds in de response van battle.getById onder het veld 'roundIds' (lijst) of 'round.roundId' (huidige ronde). Alleen de hex-ID invullen, geen ?round= toevoegen."
                   }
                 },
                 "required": [
@@ -691,7 +691,8 @@
                 "properties": {
                   "itemOfferId": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "description": "MongoDB ObjectId van het aanbod. In-game niet zichtbaar. Verkrijg via de Markt-pagina (kolom tx_id in de database) of uit de response van itemTrading.getPrices / itemOffer.getAll. Gebruik het veld '_id' of 'offerId' uit die responses."
                   }
                 },
                 "required": [
@@ -1478,6 +1479,341 @@
                 },
                 "required": [
                   "userId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user.getUserById": {
+      "post": {
+        "tags": [
+          "user"
+        ],
+        "description": "Retrieves full user information by their numeric ID",
+        "summary": "Get user by ID",
+        "operationId": "user.getUserById",
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "description": "The unique identifier of the user"
+                  }
+                },
+                "required": [
+                  "userId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/battleOrder.getByBattle": {
+      "post": {
+        "tags": [
+          "battleOrder"
+        ],
+        "description": "Retrieves all battle orders for a specific battle",
+        "summary": "Get battle orders by battle ID",
+        "operationId": "battleOrder.getByBattle",
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "battleId": {
+                    "type": "string",
+                    "description": "The unique identifier of the battle"
+                  }
+                },
+                "required": [
+                  "battleId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/battleLootSummary.getByBattleAndUser": {
+      "post": {
+        "tags": [
+          "battleLootSummary"
+        ],
+        "description": "Retrieves the loot summary for a specific user in a specific battle",
+        "summary": "Get battle loot summary by battle and user",
+        "operationId": "battleLootSummary.getByBattleAndUser",
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "battleId": {
+                    "type": "string",
+                    "description": "The unique identifier of the battle"
+                  },
+                  "userId": {
+                    "type": "string",
+                    "description": "The unique identifier of the user"
+                  }
+                },
+                "required": [
+                  "battleId",
+                  "userId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/inventory.fetchCurrentEquipment": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "description": "Retrieves the currently equipped items of a user",
+        "summary": "Get currently equipped items",
+        "operationId": "inventory.fetchCurrentEquipment",
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "description": "The unique identifier of the user"
+                  }
+                },
+                "required": [
+                  "userId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mercenaryContractAuction.getPaginatedAuctions": {
+      "post": {
+        "tags": [
+          "mercenaryContractAuction"
+        ],
+        "description": "Retrieves active mercenary contract auctions with optional filters",
+        "summary": "Get mercenary contract auctions (paginated)",
+        "operationId": "mercenaryContractAuction.getPaginatedAuctions",
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "page": {
+                    "type": "number",
+                    "description": "Page number",
+                    "default": 1,
+                    "minimum": 1
+                  },
+                  "limit": {
+                    "type": "number",
+                    "description": "Results per page",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 100
+                  },
+                  "status": {
+                    "type": "string",
+                    "description": "Filter by auction status",
+                    "enum": [
+                      "active",
+                      "won",
+                      "expiredNoBids",
+                      "expiredBattle",
+                      "expiredRound",
+                      "cancelled"
+                    ]
+                  },
+                  "muId": {
+                    "type": "string",
+                    "description": "Filter by MU (military unit) ID"
+                  },
+                  "forCountry": {
+                    "type": "string",
+                    "description": "Filter by country ID (the country that posted the contract)"
+                  },
+                  "battleId": {
+                    "type": "string",
+                    "description": "Filter by battle ID"
+                  },
+                  "forCountrySide": {
+                    "type": "string",
+                    "description": "Filter by which side the contract is for",
+                    "enum": [
+                      "attacker",
+                      "defender"
+                    ]
+                  },
+                  "professionalsOnly": {
+                    "type": "boolean",
+                    "description": "Filter to contracts that require professional MUs only"
+                  },
+                  "sortBy": {
+                    "type": "string",
+                    "description": "Field to sort results by",
+                    "enum": [
+                      "createdAt",
+                      "expiresAt",
+                      "budget",
+                      "minimumDamage",
+                      "currentPerK",
+                      "duration"
+                    ]
+                  },
+                  "sortOrder": {
+                    "type": "string",
+                    "description": "Sort direction",
+                    "enum": [
+                      "asc",
+                      "desc"
+                    ],
+                    "default": "desc"
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tournament.getLastTournament": {
+      "post": {
+        "tags": [
+          "tournament"
+        ],
+        "description": "Retrieves the most recently created or active tournament",
+        "summary": "Get latest tournament",
+        "operationId": "tournament.getLastTournament",
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tournamentTeam.getById": {
+      "post": {
+        "tags": [
+          "tournamentTeam"
+        ],
+        "description": "Retrieves a tournament team by its ID",
+        "summary": "Get tournament team by ID",
+        "operationId": "tournamentTeam.getById",
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tournamentTeamId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The unique identifier of the tournament team"
+                  }
+                },
+                "required": [
+                  "tournamentTeamId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tournamentTeam.getByTournamentId": {
+      "post": {
+        "tags": [
+          "tournamentTeam"
+        ],
+        "description": "Retrieves all teams registered in a specific tournament",
+        "summary": "Get tournament teams by tournament ID",
+        "operationId": "tournamentTeam.getByTournamentId",
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tournamentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The unique identifier of the tournament"
+                  }
+                },
+                "required": [
+                  "tournamentId"
                 ],
                 "additionalProperties": false
               }
