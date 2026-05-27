@@ -872,10 +872,13 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
             # Try SR-value match in the recommended entries for this item
             ethics = sr_ethics_by_item.get(item, {}).get(country_sr, 0.0)
             if ethics > 0:
+                # ethicSpecializationBonus (Industrialist) deactivates region deposits,
+                # so region_pct must be zeroed out here to avoid double-counting.
                 bonus["ethics_pct"] = ethics
                 bonus["country_pct"] = country_sr
+                bonus["region_pct"] = 0.0
                 bonus["total_mult"] = (
-                    1.0 + (bonus["region_pct"] + country_sr + ethics) / 100.0
+                    1.0 + (country_sr + ethics) / 100.0
                 )
             elif item and spec_top_map.get(item, {}).get("country_id") == c_id:
                 # DB fallback: specialization_top stores the permanent leader per item,
@@ -883,10 +886,12 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 top_row = spec_top_map[item]
                 db_sr = float(top_row.get("strategic_bonus") or 0)
                 db_ethics = float(top_row.get("ethic_bonus") or 0)
+                # ethicSpecializationBonus (Industrialist) deactivates region deposits.
                 bonus["ethics_pct"] = db_ethics
                 bonus["country_pct"] = db_sr
+                bonus["region_pct"] = 0.0
                 bonus["total_mult"] = (
-                    1.0 + (bonus["region_pct"] + db_sr + db_ethics) / 100.0
+                    1.0 + (db_sr + db_ethics) / 100.0
                 )
             elif item and c_id and (item, c_id) in item_country_ethics:
                 # Broader DB fallback: country_item_ethic stores ethics for ALL countries
@@ -896,10 +901,12 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 country_sr = country_bonus_map.get(c_id, {}).get(
                     "sr_pct", bonus.get("country_pct", 0.0)
                 )
+                # ethicSpecializationBonus (Industrialist) deactivates region deposits.
                 bonus["ethics_pct"] = db_ethics
                 bonus["country_pct"] = country_sr
+                bonus["region_pct"] = 0.0
                 bonus["total_mult"] = (
-                    1.0 + (bonus["region_pct"] + country_sr + db_ethics) / 100.0
+                    1.0 + (country_sr + db_ethics) / 100.0
                 )
             elif (
                 item
@@ -915,10 +922,12 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 country_sr = country_bonus_map.get(c_id, {}).get(
                     "sr_pct", bonus.get("country_pct", 0.0)
                 )
+                # ethicSpecializationBonus (Industrialist) deactivates region deposits.
                 bonus["ethics_pct"] = spec_ethics
                 bonus["country_pct"] = country_sr
+                bonus["region_pct"] = 0.0
                 bonus["total_mult"] = (
-                    1.0 + (bonus["region_pct"] + country_sr + spec_ethics) / 100.0
+                    1.0 + (country_sr + spec_ethics) / 100.0
                 )
             elif c_id and c_id in country_bonus_map:
                 # SR + ethics from getAllCountries (ethics = countryProductionBonus.value - SR)
