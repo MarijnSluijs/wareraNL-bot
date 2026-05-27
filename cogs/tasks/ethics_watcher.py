@@ -424,42 +424,49 @@ class EthicsWatcherTasks(TaskCogBase, name="ethics_watcher_tasks"):
 
         Returns None if the country could not be found or the API call failed.
         """
+        country_list = await self._fetch_country_list()
+        return self._find_in_country_list(query.strip().lower(), country_list)
+
+    async def _fetch_country_list(self) -> list[dict]:
+        """Fetch all countries from the API, or return [] on failure."""
         if not self._client:
-            return None
+            return []
         try:
             resp = await asyncio.wait_for(
                 self._client.get("/country.getAllCountries"),
                 timeout=20.0,
             )
+            return _extract_country_list(resp)
         except Exception:
-            return None
-        country_list = _extract_country_list(resp)
-        q = query.strip().lower()
+            return []
+
+    @staticmethod
+    def _find_in_country_list(
+        query: str, country_list: list[dict]
+    ) -> tuple[str, str] | None:
+        """Match a lowercased query (code, _id, or name) against a country list."""
+        q = query.lower()
         for c in country_list:
             if (
                 (c.get("code") or "").lower() == q
                 or (c.get("_id") or "").lower() == q
                 or (c.get("name") or "").lower() == q
             ):
-                return (c.get("code") or "").lower(), c.get("name") or c.get("code") or q
+                code = (c.get("code") or "").lower()
+                name = c.get("name") or code or q
+                return code, name
         return None
 
-    async def _code_to_name_map(self) -> dict[str, str]:
-        """Return {code: name} for all countries, or {} on failure."""
-        if not self._client:
-            return {}
-        try:
-            resp = await asyncio.wait_for(
-                self._client.get("/country.getAllCountries"),
-                timeout=20.0,
-            )
-            return {
-                (c.get("code") or "").lower(): c.get("name") or c.get("code") or ""
-                for c in _extract_country_list(resp)
-                if c.get("code")
-            }
-        except Exception:
-            return {}
+    @staticmethod
+    def _resolve_stored_entry(
+        stored: str, country_list: list[dict]
+    ) -> tuple[str, str]:
+        """Resolve a stored value (code or legacy _id) to (canonical_code, name).
+
+        Falls back to (stored, stored) when the country cannot be identified.
+        """
+        result = EthicsWatcherTasks._find_in_country_list(stored, country_list)
+        return result if result is not None else (stored, stored)
 
     @commands.command(name="ethics_add", hidden=True)
     @commands.check(_owner_or_privileged)
@@ -489,16 +496,23 @@ class EthicsWatcherTasks(TaskCogBase, name="ethics_watcher_tasks"):
         if not self._db:
             await ctx.send("❌ Database niet beschikbaar.")
             return
-        resolved = await self._resolve_country(query)
+        country_list = await self._fetch_country_list()
+        resolved = self._find_in_country_list(query.strip().lower(), country_list)
         if resolved is None:
             await ctx.send(f"❌ Land `{query}` niet gevonden.")
             return
         code, name = resolved
         codes = await self._get_monitored_codes()
-        if code not in codes:
+        # The stored value may be the canonical code OR a legacy _id string —
+        # find whichever stored entry resolves to the same canonical code.
+        to_remove = next(
+            (s for s in codes if self._resolve_stored_entry(s, country_list)[0] == code),
+            None,
+        )
+        if to_remove is None:
             await ctx.send(f"ℹ️ **{name}** (`{code}`) staat niet op de bewakingslijst.")
             return
-        codes.discard(code)
+        codes.discard(to_remove)
         await self._save_monitored_codes(codes)
         await ctx.send(f"✅ **{name}** (`{code}`) verwijderd van de bewakingslijst.")
         logger.info("ethics_watcher: %s removed '%s' (%s) from monitored list", ctx.author, name, code)
@@ -515,10 +529,11 @@ class EthicsWatcherTasks(TaskCogBase, name="ethics_watcher_tasks"):
         if not codes:
             await ctx.send("De bewakingslijst is leeg.")
             return
-        name_map = await self._code_to_name_map()
-        lines = [
-            f"• **{name_map.get(c, c)}** (`{c}`)" for c in sorted(codes)
-        ]
+        country_list = await self._fetch_country_list()
+        lines = []
+        for stored in sorted(codes):
+            resolved_code, resolved_name = self._resolve_stored_entry(stored, country_list)
+            lines.append(f"• **{resolved_name}** (`{resolved_code}`)")
         await ctx.send("**Bewakingslijst:**\n" + "\n".join(lines))
 
     @commands.command(name="ethics_preview", hidden=True)
@@ -529,26 +544,18 @@ class EthicsWatcherTasks(TaskCogBase, name="ethics_watcher_tasks"):
             await ctx.send("❌ API client niet beschikbaar.")
             return
 
-        # Fetch country list to find the matching country
-        try:
-            resp = await asyncio.wait_for(
-                self._client.get("/country.getAllCountries"),
-                timeout=20.0,
-            )
-        except Exception as exc:
-            await ctx.send(f"❌ Kan landen niet ophalen: {exc}")
+        country_list = await self._fetch_country_list()
+        if not country_list:
+            await ctx.send("❌ Kan landen niet ophalen.")
             return
 
-        country_list = _extract_country_list(resp)
-        q = query.strip().lower()
+        resolved = self._find_in_country_list(query.strip().lower(), country_list)
+        if resolved is None:
+            await ctx.send(f"❌ Land `{query}` niet gevonden.")
+            return
+        _code, _name = resolved
         country = next(
-            (
-                c for c in country_list
-                if (c.get("code") or "").lower() == q
-                or (c.get("_id") or "").lower() == q
-                or (c.get("name") or "").lower() == q
-            ),
-            None,
+            c for c in country_list if (c.get("code") or "").lower() == _code
         )
         if country is None:
             await ctx.send(f"❌ Land `{query}` niet gevonden.")
