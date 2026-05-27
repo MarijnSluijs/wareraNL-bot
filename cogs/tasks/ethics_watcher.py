@@ -417,39 +417,91 @@ class EthicsWatcherTasks(TaskCogBase, name="ethics_watcher_tasks"):
     # Hidden prefix commands                                               #
     # ------------------------------------------------------------------ #
 
+    async def _resolve_country(
+        self, query: str
+    ) -> tuple[str, str] | None:
+        """Resolve a user-supplied string (code, _id, or name) to (code, name).
+
+        Returns None if the country could not be found or the API call failed.
+        """
+        if not self._client:
+            return None
+        try:
+            resp = await asyncio.wait_for(
+                self._client.get("/country.getAllCountries"),
+                timeout=20.0,
+            )
+        except Exception:
+            return None
+        country_list = _extract_country_list(resp)
+        q = query.strip().lower()
+        for c in country_list:
+            if (
+                (c.get("code") or "").lower() == q
+                or (c.get("_id") or "").lower() == q
+                or (c.get("name") or "").lower() == q
+            ):
+                return (c.get("code") or "").lower(), c.get("name") or c.get("code") or q
+        return None
+
+    async def _code_to_name_map(self) -> dict[str, str]:
+        """Return {code: name} for all countries, or {} on failure."""
+        if not self._client:
+            return {}
+        try:
+            resp = await asyncio.wait_for(
+                self._client.get("/country.getAllCountries"),
+                timeout=20.0,
+            )
+            return {
+                (c.get("code") or "").lower(): c.get("name") or c.get("code") or ""
+                for c in _extract_country_list(resp)
+                if c.get("code")
+            }
+        except Exception:
+            return {}
+
     @commands.command(name="ethics_add", hidden=True)
     @commands.check(_owner_or_privileged)
-    async def cmd_ethics_add(self, ctx: Context, country_code: str) -> None:
-        """Add a country code to the ethics watch list (production only)."""
-        code = country_code.strip().lower()
+    async def cmd_ethics_add(self, ctx: Context, *, query: str) -> None:
+        """Add a country to the ethics watch list (accepts code, ID, or name)."""
         if not self._db:
             await ctx.send("❌ Database niet beschikbaar.")
             return
+        resolved = await self._resolve_country(query)
+        if resolved is None:
+            await ctx.send(f"❌ Land `{query}` niet gevonden.")
+            return
+        code, name = resolved
         codes = await self._get_monitored_codes()
         if code in codes:
-            await ctx.send(f"ℹ️ `{code}` wordt al bewaakt.")
+            await ctx.send(f"ℹ️ **{name}** (`{code}`) wordt al bewaakt.")
             return
         codes.add(code)
         await self._save_monitored_codes(codes)
-        await ctx.send(f"✅ `{code}` toegevoegd aan de bewakingslijst.")
-        logger.info("ethics_watcher: %s added '%s' to monitored list", ctx.author, code)
+        await ctx.send(f"✅ **{name}** (`{code}`) toegevoegd aan de bewakingslijst.")
+        logger.info("ethics_watcher: %s added '%s' (%s) to monitored list", ctx.author, name, code)
 
     @commands.command(name="ethics_remove", hidden=True)
     @commands.check(_owner_or_privileged)
-    async def cmd_ethics_remove(self, ctx: Context, country_code: str) -> None:
-        """Remove a country code from the ethics watch list."""
-        code = country_code.strip().lower()
+    async def cmd_ethics_remove(self, ctx: Context, *, query: str) -> None:
+        """Remove a country from the ethics watch list (accepts code, ID, or name)."""
         if not self._db:
             await ctx.send("❌ Database niet beschikbaar.")
             return
+        resolved = await self._resolve_country(query)
+        if resolved is None:
+            await ctx.send(f"❌ Land `{query}` niet gevonden.")
+            return
+        code, name = resolved
         codes = await self._get_monitored_codes()
         if code not in codes:
-            await ctx.send(f"ℹ️ `{code}` staat niet op de bewakingslijst.")
+            await ctx.send(f"ℹ️ **{name}** (`{code}`) staat niet op de bewakingslijst.")
             return
         codes.discard(code)
         await self._save_monitored_codes(codes)
-        await ctx.send(f"✅ `{code}` verwijderd van de bewakingslijst.")
-        logger.info("ethics_watcher: %s removed '%s' from monitored list", ctx.author, code)
+        await ctx.send(f"✅ **{name}** (`{code}`) verwijderd van de bewakingslijst.")
+        logger.info("ethics_watcher: %s removed '%s' (%s) from monitored list", ctx.author, name, code)
 
     @commands.command(name="ethics_list", hidden=True)
     @commands.check(_owner_or_privileged)
@@ -460,20 +512,22 @@ class EthicsWatcherTasks(TaskCogBase, name="ethics_watcher_tasks"):
             await ctx.send("ℹ️ Test-modus: alle landen worden bewaakt.")
             return
         codes = await self._get_monitored_codes()
-        if codes:
-            await ctx.send(f"Bewakingslijst: `{', '.join(sorted(codes))}`")
-        else:
+        if not codes:
             await ctx.send("De bewakingslijst is leeg.")
+            return
+        name_map = await self._code_to_name_map()
+        lines = [
+            f"• **{name_map.get(c, c)}** (`{c}`)" for c in sorted(codes)
+        ]
+        await ctx.send("**Bewakingslijst:**\n" + "\n".join(lines))
 
     @commands.command(name="ethics_preview", hidden=True)
     @commands.check(_owner_or_privileged)
-    async def cmd_ethics_preview(self, ctx: Context, country_code: str) -> None:
-        """Force-send a sample ethics-change embed for the given country code."""
+    async def cmd_ethics_preview(self, ctx: Context, *, query: str) -> None:
+        """Force-send a sample ethics-change embed for the given country (code, ID, or name)."""
         if not self._client:
             await ctx.send("❌ API client niet beschikbaar.")
             return
-
-        code = country_code.strip().lower()
 
         # Fetch country list to find the matching country
         try:
@@ -486,15 +540,21 @@ class EthicsWatcherTasks(TaskCogBase, name="ethics_watcher_tasks"):
             return
 
         country_list = _extract_country_list(resp)
+        q = query.strip().lower()
         country = next(
-            (c for c in country_list if (c.get("code") or "").lower() == code),
+            (
+                c for c in country_list
+                if (c.get("code") or "").lower() == q
+                or (c.get("_id") or "").lower() == q
+                or (c.get("name") or "").lower() == q
+            ),
             None,
         )
         if country is None:
-            await ctx.send(f"❌ Land `{code}` niet gevonden.")
+            await ctx.send(f"❌ Land `{query}` niet gevonden.")
             return
         if not country.get("rulingParty"):
-            await ctx.send(f"❌ `{code}` heeft geen regerende partij.")
+            await ctx.send(f"❌ **{country.get('name', query)}** heeft geen regerende partij.")
             return
 
         # Fetch party data
@@ -522,7 +582,7 @@ class EthicsWatcherTasks(TaskCogBase, name="ethics_watcher_tasks"):
             "ethics":       new_ethics,
             "party_id":     country.get("rulingParty") or "",
             "party_name":   party_data.get("name") or "?",
-            "country_name": country.get("name") or code,
+            "country_name": country.get("name") or query,
         }
         # Use all-zero old state so every axis shows as "changed"
         old_entry: dict = {
