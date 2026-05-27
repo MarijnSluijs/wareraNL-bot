@@ -1821,6 +1821,192 @@
           }
         }
       }
+    },
+    "/party.getById": {
+      "post": {
+        "tags": [
+          "party"
+        ],
+        "description": "Retrieves detailed information about a specific political party",
+        "summary": "Get party by ID",
+        "operationId": "party.getById",
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "partyId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The unique identifier of the party"
+                  }
+                },
+                "required": [
+                  "partyId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/party.getManyPaginated": {
+      "post": {
+        "tags": [
+          "party"
+        ],
+        "description": "Retrieves a paginated list of political parties with optional filtering",
+        "summary": "Get parties with pagination",
+        "operationId": "party.getManyPaginated",
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "limit": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "description": "Maximum number of parties to return"
+                  },
+                  "cursor": {
+                    "type": "string",
+                    "description": "Pagination cursor for next page"
+                  },
+                  "countryId": {
+                    "type": "string",
+                    "description": "Filter parties by country ID"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/company.getProductionBonus": {
+      "post": {
+        "tags": [
+          "company"
+        ],
+        "description": "Retrieves the production bonus information for a specific company",
+        "summary": "Get company production bonus",
+        "operationId": "company.getProductionBonus",
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "companyId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The unique identifier of the company"
+                  }
+                },
+                "required": [
+                  "companyId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/company.getRecommendedRegionIdsByItemCode": {
+      "post": {
+        "tags": [
+          "company"
+        ],
+        "description": "Retrieves a ranked list of regions with production bonuses for a specific item code",
+        "summary": "Get recommended regions by item code",
+        "operationId": "company.getRecommendedRegionIdsByItemCode",
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "itemCode": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The item code to find recommended regions for"
+                  },
+                  "count": {
+                    "type": "number",
+                    "minimum": 1,
+                    "description": "Maximum number of regions to return"
+                  }
+                },
+                "required": [
+                  "itemCode"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/war.getById": {
+      "post": {
+        "tags": [
+          "war"
+        ],
+        "description": "Retrieves detailed information about a specific war",
+        "summary": "Get war by ID",
+        "operationId": "war.getById",
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "warId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The unique identifier of the war"
+                  }
+                },
+                "required": [
+                  "warId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
     }
   },
   "servers": [
