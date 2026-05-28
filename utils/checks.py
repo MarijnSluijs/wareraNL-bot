@@ -14,6 +14,29 @@ PRIVILEGED_ROLE_IDS: set[int] = {
     1475468331896148079,  # bot_ontwikkelaar
 }
 
+ADMIN_ROLE_ID: int = 1456410780256702600
+
+
+def is_owner_or_admin() -> app_commands.check:
+    """app_commands check: owner OR server admin role. Bypassed in test mode."""
+
+    async def predicate(interaction: discord.Interaction) -> bool:
+        bot = interaction.client
+        if getattr(bot, "testing", False):
+            return True
+        if not getattr(bot, "_owner_id_cached", None):
+            app_info = await bot.application_info()
+            bot._owner_id_cached = app_info.owner.id
+        if interaction.user.id == bot._owner_id_cached:
+            return True
+        if interaction.guild and isinstance(interaction.user, discord.Member):
+            if any(r.id == ADMIN_ROLE_ID for r in interaction.user.roles):
+                return True
+        raise app_commands.MissingPermissions(["owner_or_admin"])
+
+    return app_commands.check(predicate)
+
+
 def has_privileged_role() -> app_commands.check:
     """app_commands check: owner OR one of the privileged roles (bypassed in test mode)."""
 

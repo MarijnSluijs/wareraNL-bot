@@ -23,7 +23,7 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
 
-from utils.checks import PRIVILEGED_ROLE_IDS, has_privileged_role
+from utils.checks import PRIVILEGED_ROLE_IDS, has_privileged_role, is_owner_or_admin
 
 
 async def _owner_or_privileged(ctx: Context) -> bool:
@@ -380,7 +380,7 @@ class Owner(commands.Cog, name="owner"):
         datum="Startdatum in formaat DD-MM-JJJJ (bijv. 07-02-2026). Laat leeg voor 7 februari 2026.",
         met_reacties="Reacties tellen (standaard: ja). Zet op nee voor een snellere analyse zonder reacties.",
     )
-    @has_privileged_role()
+    @is_owner_or_admin()
     async def congres_analyse(
         self, interaction: discord.Interaction, datum: str = "07-02-2026", met_reacties: bool = True
     ) -> None:
