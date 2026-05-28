@@ -6,12 +6,20 @@ docker-compose.testing.yml
 docker-compose.websites.yml
 pyrightconfig.json
 database/database.db.backup.*
+database/*.json
+database/ranking_weekly/
 data/reddit_state.json
+data/mu_state.json
+data/mu_state.testing.json
 dashboard/
 api_dump.json
 scripts/
 TODO.md
 map-timeline/
+rijksoverheid_web/
+run_rijksoverheid_web.py
+*.code-workspace
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -163,3 +171,5 @@ cython_debug/
 # Log file
 discord.log
 *.csv
+
+docker-compose.data-fetcher.yml

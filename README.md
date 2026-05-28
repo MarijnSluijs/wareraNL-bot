@@ -3,227 +3,153 @@
 Staging: [![CI / Deploy](https://github.com/colgre/wareraNL-bot/actions/workflows/deploy.yml/badge.svg?branch=staging)](https://github.com/colgre/wareraNL-bot/actions/workflows/deploy.yml)    
 Live: [![CI / Deploy](https://github.com/colgre/wareraNL-bot/actions/workflows/deploy.yml/badge.svg)](https://github.com/colgre/wareraNL-bot/actions/workflows/deploy.yml)
 
-WareraNL is a Discord bot implemented in Python using cogs for modular features. This README explains the repository layout, purpose of the main folders and cogs, and how to run the bot in both production and testing modes.
+WareraNL is a Discord bot implemented in Python using cogs for modular features.
 
 ## Repository layout
 
-- `_api_keys.json` — local secret file for API keys (not tracked in VCS). Keep private.
-- `config.json` — main runtime configuration with `roles`, `channels`, colors and message templates.
-- `testing_config.json` — example/template config for a testing server (fill with IDs for your test guild).
+- `_api_keys.json` — local secret file for API keys (not tracked in VCS).
 - `bot.py` — main entrypoint. Supports `--testing` and config/token overrides.
-- `pyproject.toml` — Python project metadata and dependencies. Core deps under `[project]`, website extras under `[project.optional-dependencies] website`.
-
-- `cogs/` — Discord cogs (feature modules) loaded by the bot. See below for details.
-- `templates/` — JSON/MD templates used by the `standard_messages` cogs.
+- `pyproject.toml` — Python project metadata and dependencies.
+- `cogs/` — Discord cogs (feature modules).
+- `templates/` — JSON/MD templates used by the standard_messages cogs.
 - `database/` — SQLite schema and database backups.
-- `logs/` — runtime logs (configured to use relative paths so the repo is portable).
-- `scripts/` — small helper scripts and one-off runners used during development.
-- `services/` — small service modules used by scripts and cogs (DB client, API client, workers).
-
-## Cogs (features)
-
-- `cogs/embeds.py` — helpers for building rich Discord embeds used across cogs.
-- `cogs/general.py` — common commands and utilities for users and moderation hooks.
-- `cogs/owner.py` — commands restricted to the bot owner (restart, reload, admin tasks).
-- `cogs/poller.py` — scheduled tasks, polling, and background checks the bot performs.
-- `cogs/template.py` — helpers for loading and rendering message templates.
-- `cogs/welcome.py` — welcome flow, verification, ticket creation and approval/deny workflows.
-
-- `cogs/defensie/battles.py` — domain-specific feature (defensie) for battle tracking.
-- `cogs/role_selection/roles.py` — role-selection helpers (reaction or command-based role assignment).
-- `cogs/standard_messages/` — several files that render and post standard messages (intro, mu_bericht, dreigingsniveau, etc.).
-
-Notes:
-- Most cogs expect a single `bot.config` dictionary loaded at startup (from `config.json` or a chosen config). Role and channel IDs should be stored there to avoid hardcoded numeric IDs in multiple places.
+- `services/` — service modules used by cogs (DB client, API client, workers).
+- `verification_bot/` — verifier bot; see [verification_bot/README.md](verification_bot/README.md).
 
 ## Configuration
 
-- Put your live values into `config.json`. Keys of interest are `roles` and `channels`, both mapping friendly names to numeric Discord IDs.
-- `testing_config.json` is provided as an example for a test server — populate it with the test server's role/channel IDs.
-
-Secrets / tokens
-
-- The bot reads the Discord token from an environment variable (the default name is `TOKEN`). The startup CLI lets you override the env var name when running a testing instance.
+- `config/config.json` — main runtime config (`roles`, `channels`, colors, templates).
+- `config/testing_config.json` — config for the test server.
 
 ## Setup
 
-**1. Create a virtual environment and install dependencies**
+**1. Create a virtual environment**
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-# Core bot dependencies only:
 pip install -e .
-# Or include website dependencies too:
-pip install -e ".[website]"
 ```
 
-**2. Create your environment file**
+**2. Create `.env`**
 
-For production, create a `.env` file in the project root:
-
-```
-TOKEN=your_production_discord_bot_token
-PREFIX=!
-INVITE_LINK=https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID
+```bash
+cp .env.example .env
 ```
 
-For testing, create a `.env_test` file instead:
+| Variable | Description |
+|----------|-------------|
+| `TOKEN_TEST` | Token for the testing bot |
+| `TOKEN_VERIFIER` | Token for the verifier bot |
+| `VERIFIER_SECRET` | Shared secret — `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `VERIFIER_GUILD_ID` | Production server ID |
+| `VERIFIER_ROLE_ID` | Nederlander role ID in the production server |
 
-```
-TOKEN_TEST=your_test_discord_bot_token
-PREFIX=!
-INVITE_LINK=https://discord.com/oauth2/authorize?client_id=YOUR_TEST_CLIENT_ID
-```
-
-**3. Create the API keys file**
-
-Add your War Era API key to `_api_keys.json`. Create this file in the project root:
+**3. Create `_api_keys.json`**
 
 ```json
-{
-    "keys": [
-        "your_api_key_here"
-    ]
-}
+{ "keys": ["your_api_key_here"] }
 ```
 
-**4. Configure `config.json` / `testing_config.json`**
+**4. Configure `config/config.json`**
 
-Fill in the `roles` and `channels` sections with the numeric Discord IDs from your server.
+Fill in `roles` and `channels` with numeric Discord IDs.
 
-## Running with Docker Compose
+## Containers
 
-All services are built from the same `Dockerfile`. The compose setup is split into two files:
+All services use the `warera-nl:latest` image built from the repo root.
 
-| File | Purpose | Tracked in git |
-|------|---------|----------------|
-| `docker-compose.yml` | Production — bot only | ✅ yes |
-| `docker-compose.testing.yml` | Testing — bot only (`--testing` flag) | ❌ no |
-| `docker-compose.websites.yml` | Testing — websites | ❌ no |
+---
 
-The website compose files are gitignored because they reference local `.env_test` secrets.
+### discord-bot
 
-### Production (bot only)
+War-guild testing bot. Uses `config/testing_config.json` and `TOKEN_TEST`.
 
 ```bash
-docker compose build
-docker compose up -d
-```
+# Recreate
+docker build -t warera-nl:latest . && docker compose up -d --force-recreate discord-bot
 
-### Testing — Bot
+# Logs
+docker compose logs -f discord-bot
 
-```bash
-docker compose -f docker-compose.testing.yml build
-docker compose -f docker-compose.testing.yml up -d
-```
-
-### Testing — Websites
-
-```bash
-docker compose -f docker-compose.websites.yml build
-docker compose -f docker-compose.websites.yml up -d
-```
-
-Services restart automatically (`restart: unless-stopped`).
-
-### View logs
-
-```bash
-# Test bot only
-docker compose -f docker-compose.testing.yml logs -f discord-bot
-
-# Full testing stack
-docker compose -f docker-compose.testing.yml -f docker-compose.websites.yml logs -f
-
-# Individual website services
-docker compose -f docker-compose.websites.yml logs -f website
-docker compose -f docker-compose.websites.yml logs -f map-timeline
-```
-
-### Stop services
-
-```bash
-# Test bot only
-docker compose -f docker-compose.testing.yml down
-
-# Full testing stack
-docker compose -f docker-compose.testing.yml -f docker-compose.websites.yml down
+# Stop
+docker compose stop discord-bot
 ```
 
 ---
 
-## Running the bot
+### data-fetcher
 
-Basic (production):
-
-```bash
-python bot.py
-```
-
-Run with a specific config file:
+Hourly background fetcher for citizen levels, MU memberships, etc. Writes to `database/external.db`.
 
 ```bash
-python bot.py --config testing_config.json
+# Recreate
+docker build -t warera-nl:latest . && docker compose -f docker-compose.data-fetcher.yml up -d --force-recreate data-fetcher
+
+# Logs
+docker compose -f docker-compose.data-fetcher.yml logs -f data-fetcher
+
+# Stop
+docker compose -f docker-compose.data-fetcher.yml stop data-fetcher
 ```
 
-Start a testing instance (uses `testing_config.json` and can load `.env_test`):
+---
+
+### verifier-bot
+
+Read-only bot in the production server. See [verification_bot/README.md](verification_bot/README.md).
 
 ```bash
-python bot.py --testing
+# Recreate
+docker build -t warera-nl:latest . && docker compose -f docker-compose.verifier.yml up -d --force-recreate verifier-bot
+
+# Logs
+docker compose -f docker-compose.verifier.yml logs -f verifier-bot
+
+# Stop
+docker compose -f docker-compose.verifier.yml stop verifier-bot
 ```
 
-Common runtime flags (see `bot.py --help` for full list):
+---
 
-- `--testing` — use testing defaults and the testing config file.
-- `--config <path>` — explicitly set the config JSON to load.
-- `--token-env NAME` — set the name of the environment variable that holds the Discord token (useful for running two instances concurrently).
+### rijksoverheid-web
 
-Important: the bot will fail fast if the chosen token is not present. For convenience during local testing, place your test token in a `.env_test` file and use `--testing` so the token is loaded automatically.
+Public website served on port `8484`.
+
+```bash
+# Recreate
+docker build -t warera-nl:latest . && docker compose -f docker-compose.websites.yml up -d --force-recreate rijksoverheid-web
+
+# Logs
+docker compose -f docker-compose.websites.yml logs -f rijksoverheid-web
+
+# Stop
+docker compose -f docker-compose.websites.yml stop rijksoverheid-web
+```
+
+Environment overrides: `RW_HOST`, `RW_PORT` (default `8484`), `RW_DB_PATH`, `RW_CONFIG_PATH`.
+
+---
+
+## Running locally
+
+```bash
+python bot.py                          # production config
+python bot.py --testing                # testing config + TOKEN_TEST
+python bot.py --config my_config.json  # custom config
+```
 
 ## Database & backups
 
-- `database/schema.sql` — schema used to create the bot's SQLite database.
+- `database/schema.sql` — schema used to create the SQLite database.
 - Backups in `database/` are kept as timestamped `.backup` files.
 
 ## Development notes
 
-- Follow the pattern in `cogs/` when adding new features: encapsulate logic in a Cog, register it in `bot.py` or allow auto-loading from the `cogs/` folder.
-- Avoid hardcoding numeric role/channel IDs in code — add them to `config.json` and reference them from `bot.config`.
-
-## Admin dashboard (FastAPI)
-
-The repository now includes a dashboard app at `website/app`:
-
-```bash
-uvicorn website.app.main:app --reload --port 8000
-```
-
-Required env vars for Discord OAuth:
-
-- `DISCORD_CLIENT_ID`
-- `DISCORD_CLIENT_SECRET`
-- `DISCORD_REDIRECT_URI` (for example `http://127.0.0.1:8000/auth/callback`)
-- `PANEL_SESSION_SECRET`
-
-Panel-role mapping env vars (comma-separated Discord user IDs):
-
-- `PANEL_OWNER_IDS`
-- `PANEL_ADMIN_IDS`
-- `PANEL_MODERATOR_IDS`
-- `PANEL_ANALYST_IDS`
-
-Optional overrides:
-
-- `BOT_DB_PATH` (default `database/external.db`)
-- `BOT_LOG_PATH` (default `logs/discord.log`)
-- `BOT_CONFIG_PATH` (default `config/config.json`)
-- `PANEL_AUDIT_LOG_PATH` (default `website/data/panel_audit.jsonl`)
+- Encapsulate new features in a Cog and register it in `bot.py`.
+- Store role/channel IDs in `config.json`, never hardcode them.
 
 ## Contributing
 
-Please follow the codebase style, add tests for non-trivial logic, and keep secrets out of commits. If you'd like, I can add an example `CONTRIBUTING.md` with PR/checklist guidelines.
+Follow the codebase style, add tests for non-trivial logic, keep secrets out of commits.
 
----
-
-If you want a short quick-start script or example `config.json` for a test server, tell me which pieces to include and I will add them.
