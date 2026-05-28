@@ -31,6 +31,7 @@ Usage::
 
 from .article_tips import ArticleTipsMixin
 from .base import DatabaseBase
+from .eco_donations import EcoDonationsMixin
 from .battle_drops import BattleDropsMixin
 from .battle_rankings import BattleRankingsMixin
 from .citizens import CitizensMixin
@@ -59,6 +60,7 @@ from .wealth import WealthMixin
 
 
 class Database(
+    EcoDonationsMixin,
     DailyDmgMixin,
     GemsMixin,
     DiscordAlliesMixin,

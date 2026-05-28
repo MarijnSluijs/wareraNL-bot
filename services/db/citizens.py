@@ -717,6 +717,23 @@ class CitizensMixin:
                 return row[0]
         return None
 
+    async def get_citizen_name_mu_map(
+        self, country_id: str
+    ) -> dict[str, tuple[str | None, str | None]]:
+        """Return {user_id: (citizen_name, mu_name)} for all citizens in *country_id*.
+
+        Used by eco_donations overview to resolve player names and MU names in bulk
+        without individual per-player queries.
+        """
+        result: dict[str, tuple[str | None, str | None]] = {}
+        async with self._conn.execute(
+            "SELECT user_id, citizen_name, mu_name FROM citizen_levels WHERE country_id = ?",
+            (country_id,),
+        ) as cur:
+            async for row in cur:
+                result[str(row[0])] = (row[1], row[2])
+        return result
+
     async def get_citizen_mus(self) -> list[tuple[str, str]]:
         """Return [(user_id, mu_id)] for all citizens with a non-null mu_id."""
         rows: list[tuple[str, str]] = []

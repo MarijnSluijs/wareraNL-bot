@@ -55,6 +55,7 @@ class PeilCog(CommandCogBase, name="peil"):
             app_commands.Choice(name="artikelen", value="artikelen"),
             app_commands.Choice(name="wealth", value="wealth"),
             app_commands.Choice(name="backfill", value="backfill"),
+            app_commands.Choice(name="eco_donaties", value="eco_donaties"),
             app_commands.Choice(name="alles", value="alles"),
         ]
     )
@@ -113,6 +114,8 @@ class PeilCog(CommandCogBase, name="peil"):
             await self._peil_artikelen(ctx, land)
         if onderdeel == "backfill":
             await self._peil_backfill(ctx)
+        if onderdeel == "eco_donaties":
+            await self._peil_eco_donaties(ctx)
 
     # ------------------------------------------------------------------ #
     # Burgers subsystem                                                    #
@@ -656,6 +659,40 @@ class PeilCog(CommandCogBase, name="peil"):
                 logger.warning(
                     "peil globalluck: interaction token expired while reporting error"
                 )
+
+
+    # ------------------------------------------------------------------ #
+    # Eco donations subsystem                                              #
+    # ------------------------------------------------------------------ #
+
+    async def _peil_eco_donaties(self, ctx: Context) -> None:
+        cog = self.bot.get_cog("eco_donations_poller")
+        if not cog:
+            await ctx.send("❌ Eco-donatie poller cog niet geladen.", ephemeral=True)
+            return
+        status_msg = await ctx.send(
+            "🔄 Eco-donaties ophalen… (eerste keer kan lang duren)", ephemeral=True
+        )
+        try:
+            inserted = await cog.run_once()
+            done_text = f"✅ Eco-donaties gesynchroniseerd — {inserted} nieuwe transacties opgeslagen."
+            try:
+                await status_msg.edit(content=done_text)
+            except discord.HTTPException:
+                try:
+                    await ctx.channel.send(done_text)
+                except Exception:
+                    logger.warning("peil eco_donaties: could not post result")
+        except Exception as exc:
+            logger.exception("peil eco_donaties: error")
+            err_text = f"❌ Eco-donaties sync mislukt: {exc}"
+            try:
+                await status_msg.edit(content=err_text)
+            except discord.HTTPException:
+                try:
+                    await ctx.channel.send(err_text)
+                except Exception:
+                    logger.warning("peil eco_donaties: could not post error")
 
 
 async def setup(bot) -> None:
