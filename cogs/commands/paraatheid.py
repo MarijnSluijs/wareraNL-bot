@@ -297,7 +297,7 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
             has_live_stats = any(p.get("health_cur") is not None for p in players)
 
             embed_limit_MU = 3900
-            name_w = 14 if has_live_stats else 16
+            name_w = 10 if has_live_stats else 13
             lvl_w = 2
             num_w = len(str(total_mu))
 
@@ -312,7 +312,7 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                 block = "```ansi\n" + "\n".join(lines) + "\n```"
                 if is_first_chunk:
                     embed = discord.Embed(
-                        title=f"Paraatheid — {mu_name}",
+                        title=f"Paraatheid — {mu_name} — overzicht militaire eenheid",
                         description=summary_line + "\n" + block,
                         colour=colour,
                     )
@@ -323,8 +323,8 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
 
             if has_live_stats:
                 # 3-space prefix matches: emoji (2 visual cols) + 1 space for all mode icons
-                header = f"   {'#':>{num_w}}  {'naam':<{name_w}}  {'lv':>{lvl_w}}  {'hp':>3}  {'hu':>2}  💊  {'tijd':>7}"
-                sep = "─" * (3 + num_w + 2 + name_w + 2 + lvl_w + 2 + 3 + 2 + 2 + 2 + 1 + 2 + 7)
+                header = f"   {'#':>{num_w}} {'naam':<{name_w}} {'lv':>{lvl_w}} {'hp':>3} {'hu':>2} 💊 {'tijd':>7}"
+                sep = "─" * (3 + num_w + 1 + name_w + 1 + lvl_w + 1 + 3 + 1 + 2 + 1 + 1 + 1 + 7)
             else:
                 header = f"   {'#':>{num_w}}  {'naam':<{name_w}}  {'lv':>{lvl_w}}  cooldown"
                 sep = "─" * (3 + num_w + 2 + name_w + 2 + lvl_w + 2 + 16)
@@ -356,7 +356,7 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                             tijd_str = f"{_RED}{raw_tijd:>7}{_RST}"
                     else:
                         tijd_str = f"{'—':>7}"
-                    line = f"{mode_char} {num}  {name}  {lvl}  {hp_str:>3}  {hu_str:>2}  {pill_str}  {tijd_str}"
+                    line = f"{mode_char} {num} {name} {lvl} {hp_str:>3} {hu_str:>2} {pill_str} {tijd_str}"
                 else:
                     if mode == "war":
                         cd = "par"
@@ -477,8 +477,8 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                 await ctx.send(f"Databasefout: {exc}")
                 return
 
-            name_w_all = 16
-            hdr = f"{'naam':<{name_w_all}}  {'par':>5}  {'kan':>3}  {'≥15':>3}  {'≥20':>3}  {'avg':>5}"
+            name_w_all = 12
+            hdr = f"{'naam':<{name_w_all}}  {'par':>5}  {'kan':>3}  {'≥15':>3}  {'≥20':>3}  {'avg':>4}"
             sep = "─" * len(hdr)
 
             _cat_cfg = [
@@ -488,7 +488,7 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
             ]
 
             emb = discord.Embed(
-                title="Paraatheid — Alle NL MUs",
+                title="Paraatheid — overzicht alle NL militaire eenheden",
                 description="par = paraat / totaal  •  kan = kan nu resetten  •  ≥15/≥20 = paraat op lvl ≥15/≥20  •  avg = gem. wachttijd eco-spelers",
                 colour=discord.Color.gold(),
             )
@@ -513,7 +513,7 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                 for mu_name in mu_names_of_type:
                     stats = mu_stats.get(mu_name)
                     if stats is None:
-                        row = f"{mu_name[:name_w_all]:<{name_w_all}}  {'?':>5}  {'?':>3}  {'?':>3}  {'?':>3}  {'?':>5}"
+                        row = f"{mu_name[:name_w_all]:<{name_w_all}}  {'?':>5}  {'?':>3}  {'?':>3}  {'?':>3}  {'?':>4}"
                     else:
                         par_str = f"{stats['war']}/{stats['total']}"
                         kan_str = str(stats["can_reset"])
@@ -529,7 +529,7 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                             avg_str = f"{avg_rem:.1f}d"
                         else:
                             avg_str = "—"
-                        row = f"{mu_name[:name_w_all]:<{name_w_all}}  {par_str:>5}  {kan_str:>3}  {w15_str:>3}  {w20_str:>3}  {avg_str:>5}"
+                        row = f"{mu_name[:name_w_all]:<{name_w_all}}  {par_str:>5}  {kan_str:>3}  {w15_str:>3}  {w20_str:>3}  {avg_str:>4}"
                         total_par += stats["war"]
                         total_total += stats["total"]
                         total_kan += stats["can_reset"]
@@ -550,7 +550,7 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                         tot_avg_str = "—"
                     rows.append("─" * len(hdr))
                     rows.append(
-                        f"{'totaal':<{name_w_all}}  {tot_par_str:>5}  {tot_kan_str:>3}  {tot_w15_str:>3}  {tot_w20_str:>3}  {tot_avg_str:>5}"
+                        f"{'totaal':<{name_w_all}}  {tot_par_str:>5}  {tot_kan_str:>3}  {tot_w15_str:>3}  {tot_w20_str:>3}  {tot_avg_str:>4}"
                     )
 
                 # Split rows into chunks that each fit within Discord's 1024-char field limit
