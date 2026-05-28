@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -20,6 +21,10 @@ logger = logging.getLogger("discord_bot")
 
 def mus_path(testing: bool = False) -> str:
     return "templates/mus.testing.json" if testing else "templates/mus.json"
+
+
+def mu_state_path(testing: bool = False) -> str:
+    return "data/mu_state.testing.json" if testing else "data/mu_state.json"
 
 
 def _normalize_mu_type(value: str | None) -> str:
@@ -238,6 +243,7 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
         unless *force* is True.
         """
         path = mus_path(getattr(self.bot, "testing", False))
+        state_path = mu_state_path(getattr(self.bot, "testing", False))
 
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -256,7 +262,12 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
         )
 
         now = datetime.now(timezone.utc)
-        last_updated = self._parse_updated_at(data.get("mu_info_updated_at"))
+        try:
+            with open(state_path, "r", encoding="utf-8") as _sf:
+                _state = json.load(_sf)
+        except (FileNotFoundError, Exception):
+            _state = {}
+        last_updated = self._parse_updated_at(_state.get("mu_info_updated_at"))
         if not force and last_updated is not None:
             age_seconds = max(0.0, (now - last_updated).total_seconds())
             if age_seconds < max(0, min_age_seconds) and not has_missing_metadata:
@@ -319,7 +330,10 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
 
         data["embeds"] = entries
         data.setdefault("posted_message_ids", [])
-        data["mu_info_updated_at"] = now.isoformat()
+
+        os.makedirs(os.path.dirname(state_path), exist_ok=True)
+        with open(state_path, "w", encoding="utf-8") as _sf:
+            json.dump({"mu_info_updated_at": now.isoformat()}, _sf, indent=4)
 
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)

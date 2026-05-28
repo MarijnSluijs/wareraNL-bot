@@ -980,7 +980,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
 
             def _fmt_t(v: float) -> str:
                 """Format a CC value for table display — no 'CC' suffix."""
-                return f"{v:,.3f}"
+                return f"{v:.3f}"
 
             for company in companies:
                 company_id_co = company.get("_id", "")
@@ -1025,23 +1025,23 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     continue
 
                 embed = discord.Embed(
-                    title=f"Bedrijf: {discord.utils.escape_markdown(company_name)}",
+                    title=f"{discord.utils.escape_markdown(username)} — inkomsten werknemers bij bedrijven",
                     colour=colour,
                 )
                 bonus_footer_parts: list[str] = []
                 if region_pct:
-                    bonus_footer_parts.append(f"+{region_pct:.2f}% deposit")
+                    bonus_footer_parts.append(f"+{region_pct:.0f}% dep")
                 if country_pct:
-                    bonus_footer_parts.append(f"+{country_pct:.2f}% SR")
+                    bonus_footer_parts.append(f"+{country_pct:.0f}% SR")
                 if ethics_pct:
-                    bonus_footer_parts.append(f"+{ethics_pct:.2f}% ethiek")
+                    bonus_footer_parts.append(f"+{ethics_pct:.0f}% eth")
                 total_bonus_pct = region_pct + country_pct + ethics_pct
                 bonus_footer = (
-                    f"  |  Productiebonus: +{total_bonus_pct:.2f}%"
+                    f" | +{total_bonus_pct:.0f}%"
                     if total_bonus_pct
                     else ""
                 )
-                pp_footer = f"  |  {pp_pts:.0f} PP/item"
+                pp_footer = f" | {pp_pts:.0f} PP/item"
                 if item_mat_needs:
                     _mat_parts = []
                     _mat_total = 0.0
@@ -1050,15 +1050,16 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                         _cost = float(qty) * _unit
                         _mat_total += _cost
                         _mat_parts.append(f"{float(qty):.0f}× {mat} ({_fmt_cc(_unit)})")
-                    mat_footer = (
-                        "  |  Grondstoffen/item: "
+                    mat_line = (
+                        "mat: "
                         + ", ".join(_mat_parts)
-                        + f"  =  {_fmt_cc(_mat_total)}"
+                        + f" = {_fmt_cc(_mat_total)}"
                     )
                 else:
-                    mat_footer = ""
+                    mat_line = ""
+                _footer_line1 = f"{item_code} | {_fmt_cc(sell_price)}{bonus_footer}{pp_footer}"
                 embed.set_footer(
-                    text=f"Item: {item_code}  |  Marktprijs: {_fmt_cc(sell_price)}{bonus_footer}{pp_footer}{mat_footer}"
+                    text=_footer_line1 if not mat_line else f"{_footer_line1}\n{mat_line}"
                 )
 
                 total_revenue_co = 0.0
@@ -1172,7 +1173,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 )
 
                 # Build a combined aligned table: employees + breakeven section
-                _NAME_MAX = 14
+                _NAME_MAX = 8
                 _ANSI_GRN = "\u001b[0;32m"
                 _ANSI_RED = "\u001b[0;31m"
                 _ANSI_RST = "\u001b[0m"
@@ -1184,10 +1185,9 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     c = _ANSI_GRN if val >= 0 else _ANSI_RED
                     return f"{c}{s}{_ANSI_RST}"
 
-                # Each row: (ind, name, fid, wage_str, pp_val, pp_str, day_val, day_str)
+                # Each row: (name, fid, wage_str, pp_val, pp_str, day_val, day_str)
                 emp_rows_fmt = [
                     (
-                        r[0],
                         _trunc(r[1]),
                         r[2],
                         _fmt_t(r[3]),
@@ -1198,32 +1198,32 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     )
                     for r in rows
                 ]
-                name_w = max((len(r[1]) for r in emp_rows_fmt), default=9)
-                wage_w = max((len(r[3]) for r in emp_rows_fmt), default=5)
+                name_w = max((len(r[0]) for r in emp_rows_fmt), default=4)
+                wage_w = max((len(r[2]) for r in emp_rows_fmt), default=5)
                 pp_w = (
-                    max((len(r[5]) for r in emp_rows_fmt), default=1)
+                    max((len(r[4]) for r in emp_rows_fmt), default=1)
                     if emp_rows_fmt
                     else 1
                 )
                 day_w = (
-                    max((len(r[7]) for r in emp_rows_fmt), default=1)
+                    max((len(r[6]) for r in emp_rows_fmt), default=1)
                     if emp_rows_fmt
                     else 1
                 )
                 # header — units shown here (CC implied), not in cells
-                _W_wage = max(wage_w, 7)  # "loon/PP" = 7
-                _W_pp = max(pp_w, 8)  # "winst/PP" = 8
-                _W_day = max(day_w, 9)  # "winst/dag" = 9
+                _W_wage = max(wage_w, 4)  # "loon" = 4
+                _W_pp = max(pp_w, 4)  # "w/PP" = 4
+                _W_day = max(day_w, 5)  # "w/dag" = 5
                 hdr = (
-                    f"  {'Naam':<{name_w}}  fid"
-                    f" {'loon/PP':>{_W_wage}}"
-                    f" {'winst/PP':>{_W_pp}}"
-                    f" {'winst/dag':>{_W_day}}"
+                    f"{'Naam':<{name_w}} {'fid':>3}"
+                    f" {'loon':>{_W_wage}}"
+                    f" {'w/PP':>{_W_pp}}"
+                    f" {'w/dag':>{_W_day}}"
                 )
                 sep_w = len(hdr)
                 sep = "─" * sep_w
 
-                def _trow(ind, name, fid, wage_s, pp_val, pp_s, day_val, day_s):
+                def _trow(name, fid, wage_s, pp_val, pp_s, day_val, day_s):
                     pp_padded = f"{pp_s:>{_W_pp}}"
                     day_padded = f"{day_s:>{_W_day}}"
                     if pp_val is not None:
@@ -1231,7 +1231,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     if day_val is not None:
                         day_padded = _ansi_val(day_padded, day_val)
                     return (
-                        f"{ind} {name:<{name_w}} {fid:>2}/10"
+                        f"{name:<{name_w}} {fid:>3}"
                         f" {wage_s:>{_W_wage}}"
                         f" {pp_padded}"
                         f" {day_padded}"
@@ -1242,26 +1242,11 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 if emp_rows_fmt:
                     table_lines += [_trow(*r) for r in emp_rows_fmt]
                 else:
-                    table_lines.append(f"  {'Geen werknemers':<{sep_w - 2}}")
-                # Chunk into fields of ≤15 lines
-                chunk_size = 15
-                chunks = [
-                    table_lines[i : i + chunk_size]
-                    for i in range(0, len(table_lines), chunk_size)
-                ]
-                n_chunks = len(chunks)
-                base_name = f"Werknemers ({n_emp})"
-                for chunk_idx, chunk in enumerate(chunks):
-                    field_name = (
-                        base_name
-                        if n_chunks == 1
-                        else f"{base_name} (deel {chunk_idx + 1})"
-                    )
-                    embed.add_field(
-                        name=field_name,
-                        value="```ansi\n" + "\n".join(chunk) + "\n```",
-                        inline=False,
-                    )
+                    table_lines.append("Geen werknemers")
+                embed.description = (
+                    f"**{discord.utils.escape_markdown(company_name)}** — {n_emp} werknemers\n"
+                    "```ansi\n" + "\n".join(table_lines) + "\n```"
+                )
 
                 embeds.append(embed)
 
@@ -1329,32 +1314,38 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
 
             # Breakeven overview: one embed listing every company
             if breakeven_overview:
-                _B_NAME_MAX = 20
+                _B_NAME_MAX = 8
+                _B_ITEM_MAX = 7
 
                 def _btrunc(s: str) -> str:
                     return (
                         s if len(s) <= _B_NAME_MAX else s[: _B_NAME_MAX - 1] + "\u2026"
                     )
 
+                def _bitem(s: str) -> str:
+                    return (
+                        s if len(s) <= _B_ITEM_MAX else s[: _B_ITEM_MAX - 1] + "\u2026"
+                    )
+
                 bk_name_w = max(len(_btrunc(r[0])) for r in breakeven_overview)
-                bk_item_w = max(len(r[1]) for r in breakeven_overview)
+                bk_item_w = max(len(_bitem(r[1])) for r in breakeven_overview)
                 bk_f0_w = max(len(_fmt_t(r[2])) for r in breakeven_overview)
                 bk_f10_w = max(len(_fmt_t(r[3])) for r in breakeven_overview)
                 bk_hdr = (
-                    f"  {'Bedrijf':<{bk_name_w}}  {'item':<{bk_item_w}}"
-                    f"  {'fid 0/10':>{max(bk_f0_w, 7)}}"
-                    f"  {'fid 10/10':>{max(bk_f10_w, 8)}}"
+                    f" {'Bedrijf':<{bk_name_w}} {'item':<{bk_item_w}}"
+                    f" {'f0/10':>{max(bk_f0_w, 5)}}"
+                    f" {'f10/10':>{max(bk_f10_w, 6)}}"
                 )
                 bk_sep = "\u2500" * len(bk_hdr)
                 bk_lines = [bk_hdr, bk_sep]
                 for co_name, co_item, bf0, bf10 in breakeven_overview:
                     bk_lines.append(
-                        f"  {_btrunc(co_name):<{bk_name_w}}  {co_item:<{bk_item_w}}"
-                        f"  {_fmt_t(bf0):>{max(bk_f0_w, 7)}}"
-                        f"  {_fmt_t(bf10):>{max(bk_f10_w, 8)}}"
+                        f" {_btrunc(co_name):<{bk_name_w}} {_bitem(co_item):<{bk_item_w}}"
+                        f" {_fmt_t(bf0):>{max(bk_f0_w, 5)}}"
+                        f" {_fmt_t(bf10):>{max(bk_f10_w, 6)}}"
                     )
                 bk_embed = discord.Embed(
-                    title="Breakeven loon per bedrijf (CC/PP)",
+                    title=f"{discord.utils.escape_markdown(username)} — breakeven loon per bedrijf (CC/PP)",
                     description="```\n" + "\n".join(bk_lines) + "\n```",
                     colour=colour,
                 )
