@@ -600,3 +600,17 @@ CREATE TABLE IF NOT EXISTS data_freshness (
     source            TEXT,        -- 'task' | 'manual_web' | 'manual_discord'
     duration_ms       INTEGER
 );
+
+-- ── Eco donations cache ───────────────────────────────────────────────────────
+-- Hourly snapshot of NL donation transactions, populated by eco_donations_poller.
+-- The /eco_donaties command reads from this table instead of calling the API live.
+CREATE TABLE IF NOT EXISTS eco_donations (
+    txn_id       TEXT PRIMARY KEY,   -- SHA1 of (user_id|created_at|amount)
+    user_id      TEXT NOT NULL,
+    citizen_name TEXT,               -- resolved from citizen_levels at insert time
+    mu_name      TEXT,               -- resolved from citizen_levels at insert time
+    amount       REAL NOT NULL,
+    created_at   TEXT NOT NULL       -- ISO8601 UTC, e.g. 2026-05-01T12:34:56.000Z
+);
+CREATE INDEX IF NOT EXISTS idx_eco_donations_created_at ON eco_donations(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_eco_donations_mu_name    ON eco_donations(mu_name);
