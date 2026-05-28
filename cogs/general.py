@@ -255,7 +255,7 @@ class General(commands.Cog, name="general"):
             _nono = discord.utils.find(lambda e: e.name == "Nono", self.bot.emojis)
             _nono_str = str(_nono) if _nono else ":Nono:"
             try:
-                await message.channel.send(f"{_nono_str} moet je bij <@&1500230693186179084> zijn")
+                await message.channel.send(f"{_nono_str} moet je bij <@1500230693186179084> zijn")
             except discord.HTTPException as e:
                 self.bot.logger.error(f"Failed to handle samenvatting papi for {message.id}: {e}")
 
