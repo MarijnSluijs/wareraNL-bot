@@ -31,11 +31,6 @@ _INACTIVITY_DAYS = 3  # days without login → flagged in audit (≈72 h)
 
 # Marijn's Discord user ID (receives the weekly audit DM)
 _MARIJN_DISCORD_ID = 565626197048819731
-# captainwyvern's Discord user ID (also receives the weekly audit DM)
-_CAPTAINWYVERN_DISCORD_ID = 296971354807205888
-
-# All recipients of the citizenship audit DM
-_AUDIT_DM_RECIPIENTS: list[int] = [_MARIJN_DISCORD_ID, _CAPTAINWYVERN_DISCORD_ID]
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -328,7 +323,6 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
             return
 
         no_link: list[str] = []         # geen identity koppeling
-        not_in_db: list[str] = []        # niet gevonden in citizen DB
         wrong_country: list[str] = []    # geen Nederlander in-game
         too_inactive: list[str] = []     # inactief 5+ dagen
         missing_role: list[str] = []     # in-game Nederlanders zonder Discord rol
@@ -389,7 +383,7 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                 profile = f"https://app.warera.io/user/{in_game_id}"
                 d = details.get(in_game_id)
                 if not d:
-                    # citizen_levels has no entry — fetch username + lastConnectionAt via API
+                    # citizen_levels has no entry — check inactivity via live API
                     display_name = in_game_id
                     api_last_conn: str | None = None
                     if self._client:
@@ -406,8 +400,6 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                                 )
                         except Exception:
                             pass
-                    not_in_db.append(f"• {member.mention} ([{display_name}]({profile}))")
-                    # Also check inactivity via the API date even when not in DB
                     api_days = _days_since(api_last_conn)
                     if api_days is not None and api_days > _INACTIVITY_DAYS:
                         too_inactive.append(
@@ -465,9 +457,16 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
             except Exception:
                 logger.exception("citizenship_audit: failed loading previous snapshot")
 
+        def _inactive_days_key(line: str) -> int:
+            try:
+                return int(line.split(" dagen inactief")[0].rsplit(" ", 1)[-1])
+            except (ValueError, IndexError):
+                return 0
+
+        too_inactive.sort(key=_inactive_days_key, reverse=True)
+
         current_snapshot: dict[str, list[str]] = {
             "no_link": no_link,
-            "not_in_db": not_in_db,
             "wrong_country": wrong_country,
             "too_inactive": too_inactive,
             "missing_role": missing_role,
@@ -494,10 +493,8 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
 
         # ── Build report ─────────────────────────────────────────────────────
         date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-        ping = f"<@{_CAPTAINWYVERN_DISCORD_ID}>"
         lines: list[str] = [
             f"## 🇳🇱 Burgerschap Audit — {date_str}",
-            f"{ping} hier is de dagelijkse audit.",
             "",
         ]
 
@@ -507,7 +504,6 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
             all_resolved: list[str] = []
             _section_labels = {
                 "no_link": "Geen identity koppeling",
-                "not_in_db": "Niet gevonden in citizen DB",
                 "wrong_country": "Land veranderd",
                 "too_inactive": "Inactief",
                 "missing_role": "Mist Nederlander-rol",
@@ -536,13 +532,6 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
             "*Nederlander-rol maar geen in-game koppeling — gebruik `/approve` of `/identitylink`.*"
         )
         lines.extend(no_link if no_link else ["*Geen problemen gevonden.*"])
-
-        lines.append("")
-        lines.append("### 🔍 Niet gevonden in citizen DB")
-        lines.append(
-            "*Staat niet in de citizen DB — waarschijnlijk geen NL in-game burger, of inactief.*"
-        )
-        lines.extend(not_in_db if not_in_db else ["*Geen problemen gevonden.*"])
 
         lines.append("")
         lines.append("### 🌍 Geen Nederlander in-game (land veranderd)")
