@@ -423,6 +423,24 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                     too_inactive.append(
                         f"• {member.mention} ([{citizen_name}]({profile})) — {int(days_inactive)} dagen inactief"
                     )
+                elif days_inactive is None and self._client:
+                    # last_login_at is NULL in citizen_levels — fall back to live API
+                    try:
+                        raw = await self._client.get(
+                            "/user.getUserLite",
+                            params={"input": json.dumps({"userId": in_game_id})},
+                        )
+                        data = _unwrap_trpc(raw)
+                        if isinstance(data, dict):
+                            api_last_conn = (data.get("dates") or {}).get("lastConnectionAt")
+                            api_days = _days_since(api_last_conn)
+                            if api_days is not None and api_days > _INACTIVITY_DAYS:
+                                too_inactive.append(
+                                    f"• {member.mention} ([{citizen_name}]({profile}))"
+                                    f" — {int(api_days)} dagen inactief"
+                                )
+                    except Exception:
+                        pass
 
             # ── Section B: In-game Dutch citizens without 'nederlander' role ─
             try:
