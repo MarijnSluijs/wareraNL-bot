@@ -512,8 +512,11 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                 new_e, resolved_e = _delta(key)
                 for e in new_e:
                     all_new.append(f"• **[{label}]** {e.lstrip('• ')}")
-                for e in resolved_e:
-                    all_resolved.append(f"• **[{label}]** {e.lstrip('• ')}")
+                # Don't report "resolved" for inactivity — becoming active again
+                # is normal; the absence from the current list is sufficient.
+                if key != "too_inactive":
+                    for e in resolved_e:
+                        all_resolved.append(f"• **[{label}]** {e.lstrip('• ')}")
 
             lines.append("### 🔄 Wijzigingen t.o.v. vorige audit")
             if not all_new and not all_resolved:
