@@ -102,14 +102,32 @@ class ProfielCog(CommandCogBase, name="profiel"):
     async def _resolve_user(self, query: str) -> tuple[Optional[str], Optional[dict]]:
         """Resolve *query* (username) → (user_id, profile dict).
 
-        Tries exact match first, then closest candidate by name similarity.
-        Falls back to fuzzy DB search if the API returns nothing.
+        Resolution order:
+        1. Exact case-insensitive match in citizen_levels DB (autocomplete source).
+        2. API search → exact username match.
+        3. API search → best fuzzy ratio match.
+        4. DB fuzzy fallback (only when API returns no candidates).
         """
         q_low = query.strip().lower()
+
+        # 1. DB exact match — avoids the API returning a similarly-named player.
+        db = self._db
+        if db is not None:
+            try:
+                db_exact = await db.get_citizen_by_name_exact(query)
+                if db_exact:
+                    uid, _ = db_exact
+                    profile = await self._get_user_lite(uid)
+                    if profile is not None:
+                        return uid, profile
+            except Exception:
+                pass
+
+        # 2 & 3. API search
         user_ids = await self._search_user(query)
 
         if not user_ids:
-            db = self._db
+            # 4. DB fuzzy fallback
             if db is not None:
                 nl_country_id = self.config.get("nl_country_id")
                 try:

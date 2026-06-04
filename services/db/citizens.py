@@ -708,6 +708,20 @@ class CitizensMixin:
     
     # ── Eco donations ──────────────────────────────────────────────────
 
+    async def get_citizen_by_name_exact(
+        self, name: str
+    ) -> Optional[tuple[str, str]]:
+        """Return (user_id, citizen_name) for a case-insensitive exact name match."""
+        sql = (
+            "SELECT user_id, citizen_name FROM citizen_levels "
+            "WHERE lower(citizen_name) = lower(?) LIMIT 1"
+        )
+        async with self._conn.execute(sql, (name,)) as cur:
+            row = await cur.fetchone()
+            if row and row[0]:
+                return (row[0], row[1])
+        return None
+
     async def get_citizen_name_by_id(self, user_id: str) -> Optional[str]:
         """Return the citizen name for a given user_id, or None if not found."""
         sql = "SELECT citizen_name FROM citizen_levels WHERE user_id = ?"
@@ -744,6 +758,26 @@ class CitizensMixin:
                 rows.append((str(row[0]), str(row[1])))
         return rows
 
+    async def get_citizen_mu_names_for_users(
+        self, user_ids: list[str]
+    ) -> dict[str, str]:
+        """Return {user_id: mu_name} for the given user_ids (skips nulls).
+
+        Used as a per-citizen fallback when citizen_mu_membership is incomplete.
+        """
+        if not user_ids:
+            return {}
+        placeholders = ",".join("?" * len(user_ids))
+        result: dict[str, str] = {}
+        async with self._conn.execute(
+            f"SELECT user_id, mu_name FROM citizen_levels "
+            f"WHERE user_id IN ({placeholders}) AND mu_name IS NOT NULL",
+            user_ids,
+        ) as cur:
+            async for row in cur:
+                result[str(row[0])] = str(row[1])
+        return result
+
     async def get_nl_citizens_mu_info(
         self, country_id: str
     ) -> list[tuple[str, str | None]]:
@@ -759,6 +793,27 @@ class CitizensMixin:
         ) as cur:
             async for row in cur:
                 rows.append((str(row[0]), str(row[1]) if row[1] else None))
+        return rows
+
+    async def get_active_nl_citizens(
+        self, country_id: str, min_level: int = 20, max_hours_inactive: int = 72
+    ) -> list[tuple[str, str, int]]:
+        """Return [(user_id, citizen_name, level)] for all active NL citizens (no MU filter)."""
+        rows: list[tuple[str, str, int]] = []
+        async with self._conn.execute(
+            """
+            SELECT user_id, COALESCE(citizen_name, user_id), level
+            FROM citizen_levels
+            WHERE country_id = ?
+              AND level >= ?
+              AND last_login_at IS NOT NULL
+              AND datetime(last_login_at) >= datetime('now', ? || ' hours')
+            ORDER BY level DESC
+            """,
+            (country_id, min_level, f"-{max_hours_inactive}"),
+        ) as cur:
+            async for row in cur:
+                rows.append((str(row[0]), str(row[1]), int(row[2] or 0)))
         return rows
 
     async def get_active_nl_citizens_without_mu(

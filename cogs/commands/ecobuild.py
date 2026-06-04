@@ -462,12 +462,37 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
             return None
 
     async def _resolve_user(self, query: str) -> tuple[Optional[str], Optional[dict]]:
-        """Resolve *query* → (user_id, profile) using API search + fuzzy DB fallback."""
+        """Resolve *query* → (user_id, profile) using DB exact-match then API search.
+
+        Resolution order:
+        1. Exact case-insensitive match in citizen_levels DB (autocomplete source —
+           always correct when the user picked a suggestion).
+        2. API /search.searchAnything → exact username match in results.
+        3. API results → best fuzzy SequenceMatcher ratio match.
+        4. DB fuzzy fallback (only when API returns no candidates at all).
+        """
         s_low = query.lower().strip()
+
+        # 1. DB exact match — the autocomplete is sourced from citizen_levels,
+        #    so this is the most reliable path and avoids the API returning
+        #    a similarly-prefixed player instead.
+        db = self._db
+        if db is not None:
+            try:
+                db_exact = await db.get_citizen_by_name_exact(query)
+                if db_exact:
+                    uid, _ = db_exact
+                    profile = await self._get_user_profile(uid)
+                    if profile is not None:
+                        return uid, profile
+            except Exception:
+                pass
+
+        # 2 & 3. API search
         user_ids = await self._search_user(query)
 
         if not user_ids:
-            db = self._db
+            # 4. DB fuzzy fallback
             if db is not None:
                 nl_country_id = self.config.get("nl_country_id") or self.config.get("country_id")
                 try:

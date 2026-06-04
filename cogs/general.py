@@ -200,6 +200,15 @@ class General(commands.Cog, name="general"):
                 except discord.HTTPException:
                     pass
 
+        # dreiging / let op → always react :194376alarm:
+        if any(w in words for w in ("dreiging", "let op")):
+            _e = discord.utils.get(message.guild.emojis, name="194376alarm") if message.guild else None
+            if _e:
+                try:
+                    await message.add_reaction(_e)
+                except discord.HTTPException:
+                    pass
+
         # kiss / kus → react :catKISS:
         if any(w in words for w in ("kiss", "kus")):
             _e = discord.utils.get(message.guild.emojis, name="catKISS") if message.guild else None
@@ -219,6 +228,15 @@ class General(commands.Cog, name="general"):
                 await message.add_reaction("🔇")
             except discord.HTTPException:
                 pass
+
+        # belgië / belgie → send GIF, 5% chance
+        # Normalise accented variants (ë → e, ï → i) then check for exact word "belgie"
+        _belgie_words = content.lower().replace("ë", "e").replace("ï", "i").split()
+        if "belgie" in _belgie_words and random.random() < 0.05:
+            try:
+                await message.channel.send("https://tenor.com/view/mchammerlalmb-gif-20535511")
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to send belgië gif for message {message.id}: {e}")
 
         # water → send funny GIF, 10% chance
         if "water" in words and random.random() < 0.10:

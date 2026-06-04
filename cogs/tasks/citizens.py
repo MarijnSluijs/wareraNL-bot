@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -471,12 +472,18 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
                 if member is None or member.bot:
                     continue
 
-                current_nick = (member.nick or "").strip()
-                if current_nick == target_nick:
+                # If the member has no custom nick yet, skip — let the division
+                # sync (war_guild_divisions) handle the initial nick assignment
+                # so it can apply the correct [Dx] prefix.
+                if member.nick is None:
                     skipped += 1
                     continue
 
-                if member.nick is None and member.name == target_nick:
+                # Preserve any [Dx] division prefix applied by war_guild_divisions
+                if m := re.match(r"^\[D\d\] ", member.nick):
+                    target_nick = (m.group(0) + target_nick)[:32]
+
+                if member.nick == target_nick:
                     skipped += 1
                     continue
 

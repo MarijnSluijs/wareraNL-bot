@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -350,12 +351,25 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
                         nickname, member.name,
                     )
 
-        # Set in-game nickname
+        # Set in-game nickname (preserve any [DN] division prefix already applied)
         if nickname:
             try:
-                await member.edit(nick=nickname, reason="war_sync: verificatie")
+                if member.nick and (m := re.match(r"^\[D\d\] ", member.nick)):
+                    target_nick = (m.group(0) + nickname)[:32]
+                else:
+                    target_nick = nickname
+                await member.edit(nick=target_nick, reason="war_sync: verificatie")
             except (discord.Forbidden, discord.HTTPException) as exc:
                 logger.debug("war_sync: cannot set nickname for %s: %s", member.name, exc)
+
+        # Assign division role + [DN] prefix
+        if in_game_id:
+            divisions_cog = self.bot.cogs.get("WarGuildDivisionsCog")
+            if divisions_cog:
+                try:
+                    await divisions_cog.sync_member_division(member, in_game_id)
+                except Exception as exc:
+                    logger.warning("war_sync: division sync failed for %s: %s", member.name, exc)
 
         # Assign MU roles — use DB path so it works regardless of in-memory cache state
         if in_game_id:
@@ -390,7 +404,7 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
             except discord.Forbidden:
                 logger.warning("war_sync: cannot add Nederlander to %s — missing perms", member.name)
 
-        # Set in-game nickname
+        # Set in-game nickname (new join: no existing [DN] prefix yet)
         if nickname:
             try:
                 await member.edit(nick=nickname, reason="war_sync: auto-verificatie bij joinen")
@@ -429,6 +443,16 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
                     )
 
         if in_game_id:
+            # Assign division role + [DN] prefix
+            divisions_cog = self.bot.cogs.get("WarGuildDivisionsCog")
+            if divisions_cog:
+                try:
+                    await divisions_cog.sync_member_division(member, in_game_id)
+                except Exception as exc:
+                    logger.warning(
+                        "war_sync: division sync on join failed for %s: %s",
+                        member.name, exc,
+                    )
             await self._assign_mu_roles_from_db(member, in_game_id)
         else:
             await self._assign_mu_roles_for_member(member)
@@ -631,19 +655,28 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
                         logger.warning("war_sync: auto-link failed for %s: %s", member.name, exc)
 
             # ── Nickname sync ─────────────────────────────────────────────
-            if should_have_ned:
+            # Only correct the nick when the member already has a custom nick.
+            # If member.nick is None they have never had one set — leave nick
+            # assignment entirely to war_guild_divisions (which applies the
+            # [DN] prefix).  This prevents the hourly sync from setting a bare
+            # in-game name and stripping a [DN] prefix that was just applied.
+            if should_have_ned and member.nick is not None:
                 target_nick = discord_to_nick.get(member.id)
-                logger.debug(
-                    "war_sync: nick check %s (%d): current=%r target=%r",
-                    member.name, member.id, member.nick, target_nick,
-                )
-                if target_nick and member.nick != target_nick:
-                    try:
-                        await member.edit(nick=target_nick, reason="war_sync: nickname sync")
-                        counts["nicknames_set"] += 1
-                        logger.info("war_sync: set nick for %s → %r", member.name, target_nick)
-                    except discord.Forbidden:
-                        logger.warning("war_sync: no permission to set nick for %s", member.name)
+                if target_nick:
+                    # Preserve [DN] prefix — keep it, update only the name part
+                    if m := re.match(r"^\[D\d\] ", member.nick):
+                        target_nick = (m.group(0) + target_nick)[:32]
+                    logger.debug(
+                        "war_sync: nick check %s (%d): current=%r target=%r",
+                        member.name, member.id, member.nick, target_nick,
+                    )
+                    if member.nick != target_nick:
+                        try:
+                            await member.edit(nick=target_nick, reason="war_sync: nickname sync")
+                            counts["nicknames_set"] += 1
+                            logger.info("war_sync: set nick for %s → %r", member.name, target_nick)
+                        except discord.Forbidden:
+                            logger.warning("war_sync: no permission to set nick for %s", member.name)
 
             # ── MU role sync ──────────────────────────────────────────────
             if not all_managed_role_ids:
@@ -986,11 +1019,12 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
                 # Verify the role still exists in Discord
                 existing = war_guild.get_role(stored_id)
                 if existing:
-                    # Update colour if it changed
-                    if existing.colour != colour:
+                    # Update colour and mentionable if they changed
+                    needs_edit = existing.colour != colour or not existing.mentionable
+                    if needs_edit:
                         try:
-                            await existing.edit(colour=colour, reason="war_sync: kleur update")
-                            logger.info("war_sync: updated colour for '%s'", existing.name)
+                            await existing.edit(colour=colour, mentionable=True, reason="war_sync: kleur/mentionable update")
+                            logger.info("war_sync: updated colour/mentionable for '%s'", existing.name)
                         except discord.Forbidden:
                             logger.warning("war_sync: no permission to update colour for '%s'", existing.name)
                     result[role_type] = stored_id
@@ -1013,10 +1047,11 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
                         except discord.Forbidden:
                             logger.warning("war_sync: no permission to delete duplicate '%s'", dup.name)
                 existing = canonical
-                if existing.colour != colour:
+                needs_edit = existing.colour != colour or not existing.mentionable
+                if needs_edit:
                     try:
-                        await existing.edit(colour=colour, reason="war_sync: kleur update")
-                        logger.info("war_sync: updated colour for '%s'", existing.name)
+                        await existing.edit(colour=colour, mentionable=True, reason="war_sync: kleur/mentionable update")
+                        logger.info("war_sync: updated colour/mentionable for '%s'", existing.name)
                     except discord.Forbidden:
                         logger.warning("war_sync: no permission to update colour for '%s'", existing.name)
                 result[role_type] = existing.id
@@ -1028,6 +1063,7 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
                 new_role = await war_guild.create_role(
                     name=role_name,
                     colour=colour,
+                    mentionable=True,
                     reason=f"war_sync: Dutch MU '{mu_name}'",
                 )
                 result[role_type] = new_role.id

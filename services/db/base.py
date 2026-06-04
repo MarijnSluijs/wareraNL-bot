@@ -25,6 +25,13 @@ class DatabaseBase:
         """Open the SQLite connection, create all tables, and apply migrations."""
         self._conn = await aiosqlite.connect(self.path)
 
+        # Enable WAL mode — allows concurrent readers + one writer without
+        # blocking each other, which eliminates most "database is locked" errors
+        # when the data-fetcher and discord-bot write simultaneously.
+        await self._conn.execute("PRAGMA journal_mode=WAL")
+        # Wait up to 10 s when the DB is locked before raising an error
+        # (covers brief write-write contention that WAL alone doesn't eliminate).
+        await self._conn.execute("PRAGMA busy_timeout=10000")      # 10 s
         # Performance tuning: map the whole DB into the OS page cache (avoids
         # the internal 8 MB page cache round-trip for reads).  2 GB limit is
         # enough for the current 2.3 GB db; the OS maps only what it needs.

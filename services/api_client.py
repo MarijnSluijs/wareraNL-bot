@@ -53,7 +53,7 @@ class APIClient:
     async def start(self) -> None:
         if self._session is None:
             self._session = aiohttp.ClientSession(timeout=self._timeout)
-            logger.info("APIClient session started")
+            logger.info("APIClient session started with %d API key(s)", len(self._api_keys))
 
     async def close(self) -> None:
         if self._session:
@@ -88,10 +88,13 @@ class APIClient:
             return
         next_index = (self._key_index + 1) % len(self._api_keys)
         self._set_active_key_index(next_index)
-        logger.info("Rotated API key to index %d", self._key_index)
+        logger.warning(
+            "Rotated API key: now using key %d/%d",
+            self._key_index + 1, len(self._api_keys),
+        )
 
-    def _mark_current_key_rate_limited(
-        self, retry_after: Optional[float], fallback_wait: float
+    def _mark_key_rate_limited(
+        self, key_index: int, retry_after: Optional[float], fallback_wait: float
     ) -> None:
         if not self._api_keys:
             return
@@ -99,9 +102,9 @@ class APIClient:
         wait_seconds = max(wait_seconds, 0.0)
         now = asyncio.get_running_loop().time()
         limited_until = now + wait_seconds
-        current_until = self._key_rate_limited_until.get(self._key_index, 0.0)
+        current_until = self._key_rate_limited_until.get(key_index, 0.0)
         if limited_until > current_until:
-            self._key_rate_limited_until[self._key_index] = limited_until
+            self._key_rate_limited_until[key_index] = limited_until
 
     def _next_available_key_index(self) -> Optional[int]:
         if not self._api_keys:
@@ -123,6 +126,26 @@ class APIClient:
         )
         return max(soonest - now, 0.0)
 
+    def _acquire_key_for_attempt(self) -> int:
+        """Round-robin: return the next non-rate-limited key index and advance the pointer.
+
+        Each concurrent request gets a different key so all keys are used at equal rate.
+        If all keys are currently rate-limited, returns the current index (caller will sleep).
+        """
+        if not self._api_keys:
+            return 0
+        now = asyncio.get_running_loop().time()
+        key_count = len(self._api_keys)
+        for offset in range(key_count):
+            idx = (self._key_index + offset) % key_count
+            if self._key_rate_limited_until.get(idx, 0.0) <= now:
+                # Advance pointer past this key so the next caller gets a different one
+                self._key_index = (idx + 1) % key_count
+                self._base_headers["x-api-key"] = self._api_keys[idx]
+                return idx
+        # All keys are rate-limited — return current without advancing
+        return self._key_index
+
     async def _request(self, method: str, path: str, **kwargs) -> Any:
         if self._session is None:
             raise RuntimeError("APIClient not started; call start() first")
@@ -135,10 +158,16 @@ class APIClient:
 
         while attempts < max_attempts:
             attempts += 1
+            # Round-robin: pick next available API key for this attempt
+            attempt_key_index = self._acquire_key_for_attempt()
             try:
                 # merge default headers with per-call headers
                 call_kwargs = dict(kwargs)
                 call_headers = dict(self._base_headers)
+                # Pin the key for this specific attempt so concurrent requests
+                # don't interfere with each other's key selection.
+                if self._api_keys:
+                    call_headers["x-api-key"] = self._api_keys[attempt_key_index]
                 # Always pop "headers" (may be None from default args) before merging,
                 # so setdefault / direct assignment is never blocked by a None value.
                 per_call_headers = call_kwargs.pop("headers", None)
@@ -171,23 +200,25 @@ class APIClient:
                                 retry_after = None
 
                             logger.warning(
-                                "Rate limited on %s (429). Retry-after=%s attempt %d/%d",
+                                "Rate-limited on %s (429, key %d/%d). Retry-after=%s, attempt %d/%d",
                                 url,
+                                attempt_key_index + 1,
+                                len(self._api_keys) if self._api_keys else 0,
                                 retry_after,
                                 attempts,
                                 max_attempts,
                             )
 
                             if self._api_keys:
-                                self._mark_current_key_rate_limited(
-                                    retry_after, backoff
+                                self._mark_key_rate_limited(
+                                    attempt_key_index, retry_after, backoff
                                 )
                                 next_idx = self._next_available_key_index()
                                 if next_idx is not None:
-                                    self._set_active_key_index(next_idx)
-                                    logger.info(
-                                        "Rate-limited key rotated immediately to index %d",
-                                        self._key_index,
+                                    logger.warning(
+                                        "Rate-limited: key %d/%d → switching to key %d/%d",
+                                        attempt_key_index + 1, len(self._api_keys),
+                                        next_idx + 1, len(self._api_keys),
                                     )
                                     if attempts < max_attempts:
                                         continue
@@ -199,9 +230,14 @@ class APIClient:
                                         if retry_after is not None
                                         else backoff
                                     )
+                                now_t = asyncio.get_running_loop().time()
+                                n_limited = sum(
+                                    1 for i in range(len(self._api_keys))
+                                    if self._key_rate_limited_until.get(i, 0.0) > now_t
+                                )
                                 logger.warning(
-                                    "All API keys appear rate-limited; waiting %.2fs before retry",
-                                    sleep_for,
+                                    "Rate-limited: %d/%d API keys exhausted; waiting %.2fs before retry",
+                                    n_limited, len(self._api_keys), sleep_for,
                                 )
                                 await asyncio.sleep(sleep_for)
                             else:

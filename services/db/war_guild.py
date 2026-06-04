@@ -81,6 +81,13 @@ class WarGuildMixin:
         ) as cursor:
             return [(row[0], row[1], row[2]) async for row in cursor]
 
+    async def get_all_mu_memberships(self) -> list[tuple[str, str, str, str]]:
+        """Return [(in_game_user_id, mu_id, mu_name, role_type)] for all rows."""
+        async with self._conn.execute(
+            "SELECT in_game_user_id, mu_id, mu_name, role_type FROM citizen_mu_membership"
+        ) as cursor:
+            return [(row[0], row[1], row[2], row[3]) async for row in cursor]
+
     async def replace_citizen_mu_memberships(
         self,
         user_mu_roles: dict,   # {in_game_user_id: {mu_id: role_type}}
