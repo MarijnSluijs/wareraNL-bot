@@ -14,6 +14,7 @@ Prefix commands (owner-only unless noted):
 """
 
 import asyncio
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -1111,33 +1112,77 @@ class Owner(commands.Cog, name="owner"):
     async def nl_niet_in_mu(
         self, interaction: discord.Interaction, min_level: int = 20
     ) -> None:
-        """List active NL citizens with level >= min_level, active in last 72h, without an MU."""
+        """List active NL citizens with level >= min_level, active in last 72h, without an MU (via API)."""
         await interaction.response.defer()
 
         db = getattr(self.bot, "_ext_db", None)
+        client = getattr(self.bot, "_ext_client", None)
         if not db:
             await interaction.followup.send("❌ Database niet beschikbaar.")
+            return
+        if not client:
+            await interaction.followup.send("❌ API client niet beschikbaar.")
             return
 
         nl_country_id: str = self.bot.config.get("nl_country_id", "6813b6d446e731854c7ac7a0")
 
-        rows = await db.get_active_nl_citizens_without_mu(
+        rows = await db.get_active_nl_citizens(
             nl_country_id, min_level=min_level, max_hours_inactive=72
         )
 
         if not rows:
             await interaction.followup.send(
-                f"✅ Geen actieve Nederlandse spelers (level ≥{min_level}, actief ≤72u) gevonden zonder militaire eenheid.",
+                f"✅ Geen actieve Nederlandse spelers (level ≥{min_level}, actief ≤72u) gevonden.",
+            )
+            return
+
+        await interaction.followup.send(
+            f"⏳ {len(rows)} spelers ophalen via API, even geduld..."
+        )
+
+        sem = asyncio.Semaphore(10)
+
+        async def _check_mu(uid: str, name: str, lvl: int) -> tuple[str, str, int] | None:
+            async with sem:
+                try:
+                    resp = await client.get(
+                        "/user.getUserById",
+                        params={"input": json.dumps({"userId": uid})},
+                    )
+                except Exception:
+                    return None
+            # Unwrap tRPC envelope
+            data = resp
+            if isinstance(resp, dict):
+                for key in ("result", "data"):
+                    v = resp.get(key)
+                    if isinstance(v, dict):
+                        data = v.get("data", v)
+                        break
+            if not isinstance(data, dict):
+                return None
+            # No "mu" field (or null/empty) means not in a MU
+            mu_val = data.get("mu")
+            if not mu_val:
+                return (uid, name, lvl)
+            return None
+
+        results = await asyncio.gather(*[_check_mu(uid, name, lvl) for uid, name, lvl in rows])
+        no_mu = [r for r in results if r is not None]
+
+        if not no_mu:
+            await interaction.channel.send(  # type: ignore[union-attr]
+                f"✅ Alle actieve Nederlandse spelers (level ≥{min_level}, actief ≤72u) zitten in een MU."
             )
             return
 
         lines = [
             f"• [{name}](https://app.warera.io/user/{uid}) — level {lvl}"
-            for uid, name, lvl in rows
+            for uid, name, lvl in no_mu
         ]
         header = (
             f"**Nederlandse spelers level ≥{min_level} zonder MU "
-            f"(actief in laatste 72u, {len(rows)} totaal):**\n"
+            f"(actief in laatste 72u, {len(no_mu)} van {len(rows)} totaal):**\n"
         )
         chunks: list[str] = []
         current = header
@@ -1149,9 +1194,8 @@ class Owner(commands.Cog, name="owner"):
         if current:
             chunks.append(current)
 
-        await interaction.followup.send(chunks[0])
-        for chunk in chunks[1:]:
-            await interaction.followup.send(chunk)
+        for chunk in chunks:
+            await interaction.channel.send(chunk)  # type: ignore[union-attr]
 
     @commands.command(
         name="logs",

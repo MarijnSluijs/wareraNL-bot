@@ -296,8 +296,29 @@ class TransactiesCog(CommandCogBase, name="transacties"):
             return None
 
     async def _resolve_user(self, query: str) -> tuple[Optional[str], Optional[str]]:
-        """Return (user_id, username) for *query*, or (None, None) if not found."""
+        """Return (user_id, username) for *query*, or (None, None) if not found.
+
+        Resolution order:
+        1. Exact case-insensitive match in citizen_levels DB (autocomplete source).
+        2. API search → exact username match.
+        3. API search → first candidate (original behaviour).
+        4. DB fuzzy fallback (only when API returns no candidates).
+        """
         q_low = query.lower().strip()
+
+        # 1. DB exact match — avoids the API returning a similarly-named player.
+        if self._db is not None:
+            try:
+                db_exact = await self._db.get_citizen_by_name_exact(query)
+                if db_exact:
+                    uid, _ = db_exact
+                    p = await self._get_user_profile(uid)
+                    if p:
+                        return uid, p.get("username") or uid
+            except Exception:
+                pass
+
+        # 2 & 3. API search
         user_ids = await self._search_user(query)
 
         candidates: list[tuple[str, str]] = []
@@ -313,7 +334,7 @@ class TransactiesCog(CommandCogBase, name="transacties"):
         if candidates:
             return candidates[0]
 
-        # Fall back to local DB fuzzy match when the API finds nothing
+        # 4. Fall back to local DB fuzzy match when the API finds nothing
         if self._db is not None:
             nl_country_id = self.config.get("nl_country_id")
             try:

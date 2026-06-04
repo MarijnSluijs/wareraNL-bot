@@ -9,8 +9,6 @@ database/database.db.backup.*
 database/*.json
 database/ranking_weekly/
 data/reddit_state.json
-data/mu_state.json
-data/mu_state.testing.json
 dashboard/
 api_dump.json
 scripts/

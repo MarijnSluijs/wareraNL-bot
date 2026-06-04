@@ -439,12 +439,30 @@ class Geluk(commands.Cog, name="geluk"):
     ) -> tuple[Optional[str], Optional[dict], bool]:
         """Resolve user by query: exact username first, closest search candidate as fallback.
 
-        Falls back to local DB fuzzy name match when the API search returns nothing.
+        Resolution order:
+        1. Exact case-insensitive match in citizen_levels DB (autocomplete source).
+        2. API search → exact username match.
+        3. API search → best fuzzy ratio match.
+        4. DB fuzzy fallback (only when API returns no candidates).
 
         Returns (user_id, profile, api_offline) where api_offline=True means the API
         was unreachable (as opposed to the player genuinely not being found).
         """
         s_low = query.lower().strip()
+
+        # 1. DB exact match — avoids the API returning a similarly-named player.
+        db = await self._get_db()
+        try:
+            db_exact = await db.get_citizen_by_name_exact(query)
+            if db_exact:
+                uid, _ = db_exact
+                p = await self._get_user_profile(uid)
+                if p is not None:
+                    return uid, p, False
+        except Exception:
+            pass
+
+        # 2 & 3. API search
         user_ids = await self._search_user(query)
 
         if user_ids is None:
@@ -452,8 +470,7 @@ class Geluk(commands.Cog, name="geluk"):
             return None, None, True
 
         if not user_ids:
-            # API responded but found nothing — try fuzzy match against local citizen_levels cache
-            db = await self._get_db()
+            # 4. API responded but found nothing — try fuzzy match against local citizen_levels cache
             nl_country_id = self.config.get("nl_country_id")
             match = await db.fuzzy_citizen_by_name(query, country_id=nl_country_id)
             if match:

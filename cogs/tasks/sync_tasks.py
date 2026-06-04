@@ -423,8 +423,10 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                     too_inactive.append(
                         f"• {member.mention} ([{citizen_name}]({profile})) — {int(days_inactive)} dagen inactief"
                     )
-                elif days_inactive is None and self._client:
-                    # last_login_at is NULL in citizen_levels — fall back to live API
+                elif self._client:
+                    # DB says active (or last_login_at is NULL) — verify with live API
+                    # to catch stale/wrong stored dates (e.g. data-fetcher cached a
+                    # recent-looking timestamp for a genuinely inactive member).
                     try:
                         raw = await self._client.get(
                             "/user.getUserLite",
@@ -435,8 +437,9 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                             api_last_conn = (data.get("dates") or {}).get("lastConnectionAt")
                             api_days = _days_since(api_last_conn)
                             if api_days is not None and api_days > _INACTIVITY_DAYS:
+                                api_name = data.get("username") or citizen_name
                                 too_inactive.append(
-                                    f"• {member.mention} ([{citizen_name}]({profile}))"
+                                    f"• {member.mention} ([{api_name}]({profile}))"
                                     f" — {int(api_days)} dagen inactief"
                                 )
                     except Exception:

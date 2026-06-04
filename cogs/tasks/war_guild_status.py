@@ -66,15 +66,29 @@ class WarStatusView(discord.ui.View):
 
 
 async def _handle_status(interaction: discord.Interaction, choice: str) -> None:
+    # Defer immediately — gives up to 15 min to finish instead of 3 s.
+    # ephemeral=True keeps the follow-up visible only to the clicker.
+    await interaction.response.defer(ephemeral=True, thinking=False)
+
     db = getattr(interaction.client, "_ext_db", None)
     if db is None:
-        await interaction.response.send_message(
-            "❌ Database niet beschikbaar.", ephemeral=True
+        await interaction.followup.send("❌ Database niet beschikbaar.", ephemeral=True)
+        return
+
+    try:
+        await db.upsert_war_status(str(interaction.user.id), choice)
+    except Exception:
+        logger.exception(
+            "war_guild_status: upsert_war_status failed for user %s", interaction.user.id
+        )
+        await interaction.followup.send(
+            "❌ Er is een fout opgetreden bij het opslaan van je keuze. Probeer het opnieuw.",
+            ephemeral=True,
         )
         return
-    await db.upsert_war_status(str(interaction.user.id), choice)
+
     label = "✅ Ready voor war" if choice == "ready" else "🌾 Eco nodig"
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"Jouw status is ingesteld op: **{label}**", ephemeral=True
     )
 

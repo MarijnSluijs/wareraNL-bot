@@ -47,15 +47,15 @@ def _pill_field_value(stats: dict) -> str:
     parts: list[str] = []
     if buff:
         avg_str = _fmt_hm(stats["avg_buff_secs"])
-        parts.append(f"🟢 In buff: **{buff}** (gem. {avg_str} over)")
+        parts.append(f"� In buff: **{buff}** (gem. {avg_str} over)")
     else:
-        parts.append("🟢 In buff: **0**")
+        parts.append("💊 In buff: **0**")
     if debuff:
         avg_str = _fmt_hm(stats["avg_debuff_secs"])
-        parts.append(f"🔴 In debuff: **{debuff}** (gem. {avg_str} over)")
+        parts.append(f"🤢 In debuff: **{debuff}** (gem. {avg_str} over)")
     else:
-        parts.append("🔴 In debuff: **0**")
-    parts.append(f"⚪ Geen actieve pil: **{none_}**")
+        parts.append("🤢 In debuff: **0**")
+    parts.append(f"⬜ Geen actieve pil: **{none_}**")
     parts.append(f"*(Totaal: {total} spelers)*")
     return "\n".join(parts)
 
@@ -102,13 +102,17 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
         speler="Zoek een speler op naam of ID.",
         mu="MU-naam — % oorlogsmodus + cooldown voor eco-spelers in de MU (alle MUs).",
         nl_mus="Toon paraatheid voor alle NL MUs in één tabel (geen verdere invoer nodig).",
+        divisie="Toon paraatheid voor alle divisies tegelijk (één tabel per divisie).",
     )
     @app_commands.autocomplete(
         land=country_autocomplete,
         mu=_paraatheid_mu_autocomplete,
         speler=citizen_autocomplete,
     )
-    @app_commands.choices(nl_mus=[app_commands.Choice(name="Ja", value="ja")])
+    @app_commands.choices(
+        nl_mus=[app_commands.Choice(name="Ja", value="ja")],
+        divisie=[app_commands.Choice(name="Ja", value="ja")],
+    )
     async def paraatheid(  # noqa: C901
         self,
         ctx: Context,
@@ -116,27 +120,29 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
         speler: str | None = None,
         mu: str | None = None,
         nl_mus: str | None = None,
+        divisie: str | None = None,
     ):
-        """/paraatheid — oorlogsparaatheid in vier modi:
+        """/paraatheid — oorlogsparaatheid in vijf modi:
 
         /paraatheid land:NL      — tabel per niveaugroep: %oorlog + cooldown voor eco-spelers
         /paraatheid speler:naam  — of speler al in oorlogsmodus is, of wanneer die kan resetten
         /paraatheid mu:naam      — %oorlog + reset-cooldown voor eco-spelers in de MU (alle MUs)
         /paraatheid nl_mus:Ja    — overzicht van alle NL MUs gegroepeerd op type
+        /paraatheid divisie:Ja    — overzicht paraatheid per divisie (D1–D5)
         """
         if not self._db:
             await ctx.send("Database niet geïnitialiseerd.")
             return
 
-        if speler is None and land is None and mu is None and nl_mus is None:
+        if speler is None and land is None and mu is None and nl_mus is None and divisie is None:
             speler = ctx.author.display_name
 
-        provided = sum(x is not None for x in (land, speler, mu)) + int(
+        provided = sum(x is not None for x in (land, speler, mu, divisie)) + int(
             nl_mus is not None
         )
         if provided > 1:
             await ctx.send(
-                "Geef precies één optie op: **land**, **speler**, **mu** of **nl_mus**."
+                "Geef precies één optie op: **land**, **speler**, **mu**, **divisie** of **nl_mus**."
             )
             return
 
@@ -210,9 +216,9 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                             from datetime import timezone as _tz
                             end_ts = _dt.fromisoformat(buff_end_at.replace("Z", "+00:00")).timestamp()
                             secs_left = max(0.0, end_ts - now_ts)
-                            pill_val = f"🟢 In buff — nog {_fmt_hm(secs_left)}"
+                            pill_val = f"� In buff — nog {_fmt_hm(secs_left)}"
                         except Exception:
-                            pill_val = "🟢 In buff"
+                            pill_val = "💊 In buff"
                     else:
                         debuff_duration = 16 * 3600
                         if buff_end_at:
@@ -222,13 +228,13 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                                 end_ts = _dt.fromisoformat(buff_end_at.replace("Z", "+00:00")).timestamp()
                                 debuff_left = max(0.0, end_ts + debuff_duration - now_ts)
                                 if debuff_left > 0:
-                                    pill_val = f"🔴 In debuff — nog {_fmt_hm(debuff_left)}"
+                                    pill_val = f"🤢 In debuff — nog {_fmt_hm(debuff_left)}"
                                 else:
-                                    pill_val = "⚪ Geen actieve pil"
+                                    pill_val = "⬜ Geen actieve pil"
                             except Exception:
-                                pill_val = "⚪ Geen actieve pil"
+                                pill_val = "⬜ Geen actieve pil"
                         else:
-                            pill_val = "⚪ Geen actieve pil"
+                            pill_val = "⬜ Geen actieve pil"
                     embed.add_field(name="💊 Pill status", value=pill_val, inline=False)
                 except Exception:
                     pass
@@ -341,11 +347,11 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                     hu_str = str(int(p["hunger_cur"])) if p.get("hunger_cur") is not None else " ?"
                     pill_icon = p.get("pill_icon", "⚪")
                     if pill_icon == "🟢":
-                        pill_str = f"{_GRN}●{_RST}"
+                        pill_str = f"{_GRN}+{_RST}"
                     elif pill_icon == "🔴":
-                        pill_str = f"{_RED}●{_RST}"
+                        pill_str = f"{_RED}-{_RST}"
                     else:
-                        pill_str = "○"
+                        pill_str = "."
                     exp_ts = p.get("pill_expires_ts")
                     if exp_ts is not None:
                         secs_left = max(0.0, exp_ts - _t.time())
@@ -388,30 +394,30 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                 now_live = _t.time()
                 buff_secs_l = [p["pill_expires_ts"] - now_live for p in buff_players if p.get("pill_expires_ts")]
                 debuff_secs_l = [p["pill_expires_ts"] - now_live for p in debuff_players if p.get("pill_expires_ts")]
-                buff_line = f"🟢 Pil actief: **{buff_n}**"
+                buff_line = f"� Pil actief: **{buff_n}**"
                 if buff_secs_l:
                     buff_line += f" (gem. {_fmt_hm(sum(buff_secs_l) / len(buff_secs_l))} over)"
                 stats_parts.append(buff_line)
-                debuff_line = f"🔴 In debuff: **{debuff_n}**"
+                debuff_line = f"🤢 In debuff: **{debuff_n}**"
                 if debuff_secs_l:
                     debuff_line += f" (gem. {_fmt_hm(sum(debuff_secs_l) / len(debuff_secs_l))} over)"
                 stats_parts.append(debuff_line)
-                stats_parts.append(f"⚪ Geen pil: **{none_n}**")
+                stats_parts.append(f"⬜ Geen pil: **{none_n}**")
             elif self._db:
                 try:
                     pill_stats = await self._db.get_pill_stats_from_tracking(mu_names=[mu_name])
                     buff_n = pill_stats["buff"]
                     debuff_n = pill_stats["debuff"]
                     none_n = pill_stats["none"]
-                    buff_line = f"🟢 Pil actief: **{buff_n}**"
+                    buff_line = f"� Pil actief: **{buff_n}**"
                     if buff_n and pill_stats.get("avg_buff_secs"):
                         buff_line += f" (gem. {_fmt_hm(pill_stats['avg_buff_secs'])} over)"
                     stats_parts.append(buff_line)
-                    debuff_line = f"🔴 In debuff: **{debuff_n}**"
+                    debuff_line = f"🤢 In debuff: **{debuff_n}**"
                     if debuff_n and pill_stats.get("avg_debuff_secs"):
                         debuff_line += f" (gem. {_fmt_hm(pill_stats['avg_debuff_secs'])} over)"
                     stats_parts.append(debuff_line)
-                    stats_parts.append(f"⚪ Geen pil: **{none_n}**")
+                    stats_parts.append(f"⬜ Geen pil: **{none_n}**")
                 except Exception:
                     pass
             if has_live_stats:
@@ -594,19 +600,139 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                     _nl_mu_names = list(_mu_types.keys())
                     pill_stats = await self._db.get_pill_stats_from_tracking(mu_names=_nl_mu_names)
                     _sp: list[str] = []
-                    _bl = f"🟢 Pil actief: **{pill_stats['buff']}**"
+                    _bl = f"� Pil actief: **{pill_stats['buff']}**"
                     if pill_stats['buff'] and pill_stats.get('avg_buff_secs'):
                         _bl += f" (gem. {_fmt_hm(pill_stats['avg_buff_secs'])} over)"
                     _sp.append(_bl)
-                    _dl = f"🔴 In debuff: **{pill_stats['debuff']}**"
+                    _dl = f"🤢 In debuff: **{pill_stats['debuff']}**"
                     if pill_stats['debuff'] and pill_stats.get('avg_debuff_secs'):
                         _dl += f" (gem. {_fmt_hm(pill_stats['avg_debuff_secs'])} over)"
                     _sp.append(_dl)
-                    _sp.append(f"⚪ Geen pil: **{pill_stats['none']}**")
+                    _sp.append(f"⬜ Geen pil: **{pill_stats['none']}**")
                     pill_emb = discord.Embed(
                         title="📊 Stats — NL MUs",
                         description="\n".join(_sp),
                         colour=discord.Color.gold(),
+                    )
+                    await ctx.send(embed=pill_emb)
+                except Exception:
+                    pass
+            return
+
+        # ══ Mode 3.5: divisie ═══════════════════════════════════════════
+        if divisie is not None:
+            from cogs.tasks.war_guild_divisions import DIVISION_MUS  # noqa: PLC0415
+            try:
+                mu_stats = await self._db.get_all_mu_readiness()
+            except Exception as exc:
+                await ctx.send(f"Databasefout: {exc}")
+                return
+
+            name_w_div = 12
+            hdr = f"{'naam':<{name_w_div}}  {'par':>5}  {'kan':>3}  {'≥15':>3}  {'≥20':>3}  {'avg':>4}"
+            sep = "─" * len(hdr)
+            FIELD_MAX = 1024
+            prefix = "```\n" + hdr + "\n" + sep + "\n"
+            suffix = "\n```"
+            overhead = len(prefix) + len(suffix)
+
+            emb = discord.Embed(
+                title="Paraatheid — overzicht per divisie",
+                description=(
+                    "par = paraat / totaal  •  kan = kan nu resetten  •  "
+                    "≥15/≥20 = paraat op lvl ≥15/≥20  •  avg = gem. wachttijd eco-spelers"
+                ),
+                colour=colour,
+            )
+            all_div_mu_names: list[str] = []
+
+            for div_num in sorted(DIVISION_MUS):
+                mu_names_in_div = DIVISION_MUS[div_num]
+                all_div_mu_names.extend(mu_names_in_div)
+                rows: list[str] = []
+                total_par = total_total = total_kan = total_w15 = total_w20 = 0
+                all_waiting_div: list[float] = []
+
+                for mu_name in mu_names_in_div:
+                    stats = mu_stats.get(mu_name)
+                    if stats is None:
+                        row = f"{mu_name[:name_w_div]:<{name_w_div}}  {'?':>5}  {'?':>3}  {'?':>3}  {'?':>3}  {'?':>4}"
+                    else:
+                        par_str = f"{stats['war']}/{stats['total']}"
+                        kan_str = str(stats["can_reset"])
+                        w15_str = str(stats.get("war_15", 0))
+                        w20_str = str(stats.get("war_20", 0))
+                        if stats["waiting_days"]:
+                            avg_rem = max(
+                                0.0,
+                                7 - sum(stats["waiting_days"]) / len(stats["waiting_days"]),
+                            )
+                            avg_str = f"{avg_rem:.1f}d"
+                        else:
+                            avg_str = "—"
+                        row = f"{mu_name[:name_w_div]:<{name_w_div}}  {par_str:>5}  {kan_str:>3}  {w15_str:>3}  {w20_str:>3}  {avg_str:>4}"
+                        total_par += stats["war"]
+                        total_total += stats["total"]
+                        total_kan += stats["can_reset"]
+                        total_w15 += stats.get("war_15", 0)
+                        total_w20 += stats.get("war_20", 0)
+                        all_waiting_div.extend(stats["waiting_days"])
+                    rows.append(row)
+
+                if total_total:
+                    tot_par_str = f"{total_par}/{total_total}"
+                    tot_kan_str = str(total_kan)
+                    tot_w15_str = str(total_w15)
+                    tot_w20_str = str(total_w20)
+                    if all_waiting_div:
+                        tot_avg_rem = max(0.0, 7 - sum(all_waiting_div) / len(all_waiting_div))
+                        tot_avg_str = f"{tot_avg_rem:.1f}d"
+                    else:
+                        tot_avg_str = "—"
+                    rows.append("─" * len(hdr))
+                    rows.append(
+                        f"{'totaal':<{name_w_div}}  {tot_par_str:>5}  {tot_kan_str:>3}  {tot_w15_str:>3}  {tot_w20_str:>3}  {tot_avg_str:>4}"
+                    )
+
+                # Split into chunks fitting Discord's 1024-char field limit
+                chunks: list[list[str]] = []
+                current_chunk: list[str] = []
+                current_len = 0
+                for row in rows:
+                    row_len = len(row) + 1
+                    if current_chunk and overhead + current_len + row_len > FIELD_MAX:
+                        chunks.append(current_chunk)
+                        current_chunk = []
+                        current_len = 0
+                    current_chunk.append(row)
+                    current_len += row_len
+                if current_chunk:
+                    chunks.append(current_chunk)
+
+                for i, chunk in enumerate(chunks):
+                    block_text = prefix + "\n".join(chunk) + suffix
+                    field_label = f"Divisie {div_num}" if i == 0 else f"Divisie {div_num} (vervolg)"
+                    emb.add_field(name=field_label, value=block_text, inline=False)
+
+            await ctx.send(embed=emb)
+
+            if self._db:
+                try:
+                    pill_stats = await self._db.get_pill_stats_from_tracking(mu_names=all_div_mu_names)
+                    _sp_div: list[str] = []
+                    _bl_div = f"💊 Pil actief: **{pill_stats['buff']}**"
+                    if pill_stats["buff"] and pill_stats.get("avg_buff_secs"):
+                        _bl_div += f" (gem. {_fmt_hm(pill_stats['avg_buff_secs'])} over)"
+                    _sp_div.append(_bl_div)
+                    _dl_div = f"🤢 In debuff: **{pill_stats['debuff']}**"
+                    if pill_stats["debuff"] and pill_stats.get("avg_debuff_secs"):
+                        _dl_div += f" (gem. {_fmt_hm(pill_stats['avg_debuff_secs'])} over)"
+                    _sp_div.append(_dl_div)
+                    _sp_div.append(f"⬜ Geen pil: **{pill_stats['none']}**")
+                    pill_emb = discord.Embed(
+                        title="📊 Pill stats — alle divisies",
+                        description="\n".join(_sp_div),
+                        colour=colour,
                     )
                     await ctx.send(embed=pill_emb)
                 except Exception:
@@ -748,15 +874,15 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
             try:
                 pill_stats = await self._db.get_pill_stats_from_tracking(country_id=cid)
                 _sp2: list[str] = []
-                _bl2 = f"🟢 Pil actief: **{pill_stats['buff']}**"
+                _bl2 = f"� Pil actief: **{pill_stats['buff']}**"
                 if pill_stats['buff'] and pill_stats.get('avg_buff_secs'):
                     _bl2 += f" (gem. {_fmt_hm(pill_stats['avg_buff_secs'])} over)"
                 _sp2.append(_bl2)
-                _dl2 = f"🔴 In debuff: **{pill_stats['debuff']}**"
+                _dl2 = f"🤢 In debuff: **{pill_stats['debuff']}**"
                 if pill_stats['debuff'] and pill_stats.get('avg_debuff_secs'):
                     _dl2 += f" (gem. {_fmt_hm(pill_stats['avg_debuff_secs'])} over)"
                 _sp2.append(_dl2)
-                _sp2.append(f"⚪ Geen pil: **{pill_stats['none']}**")
+                _sp2.append(f"⬜ Geen pil: **{pill_stats['none']}**")
                 pill_emb = discord.Embed(
                     title=f"📊 Stats — {country_name}",
                     description="\n".join(_sp2),
