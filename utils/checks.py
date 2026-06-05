@@ -12,6 +12,7 @@ PRIVILEGED_ROLE_IDS: set[int] = {
     1451181300009537547,  # congress member
     1458427087189835776,  # commandant
     1475468331896148079,  # bot_ontwikkelaar
+    1468230751274401843,  # douane
 }
 
 ADMIN_ROLE_ID: int = 1456410780256702600

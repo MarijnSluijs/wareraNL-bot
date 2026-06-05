@@ -25,7 +25,7 @@ from ._base import TaskCogBase
 if TYPE_CHECKING:
     pass
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("discord_bot")
 
 # ── Division configuration ────────────────────────────────────────────────────
 
