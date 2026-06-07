@@ -21,7 +21,7 @@ from utils.checks import has_privileged_role
 logger = logging.getLogger("discord_bot")
 
 # Production
-_PROD_CHANNEL_ID = 1489316733528576080
+_PROD_CHANNEL_ID = 1468692756707807376
 _PROD_ROLE_ID    = 1494815320316055573
 
 # Testing
