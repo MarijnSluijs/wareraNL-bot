@@ -619,18 +619,27 @@ class CitizensMixin:
         """Readiness stats for every distinct MU, keyed by mu_name.
 
         Each value: war, total, can_reset, waiting_days, war_15, war_20
+
+        Uses citizen_mu_membership (authoritative, populated by MU sweep) joined
+        with citizen_levels for skill/level data.  Falls back to citizen_levels.mu_name
+        for citizens whose MU membership wasn't captured in the sweep.
         """
         now = datetime.now(timezone.utc)
+        # Primary: citizen_mu_membership JOIN citizen_levels
+        # This is authoritative because /peil mus populates citizen_mu_membership.
         if country_id:
             sql = (
-                "SELECT mu_name, skill_mode, last_skills_reset_at, level "
-                "FROM citizen_levels WHERE country_id = ? AND mu_name IS NOT NULL"
+                "SELECT cmu.mu_name, cl.skill_mode, cl.last_skills_reset_at, cl.level "
+                "FROM citizen_mu_membership cmu "
+                "JOIN citizen_levels cl ON cl.user_id = cmu.in_game_user_id "
+                "WHERE cl.country_id = ?"
             )
             params: tuple = (country_id,)
         else:
             sql = (
-                "SELECT mu_name, skill_mode, last_skills_reset_at, level "
-                "FROM citizen_levels WHERE mu_name IS NOT NULL"
+                "SELECT cmu.mu_name, cl.skill_mode, cl.last_skills_reset_at, cl.level "
+                "FROM citizen_mu_membership cmu "
+                "JOIN citizen_levels cl ON cl.user_id = cmu.in_game_user_id"
             )
             params = ()
         mus: dict[str, dict] = {}

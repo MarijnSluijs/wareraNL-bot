@@ -15,10 +15,7 @@ Required war_guild config keys:
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -27,70 +24,12 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from cogs.tasks._base import TaskCogBase
+from cogs.tasks.war_guild_divisions import DIVISION_MUS
 
 logger = logging.getLogger("discord_bot")
 
 # poll_state keys
-_KEY_STATUS_MSG  = "wg_war_status_msg_id"
-_KEY_DASH_PAR    = "wg_dash_paraatheid_msg_id"
-_KEY_DASH_WS     = "wg_dash_warstatus_msg_id"
-
-
-# ── Persistent button view ────────────────────────────────────────────────────
-
-class WarStatusView(discord.ui.View):
-    """Persistent war-readiness buttons (timeout=None survives bot restarts)."""
-
-    def __init__(self) -> None:
-        super().__init__(timeout=None)
-
-    @discord.ui.button(
-        label="✅ Ready voor war",
-        style=discord.ButtonStyle.success,
-        custom_id="wg_status_ready_v1",
-    )
-    async def ready_button(
-        self, interaction: discord.Interaction, _btn: discord.ui.Button
-    ) -> None:
-        await _handle_status(interaction, "ready")
-
-    @discord.ui.button(
-        label="🌾 Eco nodig",
-        style=discord.ButtonStyle.secondary,
-        custom_id="wg_status_eco_v1",
-    )
-    async def eco_button(
-        self, interaction: discord.Interaction, _btn: discord.ui.Button
-    ) -> None:
-        await _handle_status(interaction, "eco")
-
-
-async def _handle_status(interaction: discord.Interaction, choice: str) -> None:
-    # Defer immediately — gives up to 15 min to finish instead of 3 s.
-    # ephemeral=True keeps the follow-up visible only to the clicker.
-    await interaction.response.defer(ephemeral=True, thinking=False)
-
-    db = getattr(interaction.client, "_ext_db", None)
-    if db is None:
-        await interaction.followup.send("❌ Database niet beschikbaar.", ephemeral=True)
-        return
-
-    try:
-        await db.upsert_war_status(str(interaction.user.id), choice)
-    except Exception:
-        logger.exception(
-            "war_guild_status: upsert_war_status failed for user %s", interaction.user.id
-        )
-        await interaction.followup.send(
-            "❌ Er is een fout opgetreden bij het opslaan van je keuze. Probeer het opnieuw.",
-            ephemeral=True,
-        )
-        return
-
-    label = "✅ Ready voor war" if choice == "ready" else "🌾 Eco nodig"
-    await interaction.followup.send(
-        f"Jouw status is ingesteld op: **{label}**", ephemeral=True
-    )
+_KEY_DASH_PAR = "wg_dash_paraatheid_msg_id"
 
 
 # ── Main cog ─────────────────────────────────────────────────────────────────
@@ -109,70 +48,16 @@ class WarGuildStatusCog(TaskCogBase, name="war_guild_status"):
         return self.bot.get_guild(int(self._war_cfg["guild_id"]))
 
     @property
-    def _war_status_channel_id(self) -> int:
-        return int(self._war_cfg["war_status_channel_id"])
-
-    @property
     def _dashboard_channel_id(self) -> int:
         return int(self._war_cfg["dashboard_channel_id"])
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def cog_load(self) -> None:
-        self.bot.add_view(WarStatusView())
-        asyncio.create_task(self._deferred_startup())
         self._dashboard_task.start()
 
     def cog_unload(self) -> None:
         self._dashboard_task.cancel()
-
-    async def _deferred_startup(self) -> None:
-        await self._wait_for_services()
-        await self._ensure_war_status_message()
-
-    # ── War-status button message ─────────────────────────────────────────────
-
-    async def _ensure_war_status_message(self) -> None:
-        guild = self._war_guild
-        if not guild:
-            logger.warning(
-                "war_guild_status: war guild %s not found", self._war_cfg.get("guild_id")
-            )
-            return
-        channel = guild.get_channel(self._war_status_channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            logger.warning(
-                "war_guild_status: war_status channel %d not found",
-                self._war_status_channel_id,
-            )
-            return
-
-        if self._db:
-            stored = await self._db.get_poll_state(_KEY_STATUS_MSG)
-            if stored:
-                try:
-                    await channel.fetch_message(int(stored))
-                    logger.info(
-                        "war_guild_status: war_status message %s still exists", stored
-                    )
-                    return
-                except discord.NotFound:
-                    pass
-
-        embed = discord.Embed(
-            title="⚔️ War Status",
-            description=(
-                "Geef aan of je klaar bent om te vechten, of nog eco nodig hebt.\n\n"
-                "Klik op de knop die bij jouw situatie past. "
-                "Je kunt je keuze altijd bijwerken door opnieuw te klikken."
-            ),
-            colour=discord.Colour(0xFF6600),
-        )
-        embed.set_footer(text="Jouw keuze wordt opgeslagen en getoond op het dashboard.")
-        msg = await channel.send(embed=embed, view=WarStatusView())
-        if self._db:
-            await self._db.set_poll_state(_KEY_STATUS_MSG, str(msg.id))
-        logger.info("war_guild_status: posted war_status message %d", msg.id)
 
     # ── Hourly dashboard task ─────────────────────────────────────────────────
 
@@ -200,10 +85,7 @@ class WarGuildStatusCog(TaskCogBase, name="war_guild_status"):
             return
 
         paraatheid_embeds = await self._build_paraatheid_embeds()
-        warstatus_embed = await self._build_warstatus_embed()
-
         await self._upsert_dashboard_message(channel, _KEY_DASH_PAR, paraatheid_embeds)
-        await self._upsert_dashboard_message(channel, _KEY_DASH_WS, [warstatus_embed])
 
     async def _upsert_dashboard_message(
         self,
@@ -235,37 +117,7 @@ class WarGuildStatusCog(TaskCogBase, name="war_guild_status"):
     # ── Paraatheid embed builder ──────────────────────────────────────────────
 
     async def _build_paraatheid_embeds(self) -> list[discord.Embed]:
-        """Build an embed showing NL MU readiness grouped by type (nl_mus mode)."""
-        testing = getattr(self.bot, "testing", False)
-        mus_json = "templates/mus.testing.json" if testing else "templates/mus.json"
-        try:
-            with open(mus_json, encoding="utf-8") as f:
-                mus_data = json.load(f)
-        except Exception as exc:
-            logger.error("war_guild_status: cannot read %s: %s", mus_json, exc)
-            return []
-
-        mu_types: dict[str, str] = {}
-        entries = [e for e in mus_data.get("embeds", []) if isinstance(e, dict)]
-        for entry in entries:
-            name = str(entry.get("name") or f"MU {str(entry.get('id', ''))[:8]}")
-            type_raw = str(entry.get("type", "")).strip().lower()
-            if type_raw == "elite":
-                mu_types[name] = "Elite MU"
-            elif type_raw == "eco":
-                mu_types[name] = "Eco MU"
-            else:
-                mu_types[name] = "Standaard MU"
-
-        # Backward compat: old schema uses title + description[**...**]
-        if not mu_types:
-            for emb in entries:
-                title = emb.get("title", "")
-                m = re.search(r"\[\*\*(.+?)\*\*\]", emb.get("description", ""))
-                mu_types[title] = m.group(1) if m else "Standaard MU"
-        if not mu_types:
-            return []
-
+        """Build an embed showing NL MU readiness grouped by division."""
         try:
             mu_stats = await self._db.get_all_mu_readiness()
         except Exception as exc:
@@ -276,15 +128,17 @@ class WarGuildStatusCog(TaskCogBase, name="war_guild_status"):
         hdr = f"{'naam':<{name_w}}  {'par':>5}  {'kan':>3}  {'≥15':>3}  {'≥20':>3}  {'avg':>5}"
         sep = "─" * len(hdr)
 
-        cat_cfg = [
-            ("Elite MU", "🟠 Elite MU"),
-            ("Eco MU", "🟢 Eco MU"),
-            ("Standaard MU", "🔵 Standaard MU"),
-        ]
+        div_labels = {
+            1: "🥇 Divisie 1",
+            2: "🥈 Divisie 2",
+            3: "🥉 Divisie 3",
+            4: "4️⃣ Divisie 4",
+            5: "5️⃣ Divisie 5",
+        }
 
         now_str = datetime.now(timezone.utc).strftime("%d/%m %H:%M")
         emb = discord.Embed(
-            title="📊 Paraatheid — Alle NL MUs",
+            title="📊 Paraatheid — Alle NL Divisies",
             description=(
                 "par = paraat/totaal  •  kan = kan resetten  •  "
                 "≥15/≥20 = paraat op dat level  •  avg = gem. eco-wachttijd"
@@ -293,16 +147,15 @@ class WarGuildStatusCog(TaskCogBase, name="war_guild_status"):
         )
 
         has_data = False
-        for mu_type, field_label in cat_cfg:
-            mu_names_of_type = [n for n, t in mu_types.items() if t == mu_type]
-            if not mu_names_of_type:
-                continue
+        for div_num in sorted(DIVISION_MUS.keys()):
+            mu_names = DIVISION_MUS[div_num]
+            field_label = div_labels.get(div_num, f"Divisie {div_num}")
 
             rows: list[str] = []
             total_par = total_total = total_kan = total_w15 = total_w20 = 0
             all_waiting: list[float] = []
 
-            for mu_name in mu_names_of_type:
+            for mu_name in mu_names:
                 stats = mu_stats.get(mu_name)
                 if stats is None:
                     rows.append(
@@ -379,64 +232,6 @@ class WarGuildStatusCog(TaskCogBase, name="war_guild_status"):
         )
         return [emb]
 
-    # ── War-status embed builder ──────────────────────────────────────────────
-
-    async def _build_warstatus_embed(self) -> discord.Embed:
-        """Build an embed showing war-status choices grouped per MU."""
-        now_str = datetime.now(timezone.utc).strftime("%d/%m %H:%M")
-        colour = discord.Colour(0xFFB612)
-
-        try:
-            rows = await self._db.get_war_status_by_mu()
-        except Exception as exc:
-            logger.error("war_guild_status: get_war_status_by_mu failed: %s", exc)
-            return discord.Embed(
-                title="⚔️ War Status — per MU",
-                description="❌ Kon data niet ophalen.",
-                colour=colour,
-            )
-
-        # Aggregate: {mu_name: {ready: int, eco: int}}
-        by_mu: dict[str, dict[str, int]] = {}
-        for row in rows:
-            mu = row["mu_name"]
-            choice = row["choice"]
-            cnt = row["count"]
-            if mu not in by_mu:
-                by_mu[mu] = {"ready": 0, "eco": 0}
-            if choice in by_mu[mu]:
-                by_mu[mu][choice] = cnt
-
-        emb = discord.Embed(title="⚔️ War Status — per MU", colour=colour)
-
-        if not by_mu:
-            emb.description = "_Nog geen statussen ingesteld._"
-            emb.set_footer(text=f"Bijgewerkt: {now_str} UTC")
-            return emb
-
-        total_ready = total_eco = 0
-        lines: list[str] = []
-        for mu_name in sorted(by_mu.keys()):
-            r = by_mu[mu_name].get("ready", 0)
-            e = by_mu[mu_name].get("eco", 0)
-            total = r + e
-            lines.append(
-                f"**{mu_name}**  —  ✅ {r} ready  •  🌾 {e} eco  *(totaal: {total})*"
-            )
-            total_ready += r
-            total_eco += e
-
-        grand_total = total_ready + total_eco
-        summary = (
-            f"✅ **{total_ready}** ready  •  🌾 **{total_eco}** eco  "
-            f"*(van {grand_total} spelers)*"
-        )
-        emb.description = summary + "\n\n" + "\n".join(lines)
-        emb.set_footer(
-            text=f"Bijgewerkt: {now_str} UTC  •  Automatisch elk uur vernieuwd"
-        )
-        return emb
-
 
     # ── Manual refresh command ────────────────────────────────────────────────
 
@@ -459,72 +254,6 @@ class WarGuildStatusCog(TaskCogBase, name="war_guild_status"):
         async with ctx.typing():
             await self._update_dashboard()
 
-    # ── War status list command ───────────────────────────────────────────────
-
-    @commands.command(name="warstatus", aliases=["ws"])
-    @commands.is_owner()
-    async def war_status_list(self, ctx: commands.Context) -> None:
-        """Show everyone who clicked a war-status button (owner only)."""
-        try:
-            await ctx.message.delete()
-        except discord.Forbidden:
-            pass
-
-        rows = await self._db.get_all_war_statuses()
-        if not rows:
-            await ctx.send("Niemand heeft nog een status ingesteld.", delete_after=30)
-            return
-
-        ready_lines: list[str] = []
-        eco_lines: list[str] = []
-        for row in rows:
-            mention = f"<@{row['discord_user_id']}>"
-            ts = row["updated_at"][:16].replace("T", " ")  # "YYYY-MM-DD HH:MM"
-            line = f"{mention} `{ts}`"
-            if row["choice"] == "ready":
-                ready_lines.append(line)
-            else:
-                eco_lines.append(line)
-
-        embed = discord.Embed(title="⚔️ War Status — overzicht", colour=discord.Colour(0xFFB612))
-        embed.description = (
-            f"✅ **{len(ready_lines)} ready**  •  🌾 **{len(eco_lines)} eco**  "
-            f"*(totaal: {len(rows)})*"
-        )
-        if ready_lines:
-            # Split into 1024-char chunks
-            chunk, chunks = [], []
-            for line in ready_lines:
-                chunk.append(line)
-                if sum(len(l) + 1 for l in chunk) > 950:
-                    chunks.append(chunk)
-                    chunk = []
-            if chunk:
-                chunks.append(chunk)
-            for i, c in enumerate(chunks):
-                embed.add_field(
-                    name="✅ Ready" if i == 0 else "✅ Ready (vervolg)",
-                    value="\n".join(c),
-                    inline=False,
-                )
-        if eco_lines:
-            chunk, chunks = [], []
-            for line in eco_lines:
-                chunk.append(line)
-                if sum(len(l) + 1 for l in chunk) > 950:
-                    chunks.append(chunk)
-                    chunk = []
-            if chunk:
-                chunks.append(chunk)
-            for i, c in enumerate(chunks):
-                embed.add_field(
-                    name="🌾 Eco nodig" if i == 0 else "🌾 Eco nodig (vervolg)",
-                    value="\n".join(c),
-                    inline=False,
-                )
-        await ctx.send(embed=embed, delete_after=120)
-
-
 # ── Extension entry point ─────────────────────────────────────────────────────
 
 async def setup(bot) -> None:
@@ -533,8 +262,8 @@ async def setup(bot) -> None:
     if not war_cfg:
         logger.debug("war_guild_status: no war_guild config — cog not loaded")
         return
-    if not war_cfg.get("war_status_channel_id") or not war_cfg.get("dashboard_channel_id"):
-        logger.debug("war_guild_status: missing channel IDs in war_guild config — cog not loaded")
+    if not war_cfg.get("dashboard_channel_id"):
+        logger.debug("war_guild_status: missing dashboard_channel_id in war_guild config — cog not loaded")
         return
     await bot.add_cog(WarGuildStatusCog(bot))
     logger.info("war_guild_status: cog loaded")
