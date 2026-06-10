@@ -89,6 +89,47 @@ class WelcomeView(discord.ui.View):
         """Handle embassy request."""
         await interaction.response.send_modal(VerificationQuestionnaireModal("embassy"))
 
+    @discord.ui.button(
+        label="Admin Contact",
+        style=discord.ButtonStyle.secondary,
+        custom_id="welcome_admin_contact",
+        emoji="📩",
+    )
+    async def admin_contact_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        """Handle admin contact request."""
+        await interaction.response.send_modal(AdminContactModal())
+
+
+class AdminContactModal(discord.ui.Modal, title="Contact Admins"):
+    """Simple modal for sending a question or suggestion to admins."""
+
+    message = discord.ui.TextInput(
+        label="Vraag of suggestie",
+        style=discord.TextStyle.paragraph,
+        placeholder="Stel je vraag of geef je suggestie hier...",
+        required=True,
+        max_length=1000,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            await create_verification_channel(
+                interaction,
+                "admin_contact",
+                questionnaire_answers={"Vraag / Suggestie": str(self.message).strip()},
+            )
+        except Exception:
+            logger.exception(
+                "Unexpected error in create_verification_channel for %s (admin_contact)",
+                interaction.user,
+            )
+            await interaction.followup.send(
+                "Er is een onverwachte fout opgetreden. Probeer het opnieuw of neem contact op met een moderator.",
+                ephemeral=True,
+            )
+
 
 class VerificationQuestionnaireModal(discord.ui.Modal):
     """Questionnaire shown to users before opening a verification ticket."""
@@ -269,7 +310,7 @@ async def create_verification_channel(
     )
 
     username_slug = user.name.lower().replace(" ", "-")
-    known_prefixes = ("citizen-", "belgian-", "foreigner-", "embassy-")
+    known_prefixes = ("citizen-", "belgian-", "foreigner-", "embassy-", "admin-")
     # Only block if there's already a ticket of the *same* type.
     type_prefix = f"{request_type}-"
     existing_channel = None
@@ -323,6 +364,11 @@ async def create_verification_channel(
         role_ids = [roles_cfg.get("border_control")]
         embed_color = discord.Color.blue()
         request_title = "Foreigner Verification Request"
+    elif request_type == "admin_contact":
+        channel_name = f"admin-{ticket_id}-{user.name}"
+        role_ids = [roles_cfg.get("admin")]
+        embed_color = discord.Color.og_blurple()
+        request_title = "Admin Contact"
     else:  # embassy
         channel_name = f"embassy-{ticket_id}-{user.name}"
         # Embassy requests notify multiple high-level roles
@@ -427,14 +473,15 @@ async def create_verification_channel(
         timestamp=datetime.datetime.now(datetime.UTC),
     )
     embed.set_thumbnail(url=user.display_avatar.url)
-    embed.add_field(
-        name="Instructies voor Moderators",
-        value=(
-            f"Gebruik `{'/approve' if not request_type=='embassy' else '/embassyapprove'}` om dit verzoek goed te keuren\n"
-            "Gebruik `/deny` om dit verzoek af te wijzen"
-        ),
-        inline=False,
-    )
+    if request_type != "admin_contact":
+        embed.add_field(
+            name="Instructies voor Moderators",
+            value=(
+                f"Gebruik `{'/approve' if not request_type=='embassy' else '/embassyapprove'}` om dit verzoek goed te keuren\n"
+                "Gebruik `/deny` om dit verzoek af te wijzen"
+            ),
+            inline=False,
+        )
     embed.set_footer(text=f"User ID: {user.id}")
 
     # Send the ticket message, pinging relevant moderators
@@ -460,6 +507,11 @@ async def create_verification_channel(
             "Hallo, stuur alsjeblieft een screenshot van je WarEra profiel "
             "om je verificatieverzoek af te ronden."
         )
+    elif request_type == "admin_contact":
+        instruction_text = (
+            "Hallo! Een admin zal zo snel mogelijk reageren op je bericht. "
+            "Je kunt hier alvast meer context geven als dat nodig is."
+        )
     elif request_type == "embassy":
         mofa_user_info = config.get("users", {}).get("mofa")
         mofa_user_id = mofa_user_info.get("discord_id") if mofa_user_info else None
@@ -483,7 +535,13 @@ async def create_verification_channel(
     await channel.send(content=user.mention, embed=instructions_embed)
 
     # Confirm to the user (only they can see this response)
-    if request_type == "citizen":
+    if request_type == "admin_contact":
+        await interaction.followup.send(
+            f"Je bericht is verstuurd naar de admins: {channel.mention}\n"
+            "Een admin zal zo snel mogelijk reageren.",
+            ephemeral=True,
+        )
+    elif request_type == "citizen":
         await interaction.followup.send(
             f"Je verificatiekanaal is aangemaakt: {channel.mention}\n"
             "Wacht op een moderator om je verzoek te beoordelen.",

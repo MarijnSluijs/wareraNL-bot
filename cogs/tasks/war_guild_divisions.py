@@ -51,7 +51,7 @@ DIVISION_MUS: dict[int, list[str]] = {
         "Reg. Genietroepen",
         "Gild der Gulden",
         "De Reddingsbrigade",
-        "Lokale Helden",
+        "Lokale helden",
         "Baronie Wachteenheid",
         "MIVD",
     ],
@@ -67,7 +67,7 @@ DIVISION_MUS: dict[int, list[str]] = {
     5: [
         "TSCo",
         "Henk",
-        "V. O. C.",
+        "V.O.C.",
         "Kwaakende Kikkers",
         "Dutch Bounty Hunters",
         "OTCo",
