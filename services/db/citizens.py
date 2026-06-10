@@ -90,6 +90,17 @@ class CitizensMixin:
                 (mu_id, mu_name, user_id),
             )
 
+    async def clear_all_citizen_mus(self) -> None:
+        """Clear mu_id and mu_name for every row in citizen_levels.
+
+        Called before a full MU membership sweep so that citizens who have
+        left all known MUs end up with NULL rather than stale data.
+        """
+        await self._conn.execute(
+            "UPDATE citizen_levels SET mu_id = NULL, mu_name = NULL"
+        )
+        await self._conn.commit()
+
     async def clear_citizen_mus_for_country(self, country_id: str) -> None:
         """Clear military unit information for all citizens in a specific country."""
         await self._conn.execute(

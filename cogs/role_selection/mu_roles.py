@@ -368,7 +368,15 @@ class MuRoles(commands.Cog, name="mu_roles"):
         mus_path_str = "templates/mus.testing.json" if testing else "templates/mus.json"
         if citizen_cache and nl_country_id:
             try:
-                await citizen_cache.refresh_mu_memberships(nl_country_id, mus_path_str)
+                with open(mus_path_str, encoding="utf-8") as _f:
+                    _mus_data = json.load(_f)
+                _mu_entries = [
+                    (str(e.get("id", "")).strip(), str(e.get("name") or e.get("title") or ""))
+                    for e in _mus_data.get("embeds", [])
+                    if str(e.get("id", "")).strip()
+                ]
+                if _mu_entries:
+                    await citizen_cache.refresh_mu_memberships(nl_country_id, _mu_entries)
             except Exception as _e:
                 logger.warning("voegmu: refresh_mu_memberships failed: %s", _e)
 

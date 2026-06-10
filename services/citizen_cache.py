@@ -254,52 +254,20 @@ class CitizenCache:
         players.sort(key=lambda p: -(p["level"] or 0))
         return effective_name, players
 
-    async def refresh_mu_memberships(self, country_id: str, mus_json_path: str) -> int:
+    async def refresh_mu_memberships(self, country_id: str, mu_entries: list[tuple[str, str]]) -> int:
         """Fetch MU member lists from the API and write mu_id/mu_name to citizen_levels.
 
-        Reads MU IDs from *mus_json_path* (the templates/mus.json file), paginates
-        /mu.getById for each MU to get the member user IDs, then bulk-updates the DB.
+        Accepts a list of (mu_id, mu_name) pairs. For each MU, calls /mu.getById to
+        get the current member list, then bulk-updates the DB.
 
         Only citizens already present in citizen_levels are updated (via user_id match).
-        Uses a targeted clear so citizens assigned to MUs *outside* mus.json keep
+        Uses a targeted clear so citizens assigned to MUs outside the given list keep
         their MU assignment (set from their profile during refresh_country).
 
         Returns the number of citizen rows updated.
         """
-        # Load MU list from mus.json
-        try:
-            with open(mus_json_path, encoding="utf-8") as f:
-                mus_data = json.load(f)
-        except Exception as exc:
-            logger.warning(
-                "refresh_mu_memberships: failed to load %s: %s", mus_json_path, exc
-            )
-            return 0
-
-        embeds = mus_data.get("embeds", [])
-        if not embeds:
-            return 0
-
-        import re
-
-        mu_entries: list[tuple[str, str]] = []  # (mu_id, mu_name)
-        for embed in embeds:
-            mu_id = str(embed.get("id") or "").strip()
-            if not mu_id:
-                description = embed.get("description", "")
-                m = re.search(r"/mu/([A-Za-z0-9]+)", description)
-                if m:
-                    mu_id = m.group(1)
-            if not mu_id:
-                continue
-
-            mu_name = str(embed.get("name") or embed.get("title") or f"MU {mu_id[:8]}")
-            mu_entries.append((mu_id, mu_name))
-
         if not mu_entries:
-            logger.warning(
-                "refresh_mu_memberships: no MU IDs found in %s", mus_json_path
-            )
+            logger.warning("refresh_mu_memberships: empty mu_entries list")
             return 0
 
         # Clear only citizens currently assigned to one of the known MU IDs.

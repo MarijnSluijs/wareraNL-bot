@@ -13,6 +13,7 @@ import discord
 from discord.ext import commands, tasks
 
 from cogs.tasks._base import TaskCogBase
+from cogs.tasks.war_guild_divisions import DIVISION_MUS
 from services.country_utils import country_id as cid_of
 from services.country_utils import extract_country_list
 
@@ -136,10 +137,19 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
         # Refresh MU memberships from the authoritative MU member lists so that
         # citizens who recently joined/changed MUs are correctly tagged.
         try:
-            testing = getattr(self.bot, "testing", False)
-            mus_json = "templates/mus.testing.json" if testing else "templates/mus.json"
-            updated = await self._citizen_cache.refresh_mu_memberships(nl_country_id, mus_json)
-            logger.info("citizen_refresh: NL MU memberships refreshed (%d updated)", updated)
+            mu_entries: list[tuple[str, str]] = []
+            for mu_name in [n for names in DIVISION_MUS.values() for n in names]:
+                mu_id, effective_name = await self._db.get_known_mu_by_name(mu_name)
+                if mu_id:
+                    mu_entries.append((mu_id, effective_name or mu_name))
+            if mu_entries:
+                updated = await self._citizen_cache.refresh_mu_memberships(nl_country_id, mu_entries)
+                logger.info("citizen_refresh: NL MU memberships refreshed (%d updated)", updated)
+            else:
+                logger.warning(
+                    "citizen_refresh: no division MU IDs found in known_mus, "
+                    "skipping MU membership refresh"
+                )
         except Exception:
             logger.exception("citizen_refresh: NL MU membership refresh failed")
 
