@@ -62,8 +62,8 @@ _ETHICS_LABELS: dict[str, str] = {
 # Descriptive label per axis per value level (game-accurate names)
 _ETHICS_VALUE_LABELS: dict[str, dict[int, str]] = {
     "militarism": {
-        2:  "Fanatic Militarist",
-        1:  "Militarist",
+        2:  "Fanatic Expansionist",
+        1:  "Expansionist",
         0:  "Neutraal",
         -1: "Pacifist",
         -2: "Fanatic Pacifist",
@@ -399,6 +399,12 @@ class EthicsWatcherTasks(TaskCogBase, name="ethics_watcher_tasks"):
             embed.add_field(
                 name="Huidige ethiek",
                 value="\n".join(current_lines),
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="Huidige ethiek",
+                value="**Unethical**",
                 inline=False,
             )
 
