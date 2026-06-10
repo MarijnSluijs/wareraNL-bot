@@ -165,9 +165,15 @@ class Users(CommandCogBase, name="users"):
         nl_country_id = self.config.get("nl_country_id")
         if citizen_cache and nl_country_id:
             try:
-                await citizen_cache.refresh_mu_memberships(
-                    nl_country_id, str(mus_path)
-                )
+                _mu_entries_for_refresh = [
+                    (str(e.get("id", "")).strip(), str(e.get("name") or e.get("title") or ""))
+                    for e in template_raw.get("embeds", [])
+                    if str(e.get("id", "")).strip()
+                ]
+                if _mu_entries_for_refresh:
+                    await citizen_cache.refresh_mu_memberships(
+                        nl_country_id, _mu_entries_for_refresh
+                    )
             except Exception:
                 logger.warning("sync_mu_roles: refresh_mu_memberships failed, continuing with cached data", exc_info=True)
 

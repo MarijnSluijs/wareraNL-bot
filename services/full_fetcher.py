@@ -349,11 +349,17 @@ async def fetch_all_mu_names(client: APIClient, db: Database) -> int:
 
 
 async def fetch_mu_memberships(cache: CitizenCache, db: Database) -> tuple[int, int]:
-    """Sweep every known MU's membership list (slow — gated by env flag)."""
+    """Sweep every known MU's membership list (slow — gated by env flag).
+
+    Clears all MU assignments first so citizens who left every known MU end up
+    with NULL rather than retaining stale data.
+    """
     dataset = "all_countries.mu_memberships"
     await db.mark_started(dataset, source="full_fetcher")
     started = time.monotonic()
     try:
+        # Clear first so citizens not in any known MU don't retain stale data.
+        await db.clear_all_citizen_mus()
         mus_tagged, citizens_updated = await cache.sweep_all_mu_memberships()
         duration_ms = int((time.monotonic() - started) * 1000)
         await db.mark_finished(dataset, status="ok", duration_ms=duration_ms)

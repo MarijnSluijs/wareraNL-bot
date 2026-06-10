@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import discord
@@ -19,6 +18,7 @@ from discord import app_commands
 from discord.ext import tasks
 
 from cogs.tasks._base import TaskCogBase
+from cogs.tasks.war_guild_divisions import DIVISION_MUS
 from services.country_utils import extract_country_list
 from utils.checks import has_privileged_role
 
@@ -34,14 +34,6 @@ _MARIJN_DISCORD_ID = 565626197048819731
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
-
-def _mus_template_path(testing: bool = False) -> Path:
-    return Path("templates/mus.testing.json" if testing else "templates/mus.json")
-
-
-def _mu_entries(data: dict) -> list[dict[str, Any]]:
-    return [e for e in data.get("embeds", []) if isinstance(e, dict)]
-
 
 def _unwrap_mu_getbyid(resp: Any) -> dict | None:
     """Unwrap tRPC response from /mu.getById and return the data dict."""
@@ -158,18 +150,19 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
         if not self._db or not self._client:
             return stats
 
-        testing = bool(getattr(self.bot, "testing", False))
-        path = _mus_template_path(testing)
-        if not path.exists():
-            return stats
-
-        data = json.loads(path.read_text(encoding="utf-8"))
-        tracked_mu_ids: list[str] = [
-            str(e.get("id") or "").strip()
-            for e in _mu_entries(data)
-            if str(e.get("id") or "").strip()
+        # Look up MU IDs for all division MUs from the known_mus registry
+        all_mu_names: list[str] = [
+            name for names in DIVISION_MUS.values() for name in names
         ]
+        tracked_mu_ids: list[str] = []
+        for mu_name in all_mu_names:
+            mu_id, _ = await self._db.get_known_mu_by_name(mu_name)
+            if mu_id:
+                tracked_mu_ids.append(mu_id)
         if not tracked_mu_ids:
+            logger.warning(
+                "commander_role_check: no MU IDs found in known_mus for division MUs"
+            )
             return stats
 
         commandant_role_id: int | None = None
@@ -207,6 +200,7 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                 )
 
         # In testing mode, merge in fake commanders defined in config
+        testing = bool(getattr(self.bot, "testing", False))
         if testing:
             fake_commanders = self.bot.config.get("testing_commanders", [])
             current_commanders.update(str(c) for c in fake_commanders if c)
