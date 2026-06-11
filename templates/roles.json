@@ -100,7 +100,20 @@
       ]
     },
     {
-      "title": "🗳️ Verkiezingen",
+      "title": "� Server Bump",
+      "color": "0x2ecc71",
+      "description": "Klik op de knop hieronder om de **Bump** rol te krijgen.\n\nMet deze rol word je gepingd wanneer het tijd is om onze server te bumpen in een andere community server, om Nederland te promoten.",
+      "buttons": [
+        {
+          "label": "Bump",
+          "role_id": 1514627397880774858,
+          "style": "success",
+          "row": 0
+        }
+      ]
+    },
+    {
+      "title": "�🗳️ Verkiezingen",
       "color": "0x9b59b6",
       "description": "Kies met onderstaande knoppen je toegang tot de campagnekanalen.\n\n**Kandidaat-President**: Voor deelname aan de presidentsverkiezingen.\n**Kandidaat-Congreslid**: Voor deelname aan de congresverkiezingen.\n**Verkiezingen**: Pings bij verkiezingen en gerelateerde aankondigingen.",
       "buttons": [
