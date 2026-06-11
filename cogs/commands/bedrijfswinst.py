@@ -733,6 +733,36 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
             "_recommended_entries": recommended_entries,
         }
 
+    async def _get_company_production_bonuses(
+        self, company_ids: list[str]
+    ) -> dict[str, float]:
+        """Return {company_id: total_production_bonus_pct} from company.getProductionBonus."""
+        if not company_ids:
+            return {}
+        inputs = [{"companyId": cid} for cid in company_ids]
+        try:
+            results = await asyncio.wait_for(
+                self._client.batch_get("company.getProductionBonus", inputs),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("bedrijfswinst: getProductionBonus batch timed out")
+            return {}
+        except Exception as exc:
+            logger.warning("bedrijfswinst: getProductionBonus batch failed: %s", exc)
+            return {}
+        out: dict[str, float] = {}
+        for cid, raw in zip(company_ids, results):
+            data = _unwrap(raw) if isinstance(raw, dict) else raw
+            if isinstance(data, dict):
+                try:
+                    out[cid] = float(data.get("total") or 0)
+                except (TypeError, ValueError):
+                    out[cid] = 0.0
+            else:
+                out[cid] = 0.0
+        return out
+
     async def _get_worker_profiles(self, user_ids: list[str]) -> dict[str, dict]:
         """Return a {user_id: {username, energy, production}} mapping via batch getUserLite."""
         if not user_ids:
@@ -818,6 +848,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
         (
             workers_lists,
             prod_bonuses_list,
+            ae_prod_bonuses_map,
             (
                 _avg_prices,
                 (prod_points, prod_needs),
@@ -836,6 +867,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                     for c in companies
                 ]
             ),
+            self._get_company_production_bonuses([c.get("_id", "") for c in companies]),
             asyncio.gather(
                 self._get_item_prices(),
                 self._get_production_points(),
@@ -847,6 +879,25 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
         )
         # Overwrite average prices with highest buy-order prices where available
         item_prices = await self._get_highest_bid_prices(item_codes_needed, _avg_prices)
+
+        # Compute total automated engine PP/day across all companies.
+        # Level N gives N PP/hr → N × 24 PP/day, multiplied by the company's total
+        # production bonus (as returned by company.getProductionBonus).
+        # Disabled companies (disabledAt is set) are excluded.
+        _AE_CC_PER_PP = 0.08
+        total_ae_pp_day = 0.0
+        for company in companies:
+            if company.get("disabledAt"):
+                continue
+            cid = company.get("_id", "")
+            ae_level = int(
+                (company.get("activeUpgradeLevels") or {}).get("automatedEngine") or 0
+            )
+            if ae_level <= 0:
+                continue
+            ae_bonus_pct = ae_prod_bonuses_map.get(cid, 0.0)
+            total_ae_pp_day += ae_level * 24 * (1.0 + ae_bonus_pct / 100.0)
+
         workers_by_id: dict[str, list[dict]] = {
             c.get("_id", ""): w for c, w in zip(companies, workers_lists)
         }
@@ -1302,10 +1353,17 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                         f"{_p_color}{_profit_row}{_S_RST}",
                     ]
                 )
+                _ae_cc_day = total_ae_pp_day * _AE_CC_PER_PP
+                _ae_line = (
+                    f"🤖 **Automated engine:** {total_ae_pp_day:,.1f} PP/dag → {_fmt_cc(_ae_cc_day)}/dag (@ {_AE_CC_PER_PP} CC/PP)\n\n"
+                    if total_ae_pp_day > 0
+                    else ""
+                )
                 summary = discord.Embed(
                     title=f"{discord.utils.escape_markdown(username)} — inkomsten werknemers bij bedrijven",
                     description=(
-                        f"*Inkomsten van werknemers, automated engine niet meegeteld.*\n\n"
+                        f"{_ae_line}"
+                        f"*Inkomsten van werknemers (automated engine niet meegeteld):*\n\n"
                         f"```ansi\n{summary_table}\n```"
                     ),
                     colour=colour,
@@ -1317,9 +1375,15 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
                 )
                 all_embeds = [summary] + embeds
             else:
+                _ae_cc_day_no_emp = total_ae_pp_day * _AE_CC_PER_PP
+                _ae_line_no_emp = (
+                    f"🤖 **Automated engine:** {total_ae_pp_day:,.1f} PP/dag → {_fmt_cc(_ae_cc_day_no_emp)}/dag (@ {_AE_CC_PER_PP} CC/PP)\n\n"
+                    if total_ae_pp_day > 0
+                    else ""
+                )
                 no_emp_embed = discord.Embed(
                     title=f"{discord.utils.escape_markdown(username)} — inkomsten werknemers bij bedrijven",
-                    description="*Deze speler heeft geen werknemers in dienst.*",
+                    description=f"{_ae_line_no_emp}*Deze speler heeft geen werknemers in dienst.*",
                     colour=colour,
                 )
                 if avatar_url:
