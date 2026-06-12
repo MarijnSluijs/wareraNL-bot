@@ -11,7 +11,6 @@ from cogs.commands.bedrijvenbonuscheck import (
     _load_state,
     _save_state,
 )
-from cogs.commands.mu_onboarding import MUOnboardingView
 from cogs.commands.pillreminder import PillReminderView
 from cogs.commands.pillreminder import _load_state as _pill_load_state
 from cogs.commands.pillreminder import _save_state as _pill_save_state
@@ -45,7 +44,6 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
         # Re-register persistent views for special buttons
         self.bot.add_view(BedrijvenBonusCheckView())
         self.bot.add_view(PillReminderView())
-        self.bot.add_view(MUOnboardingView(bot))
 
     @app_commands.command(
         name="generalroles", description="Post de rol-knoppen in het rollen-kanaal."
@@ -190,22 +188,6 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
         pill_state = _pill_load_state(self.bot.testing)
         pill_state["button_message_id"] = pill_msg.id
         _pill_save_state(pill_state, self.bot.testing)
-
-        # Post the MU application button
-        mu_embed = discord.Embed(
-            title="🇳🇱 MU Aanmelden",
-            description="Klik op de onderstaande knop om je MU aan te melden bij de overheid.",
-            color=discord.Color.gold(),
-        )
-        mu_embed.set_thumbnail(
-            url="https://jorisvanderbijl.nl/wp-content/uploads/2022/05/ministerie-defensie-logo-480x480.png"
-        )
-        await target_channel.send(embed=mu_embed, view=MUOnboardingView(self.bot))
-
-        await interaction.followup.send(
-            f"✅ Rol-knoppen gepost in {target_channel.mention}.", ephemeral=True
-        )
-
 
 async def setup(bot) -> None:
     """Add the GeneralRoles cog to the bot."""
