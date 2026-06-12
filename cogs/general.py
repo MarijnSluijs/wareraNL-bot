@@ -343,6 +343,7 @@ class General(commands.Cog, name="general"):
         "bonuscog": "🏭",
         "bedrijfswinstcog": "💰",
         "bedrijvenbonuscheck": "💰",
+        "buddysysteemcog": "🤝",
         "ecobuildcog": "🌱",
         "geluk": "🍀",
         "globalluck": "🌍",
