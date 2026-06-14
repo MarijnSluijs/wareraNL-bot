@@ -625,39 +625,59 @@ class CitizensMixin:
         return names
 
     async def get_all_mu_readiness(
-        self, country_id: Optional[str] = None
+        self, country_id: Optional[str] = None, use_membership: bool = True
     ) -> dict[str, dict]:
         """Readiness stats for every distinct MU, keyed by mu_name.
 
         Each value: war, total, can_reset, waiting_days, war_15, war_20
 
-        Uses citizen_mu_membership (authoritative, populated by the war guild's
-        MU sweep) joined with citizen_levels for skill/level data, falling back
-        to citizen_levels.mu_id/mu_name (populated by /peil mus on any bot) for
-        citizens whose MU membership isn't present in citizen_mu_membership —
-        e.g. on bots where the war-guild sweep never runs.
+        By default, uses citizen_mu_membership (authoritative, populated by the
+        war guild's MU sweep) joined with citizen_levels for skill/level data,
+        falling back to citizen_levels.mu_id/mu_name (populated by /peil mus on
+        any bot) for citizens whose MU membership isn't present in
+        citizen_mu_membership — e.g. on bots where the war-guild sweep never
+        runs.
+
+        If *use_membership* is False, citizen_mu_membership is ignored entirely
+        and only citizen_levels.mu_id/mu_name is used. This gives identical
+        results across bots regardless of whether the war-guild sweep runs,
+        since citizen_levels.mu_id is refreshed the same way (via /peil mus and
+        the hourly division MU refresh) on every bot.
         """
         now = datetime.now(timezone.utc)
-        base_sql = (
-            "SELECT mu_name, skill_mode, last_skills_reset_at, level, country_id FROM ("
-            "  SELECT cmu.mu_name AS mu_name, cl.skill_mode, cl.last_skills_reset_at, "
-            "         cl.level, cl.country_id "
-            "  FROM citizen_mu_membership cmu "
-            "  JOIN citizen_levels cl ON cl.user_id = cmu.in_game_user_id "
-            "  UNION ALL "
-            "  SELECT cl.mu_name AS mu_name, cl.skill_mode, cl.last_skills_reset_at, "
-            "         cl.level, cl.country_id "
-            "  FROM citizen_levels cl "
-            "  WHERE cl.mu_id IS NOT NULL AND cl.mu_name IS NOT NULL "
-            "    AND cl.user_id NOT IN (SELECT in_game_user_id FROM citizen_mu_membership)"
-            ")"
-        )
-        if country_id:
-            sql = base_sql + " WHERE country_id = ?"
-            params: tuple = (country_id,)
+        if use_membership:
+            base_sql = (
+                "SELECT mu_name, skill_mode, last_skills_reset_at, level, country_id FROM ("
+                "  SELECT cmu.mu_name AS mu_name, cl.skill_mode, cl.last_skills_reset_at, "
+                "         cl.level, cl.country_id "
+                "  FROM citizen_mu_membership cmu "
+                "  JOIN citizen_levels cl ON cl.user_id = cmu.in_game_user_id "
+                "  UNION ALL "
+                "  SELECT cl.mu_name AS mu_name, cl.skill_mode, cl.last_skills_reset_at, "
+                "         cl.level, cl.country_id "
+                "  FROM citizen_levels cl "
+                "  WHERE cl.mu_id IS NOT NULL AND cl.mu_name IS NOT NULL "
+                "    AND cl.user_id NOT IN (SELECT in_game_user_id FROM citizen_mu_membership)"
+                ")"
+            )
+            if country_id:
+                sql = base_sql + " WHERE country_id = ?"
+                params: tuple = (country_id,)
+            else:
+                sql = base_sql
+                params = ()
         else:
-            sql = base_sql
-            params = ()
+            base_sql = (
+                "SELECT mu_name, skill_mode, last_skills_reset_at, level, country_id "
+                "FROM citizen_levels "
+                "WHERE mu_id IS NOT NULL AND mu_name IS NOT NULL"
+            )
+            if country_id:
+                sql = base_sql + " AND country_id = ?"
+                params = (country_id,)
+            else:
+                sql = base_sql
+                params = ()
         mus: dict[str, dict] = {}
         async with self._conn.execute(sql, params) as cur:
             async for row in cur:
