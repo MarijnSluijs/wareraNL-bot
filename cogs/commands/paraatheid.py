@@ -8,9 +8,7 @@ This module defines the ParaatheadCog, which provides the /paraatheid command to
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 import time as _t
 from datetime import datetime as _dt
 from datetime import timezone as _tz
@@ -25,10 +23,28 @@ from cogs.commands._base import (
     citizen_autocomplete,
     country_autocomplete,
 )
+from cogs.tasks.war_guild_divisions import DIVISION_MUS
 from services.country_utils import country_id as cid_of
 from services.country_utils import find_country
 
 logger = logging.getLogger("discord_bot")
+
+# /paraatheid nl_mus categorisation — overrides any "type" set in mus.json.
+# Any MU not listed here falls into "Casual MU".
+_NL_MU_CATEGORIES: dict[str, str] = {
+    "De Heeren XVII": "Elite MU",
+    "Korps Commando's": "Elite MU",
+    "Korps Mariniers": "Elite MU",
+    "Regiment Huzaren": "Elite MU",
+    "OTCo": "Edu MU",
+    "OTCo II": "Edu MU",
+    "De Belastingdienst": "Edu MU",
+    "TSCo": "Starter MU",
+    "V.O.C.": "Starter MU",
+    "Dutch Bounty Hunters": "Starter MU",
+    "Henk": "Starter MU",
+    "Kwaakende Kikkers": "Starter MU",
+}
 
 
 def _fmt_hm(secs: float) -> str:
@@ -443,42 +459,16 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
         # ══ Mode 3: NL MUs ════════════════════════════════════════════════
         if nl_mus:
             nl_country_id = self.config.get("nl_country_id")
-            testing = getattr(self.bot, "testing", False)
-            mus_json = "templates/mus.testing.json" if testing else "templates/mus.json"
 
-            try:
-                with open(mus_json, encoding="utf-8") as _f:
-                    _mus_data = json.load(_f)
-            except Exception as exc:
-                await ctx.send(f"Kon {mus_json} niet lezen: {exc}")
-                return
             _mu_types: dict[str, str] = {}
-
-            # New schema: {id, type, role_id, name, thumbnail}
-            _entries = [e for e in _mus_data.get("embeds", []) if isinstance(e, dict)]
-            _new_schema = any(e.get("id") and e.get("type") for e in _entries)
-            if _new_schema:
-                for _entry in _entries:
-                    _name = str(_entry.get("name") or f"MU {str(_entry.get('id'))[:8]}")
-                    _type_raw = str(_entry.get("type", "")).strip().lower()
-                    if _type_raw == "elite":
-                        _mu_types[_name] = "Elite MU"
-                    elif _type_raw == "eco":
-                        _mu_types[_name] = "Eco MU"
-                    else:
-                        _mu_types[_name] = "Standaard MU"
-
-            # Backward compatibility for old schema
+            for _div_mus in DIVISION_MUS.values():
+                for _name in _div_mus:
+                    _mu_types[_name] = _NL_MU_CATEGORIES.get(_name, "Casual MU")
             if not _mu_types:
-                for _emb in _entries:
-                    _title = _emb.get("title", "")
-                    _m = re.search(r"\[\*\*(.+?)\*\*\]", _emb.get("description", ""))
-                    _mu_types[_title] = _m.group(1) if _m else "Standaard MU"
-            if not _mu_types:
-                await ctx.send("Geen MUs gevonden in het configuratiebestand.")
+                await ctx.send("Geen MUs gevonden in DIVISION_MUS.")
                 return
             try:
-                mu_stats = await self._db.get_all_mu_readiness()
+                mu_stats = await self._db.get_all_mu_readiness(use_membership=False)
             except Exception as exc:
                 await ctx.send(f"Databasefout: {exc}")
                 return
@@ -489,8 +479,9 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
 
             _cat_cfg = [
                 ("Elite MU", "🟠", "🟠 Elite MU"),
-                ("Eco MU", "🟢", "🟢 Eco MU"),
-                ("Standaard MU", "🔵", "🔵 Standaard MU"),
+                ("Edu MU", "🎓", "🎓 Edu MU"),
+                ("Starter MU", "🌱", "🌱 Starter MU"),
+                ("Casual MU", "🔵", "🔵 Casual MU"),
             ]
 
             emb = discord.Embed(
@@ -621,9 +612,8 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
 
         # ══ Mode 3.5: divisie ═══════════════════════════════════════════
         if divisie is not None:
-            from cogs.tasks.war_guild_divisions import DIVISION_MUS  # noqa: PLC0415
             try:
-                mu_stats = await self._db.get_all_mu_readiness()
+                mu_stats = await self._db.get_all_mu_readiness(use_membership=False)
             except Exception as exc:
                 await ctx.send(f"Databasefout: {exc}")
                 return

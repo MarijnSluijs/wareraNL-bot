@@ -29,9 +29,13 @@ class DatabaseBase:
         # blocking each other, which eliminates most "database is locked" errors
         # when the data-fetcher and discord-bot write simultaneously.
         await self._conn.execute("PRAGMA journal_mode=WAL")
-        # Wait up to 10 s when the DB is locked before raising an error
-        # (covers brief write-write contention that WAL alone doesn't eliminate).
-        await self._conn.execute("PRAGMA busy_timeout=10000")      # 10 s
+        # Wait up to 30 s when the DB is locked before raising an error
+        # (covers write-write contention between this connection, the other
+        # Database() instances opened by mu/geluk/users/welcome/articles cogs,
+        # and the standalone data-fetcher process — all of which share one
+        # SQLite file and can briefly hold the single writer lock during a
+        # citizen_refresh sweep or schema/migration run).
+        await self._conn.execute("PRAGMA busy_timeout=30000")      # 30 s
         # Performance tuning: map the whole DB into the OS page cache (avoids
         # the internal 8 MB page cache round-trip for reads).  2 GB limit is
         # enough for the current 2.3 GB db; the OS maps only what it needs.
