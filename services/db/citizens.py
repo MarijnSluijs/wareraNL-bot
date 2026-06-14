@@ -631,32 +631,37 @@ class CitizensMixin:
 
         Each value: war, total, can_reset, waiting_days, war_15, war_20
 
-        Uses citizen_mu_membership (authoritative, populated by MU sweep) joined
-        with citizen_levels for skill/level data.  Falls back to citizen_levels.mu_name
-        for citizens whose MU membership wasn't captured in the sweep.
+        Uses citizen_mu_membership (authoritative, populated by the war guild's
+        MU sweep) joined with citizen_levels for skill/level data, falling back
+        to citizen_levels.mu_id/mu_name (populated by /peil mus on any bot) for
+        citizens whose MU membership isn't present in citizen_mu_membership —
+        e.g. on bots where the war-guild sweep never runs.
         """
         now = datetime.now(timezone.utc)
-        # Primary: citizen_mu_membership JOIN citizen_levels
-        # This is authoritative because /peil mus populates citizen_mu_membership.
+        base_sql = (
+            "SELECT mu_name, skill_mode, last_skills_reset_at, level, country_id FROM ("
+            "  SELECT cmu.mu_name AS mu_name, cl.skill_mode, cl.last_skills_reset_at, "
+            "         cl.level, cl.country_id "
+            "  FROM citizen_mu_membership cmu "
+            "  JOIN citizen_levels cl ON cl.user_id = cmu.in_game_user_id "
+            "  UNION ALL "
+            "  SELECT cl.mu_name AS mu_name, cl.skill_mode, cl.last_skills_reset_at, "
+            "         cl.level, cl.country_id "
+            "  FROM citizen_levels cl "
+            "  WHERE cl.mu_id IS NOT NULL AND cl.mu_name IS NOT NULL "
+            "    AND cl.user_id NOT IN (SELECT in_game_user_id FROM citizen_mu_membership)"
+            ")"
+        )
         if country_id:
-            sql = (
-                "SELECT cmu.mu_name, cl.skill_mode, cl.last_skills_reset_at, cl.level "
-                "FROM citizen_mu_membership cmu "
-                "JOIN citizen_levels cl ON cl.user_id = cmu.in_game_user_id "
-                "WHERE cl.country_id = ?"
-            )
+            sql = base_sql + " WHERE country_id = ?"
             params: tuple = (country_id,)
         else:
-            sql = (
-                "SELECT cmu.mu_name, cl.skill_mode, cl.last_skills_reset_at, cl.level "
-                "FROM citizen_mu_membership cmu "
-                "JOIN citizen_levels cl ON cl.user_id = cmu.in_game_user_id"
-            )
+            sql = base_sql
             params = ()
         mus: dict[str, dict] = {}
         async with self._conn.execute(sql, params) as cur:
             async for row in cur:
-                mu_name, mode, reset_at, level = row
+                mu_name, mode, reset_at, level, _country_id = row
                 level_int = int(level) if level is not None else 0
                 if mu_name not in mus:
                     mus[mu_name] = {
