@@ -238,6 +238,22 @@ class VerificationQuestionnaireModal(discord.ui.Modal):
             await interaction.followup.send(msg, ephemeral=True)
 
 
+async def _get_shared_db(client):
+    """Return the bot's shared external DB, lazily creating one as fallback."""
+    shared = getattr(client, "_ext_db", None)
+    if shared is not None:
+        return shared
+
+    from services.db import Database
+
+    config = getattr(client, "config", {}) or {}
+    db_path = config.get("external_db_path", "database/external.db")
+    db = Database(db_path)
+    await db.setup()
+    client._ext_db = db
+    return db
+
+
 async def create_verification_channel(
     interaction: discord.Interaction,
     request_type: str,
@@ -452,6 +468,19 @@ async def create_verification_channel(
         error_msg += f"\n**Fout:** {e}"
         await interaction.followup.send(error_msg, ephemeral=True)
         return
+
+    # Log the ticket for /ticketstats reporting
+    try:
+        db = await _get_shared_db(interaction.client)
+        await db.log_ticket_created(
+            guild_id=str(guild.id),
+            channel_id=str(channel.id),
+            request_type=request_type,
+            discord_user_id=str(user.id),
+            created_at=datetime.datetime.now(datetime.UTC).isoformat(),
+        )
+    except Exception:
+        logger.exception("Failed to log ticket creation for %s (%s)", user, request_type)
 
     # Build list of role mentions to ping
     role_mentions = []
@@ -1020,6 +1049,87 @@ class Welcome(commands.Cog, name="welcome"):
                     _log_posted = True
                 except (discord.Forbidden, discord.HTTPException) as e:
                     self.bot.logger.error(f"Failed to post to log channel: {e}")
+
+    @app_commands.command(
+        name="ticketstats",
+        description="Toon hoeveel verificatietickets per type zijn aangemaakt sinds een datum",
+    )
+    @app_commands.describe(
+        start_date="Begindatum in JJJJ-MM-DD formaat (bijv. 2026-01-01)",
+    )
+    @has_privileged_role()
+    async def ticketstats(self, interaction: discord.Interaction, start_date: str):
+        """Show ticket creation counts per type since *start_date*."""
+        try:
+            requested_start = datetime.datetime.strptime(start_date, "%Y-%m-%d").replace(
+                tzinfo=datetime.timezone.utc
+            )
+        except ValueError:
+            await interaction.response.send_message(
+                "Ongeldige datum. Gebruik het formaat JJJJ-MM-DD, bijvoorbeeld 2026-01-01.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        db = await _get_shared_db(interaction.client)
+        guild_id = str(interaction.guild.id)
+
+        earliest = await db.get_earliest_ticket_log_at(guild_id)
+        if earliest is None:
+            await interaction.followup.send(
+                "Er is nog geen ticketdata gelogd. Vanaf nu worden nieuwe tickets "
+                "automatisch geregistreerd — probeer dit commando over enige tijd opnieuw.",
+                ephemeral=True,
+            )
+            return
+
+        earliest_dt = datetime.datetime.fromisoformat(earliest)
+        if earliest_dt.tzinfo is None:
+            earliest_dt = earliest_dt.replace(tzinfo=datetime.timezone.utc)
+
+        effective_start = max(requested_start, earliest_dt)
+        counts = await db.get_ticket_counts_since(guild_id, effective_start.isoformat())
+
+        type_labels = {
+            "citizen": "🇳🇱 Nederlander",
+            "belgian": "🇧🇪 Belgian",
+            "foreigner": "🌍 Foreigner",
+            "embassy": "🚨 Embassy",
+            "admin_contact": "📩 Admin Contact",
+        }
+
+        lines = []
+        total = 0
+        for key, label in type_labels.items():
+            count = counts.get(key, 0)
+            total += count
+            lines.append(f"{label}: **{count}**")
+        # Include any other/unexpected types as well
+        for key, count in counts.items():
+            if key not in type_labels:
+                total += count
+                lines.append(f"{key}: **{count}**")
+
+        embed = discord.Embed(
+            title="📊 Ticket statistieken",
+            description="\n".join(lines) + f"\n\n**Totaal: {total}**",
+            color=discord.Color.blurple(),
+            timestamp=datetime.datetime.now(datetime.UTC),
+        )
+
+        if requested_start < earliest_dt:
+            embed.set_footer(
+                text=(
+                    f"We loggen ticketdata pas vanaf {earliest_dt.strftime('%Y-%m-%d')}. "
+                    "De cijfers hierboven zijn vanaf die datum."
+                )
+            )
+        else:
+            embed.set_footer(text=f"Vanaf {requested_start.strftime('%Y-%m-%d')}")
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     async def _get_nickname(self, in_game_id: str) -> str | None:
         # Ensure the shared API client is available. The ServiceCoordinator cog

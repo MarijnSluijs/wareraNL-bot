@@ -137,6 +137,19 @@ CREATE TABLE IF NOT EXISTS pending_ticket_deletions (
     delete_at   TEXT NOT NULL   -- ISO-8601 UTC timestamp when deletion is due
 );
 
+-- ticket_log: historical record of every verification ticket opened, used
+--   for /ticketstats reporting. Logging started when this table was
+--   introduced — tickets created before that are not represented.
+CREATE TABLE IF NOT EXISTS ticket_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id        TEXT NOT NULL,
+    channel_id      TEXT NOT NULL,
+    request_type    TEXT NOT NULL,
+    discord_user_id TEXT NOT NULL,
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_log_guild_created ON ticket_log(guild_id, created_at);
+
 -- seen_articles: deduplication for posted articles
 CREATE TABLE IF NOT EXISTS seen_articles (
     article_id TEXT PRIMARY KEY,
