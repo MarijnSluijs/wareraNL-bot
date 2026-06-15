@@ -413,3 +413,46 @@ class IdentityLinksMixin:
                     }
                 )
         return results
+
+    # ── Ticket log ───────────────────────────────────────────────────── #
+
+    async def log_ticket_created(
+        self,
+        guild_id: str,
+        channel_id: str,
+        request_type: str,
+        discord_user_id: str,
+        created_at: str,
+    ) -> None:
+        """Record that a verification ticket of *request_type* was opened."""
+        await self._conn.execute(
+            "INSERT INTO ticket_log "
+            "(guild_id, channel_id, request_type, discord_user_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (guild_id, channel_id, request_type, discord_user_id, created_at),
+        )
+        await self._conn.commit()
+
+    async def get_earliest_ticket_log_at(self, guild_id: str) -> Optional[str]:
+        """Return the ISO timestamp of the oldest logged ticket for *guild_id*, if any."""
+        async with self._conn.execute(
+            "SELECT MIN(created_at) FROM ticket_log WHERE guild_id = ?",
+            (guild_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        return row[0] if row else None
+
+    async def get_ticket_counts_since(
+        self, guild_id: str, since: str
+    ) -> dict[str, int]:
+        """Return ticket counts per request_type for *guild_id* created at/after *since*."""
+        counts: dict[str, int] = {}
+        async with self._conn.execute(
+            "SELECT request_type, COUNT(*) FROM ticket_log "
+            "WHERE guild_id = ? AND created_at >= ? "
+            "GROUP BY request_type",
+            (guild_id, since),
+        ) as cur:
+            async for row in cur:
+                counts[row[0]] = row[1]
+        return counts
