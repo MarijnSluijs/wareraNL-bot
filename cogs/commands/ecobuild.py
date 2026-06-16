@@ -618,13 +618,15 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
         ])
 
         # For each unique (item_code, region_id) try the recommended-region list
-        # to get strategicBonus + ethicSpecializationBonus (the authoritative values).
-        # region_id → (sr_pct, ethics_pct, found)
-        region_bonus: dict[str, tuple[float, float, bool]] = {}
+        # to get the authoritative bonus breakdown (mirrors bedrijfswinst.py).
+        # depositBonus + ethicDepositBonus from this list supersede region.getById
+        # because it knows whether the deposit is active/deactivated by ethics.
+        # region_id → (sr_pct, ethics_pct, found, deposit_rec)
+        region_bonus: dict[str, tuple[float, float, bool, float]] = {}
 
         async def _fetch_recommended(region_id: str, item_code: str) -> None:
             if not item_code:
-                region_bonus[region_id] = (0.0, 0.0, False)
+                region_bonus[region_id] = (0.0, 0.0, False, 0.0)
                 return
             try:
                 raw = await self._client.get(  # type: ignore[union-attr]
@@ -635,11 +637,15 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
                     if entry.get("regionId") == region_id:
                         sr = float(entry.get("strategicBonus") or 0)
                         ethics = float(entry.get("ethicSpecializationBonus") or 0)
-                        region_bonus[region_id] = (sr, ethics, True)
+                        deposit_rec = (
+                            float(entry.get("depositBonus") or 0)
+                            + float(entry.get("ethicDepositBonus") or 0)
+                        )
+                        region_bonus[region_id] = (sr, ethics, True, deposit_rec)
                         return
             except Exception:
                 pass
-            region_bonus[region_id] = (0.0, 0.0, False)
+            region_bonus[region_id] = (0.0, 0.0, False, 0.0)
 
         await asyncio.gather(*[
             _fetch_recommended(rid, region_item[rid])
@@ -651,7 +657,7 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
         missing_country_ids = {
             country_id
             for rid, (_, country_id) in region_info.items()
-            if country_id and not region_bonus.get(rid, (0, 0, False))[2]
+            if country_id and not region_bonus.get(rid, (0, 0, False, 0.0))[2]
         }
 
         async def _fetch_country(country_id: str) -> None:
@@ -680,13 +686,11 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
         # Combine per region
         for region_id, cids in region_cids.items():
             deposit_pct, country_id = region_info.get(region_id, (0.0, ""))
-            sr_pct, ethics_pct, found = region_bonus.get(region_id, (0.0, 0.0, False))
+            sr_pct, ethics_pct, found, deposit_rec = region_bonus.get(region_id, (0.0, 0.0, False, 0.0))
             if found:
-                # Recommended list gives authoritative deposit+SR+ethics split;
-                # deposit is already baked into sr_pct via depositBonus field.
-                # We use deposit_pct from region.getById as the deposit component
-                # and sr_pct + ethics_pct from the recommended list.
-                total = deposit_pct + sr_pct + ethics_pct
+                # Use deposit from the recommended-regions list — it reflects whether
+                # the deposit is active or deactivated by ethics (unlike region.getById).
+                total = deposit_rec + sr_pct + ethics_pct
             else:
                 fb_sr, fb_ethics = country_bonus.get(country_id, (0.0, 0.0))
                 total = deposit_pct + fb_sr + fb_ethics
@@ -1017,6 +1021,16 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
             embed.add_field(
                 name=f"\u2699\ufe0f Optimale verdeling  [{improvement_str}]",
                 value=_skill_table(opt_rows, b_daily)[:1024],
+                inline=False,
+            )
+
+        if opt_n_companies < 12:
+            embed.add_field(
+                name="\U0001f4c8 Tip: bouw meer bedrijven!",
+                value=(
+                    "Het kopen van extra bedrijven is veruit de meest winstgevende investering. "
+                    "Bedrijven leveren elke dag passieve PP op, hoe meer bedrijven hoe beter."
+                ),
                 inline=False,
             )
 
