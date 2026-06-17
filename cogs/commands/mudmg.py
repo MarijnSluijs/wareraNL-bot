@@ -20,6 +20,7 @@ from discord.ext.commands import Context
 
 from cogs.commands._base import CommandCogBase
 from cogs.tasks.mus import mus_path
+from cogs.tasks.war_guild_divisions import DIVISION_MUS
 from services.damage_calc import fmt_damage
 
 if TYPE_CHECKING:
@@ -152,15 +153,12 @@ async def mu_autocomplete(
     interaction: discord.Interaction, current: str
 ) -> list[app_commands.Choice[str]]:
     """Suggest Dutch MU names for the 'mu' parameter."""
-    try:
-        entries = _load_mus(getattr(interaction.client, "testing", False))
-    except Exception:
-        return []
+    all_names = [name for names in DIVISION_MUS.values() for name in names]
     q = current.strip().lower()
     return [
-        app_commands.Choice(name=e["name"], value=e["name"])
-        for e in entries
-        if q in e["name"].lower()
+        app_commands.Choice(name=n, value=n)
+        for n in all_names
+        if q in n.lower()
     ][:25]
 
 
@@ -173,8 +171,42 @@ class MudmgCog(CommandCogBase, name="mudmg"):
     def __init__(self, bot: DiscordBot) -> None:
         self.bot = bot
 
-    def _mus(self) -> list[dict]:
-        return _load_mus(getattr(self.bot, "testing", False))
+    async def _build_division_entries(self) -> list[dict]:
+        """Build MU entry list from DIVISION_MUS with IDs from DB (known_mus) or mus.json fallback."""
+        # Fallback: name→id from mus.json
+        json_id_map: dict[str, str] = {}
+        json_thumb_map: dict[str, str] = {}
+        try:
+            for e in _load_mus(getattr(self.bot, "testing", False)):
+                key = e["name"].lower()
+                json_id_map[key] = e["id"]
+                if e.get("thumbnail"):
+                    json_thumb_map[key] = e["thumbnail"]
+        except Exception:
+            pass
+
+        # Primary: name→id from known_mus DB table
+        db_id_map: dict[str, str] = {}
+        if self._db:
+            try:
+                for mu_id, mu_name, _country_id in await self._db.get_all_known_mu_ids():
+                    db_id_map[mu_name.lower()] = mu_id
+            except Exception:
+                pass
+
+        entries = []
+        for div, names in DIVISION_MUS.items():
+            for name in names:
+                key = name.lower()
+                mu_id = db_id_map.get(key) or json_id_map.get(key)
+                if not mu_id:
+                    logger.warning("mudmg: no ID found for MU %r (not in DB or mus.json)", name)
+                    continue
+                entry: dict = {"id": mu_id, "name": name, "type": f"D{div}"}
+                if key in json_thumb_map:
+                    entry["thumbnail"] = json_thumb_map[key]
+                entries.append(entry)
+        return entries
 
     # ── Command ───────────────────────────────────────────────────────────────
 
@@ -199,7 +231,7 @@ class MudmgCog(CommandCogBase, name="mudmg"):
         if hasattr(ctx, "defer"):
             await ctx.defer()
 
-        entries = self._mus()
+        entries = await self._build_division_entries()
         if not entries:
             await ctx.send("Geen MU-configuratie gevonden.")
             return
@@ -236,7 +268,7 @@ class MudmgCog(CommandCogBase, name="mudmg"):
         rows.sort(key=lambda r: r[2], reverse=True)
 
         # Build code-block table that fits in an embed description (max 4096 chars)
-        _CAT_ICON = {"Elite": "🎖️", "Eco": "🏭", "Standaard": "🛡️"}
+        _CAT_ICON = {"D1": "🟡", "D2": "🔵", "D3": "🟢", "D4": "🔴", "D5": "🟣"}
         name_w = min(max((len(r[0]) for r in rows), default=4), 22)
         W = 10
         T = 10
@@ -273,7 +305,7 @@ class MudmgCog(CommandCogBase, name="mudmg"):
             if chunk_lines:
                 chunks.append("```\n" + "\n".join(chunk_lines) + "\n```")
 
-        legend = "🎖️ Elite  •  🏭 Eco  •  🛡️ Standaard"
+        legend = "🟡 D1  •  🔵 D2  •  🟢 D3  •  🔴 D4  •  🟣 D5"
         for i, chunk in enumerate(chunks):
             title = "⚔️ Nederlandse MUs — Ranking wekelijkse schade"
             if len(chunks) > 1:
