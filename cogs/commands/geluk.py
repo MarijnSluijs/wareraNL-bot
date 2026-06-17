@@ -16,7 +16,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from cogs.commands._base import citizen_autocomplete
+from cogs.commands._base import citizen_autocomplete, strip_division_prefix
 from services.api_client import APIClient
 
 if TYPE_CHECKING:
@@ -630,7 +630,7 @@ class Geluk(commands.Cog, name="geluk"):
         await interaction.response.defer(thinking=True)
 
         if not speler and not gebruiker_id:
-            speler = interaction.user.display_name
+            speler = strip_division_prefix(interaction.user.display_name)
 
         # 1. Find player — by gebruiker_id if provided, otherwise by username.
         profile: Optional[dict] = None

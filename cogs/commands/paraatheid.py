@@ -22,6 +22,7 @@ from cogs.commands._base import (
     CommandCogBase,
     citizen_autocomplete,
     country_autocomplete,
+    strip_division_prefix,
 )
 from cogs.tasks.war_guild_divisions import DIVISION_MUS
 from services.country_utils import country_id as cid_of
@@ -151,7 +152,7 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
             return
 
         if speler is None and land is None and mu is None and nl_mus is None and divisie is None:
-            speler = ctx.author.display_name
+            speler = strip_division_prefix(ctx.author.display_name)
 
         provided = sum(x is not None for x in (land, speler, mu, divisie)) + int(
             nl_mus is not None

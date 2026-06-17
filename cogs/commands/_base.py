@@ -6,6 +6,7 @@ Provides safe access to shared services and common Discord utilities.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Union
 
@@ -13,6 +14,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
+
+_DIVISION_PREFIX_RE = re.compile(r"^\[D\d\] ")
+
+
+def strip_division_prefix(name: str) -> str:
+    """Strip a war-guild division prefix (e.g. '[D1] ') from a display name."""
+    return _DIVISION_PREFIX_RE.sub("", name)
 
 from services.country_utils import (
     _COUNTRY_ALIASES,

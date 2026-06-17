@@ -25,7 +25,7 @@ from typing import Optional
 import discord
 from discord import app_commands
 
-from cogs.commands._base import CommandCogBase, citizen_autocomplete
+from cogs.commands._base import CommandCogBase, citizen_autocomplete, strip_division_prefix
 
 logger = logging.getLogger("discord_bot")
 
@@ -826,7 +826,7 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
             gen_ae_lvl = 1  # default: AE level 1
 
             # Always resolve player profile to fill missing values and get AE data
-            query = speler or interaction.user.display_name
+            query = speler or strip_division_prefix(interaction.user.display_name)
             gen_user_id, gen_profile = await self._resolve_user(query)
             if gen_profile is not None:
                 leveling_g: dict = gen_profile.get("leveling") or {}
@@ -862,7 +862,7 @@ class EcoBuildCog(CommandCogBase, name="ecobuild"):
             await self._ecobuild_generic(interaction, gen_level or 1, gen_bedrijven or 0, gen_ae_lvl, gen_best_bonus_pct)
             return
 
-        query = speler or interaction.user.display_name
+        query = speler or strip_division_prefix(interaction.user.display_name)
         user_id, profile = await self._resolve_user(query)
 
         if user_id is None or profile is None:
