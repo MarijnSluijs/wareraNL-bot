@@ -46,6 +46,7 @@ from .giveaways_db import GiveawaysMixin
 from .identities import IdentityLinksMixin
 from .level5_notified import Level5NotifiedMixin
 from .luck import LuckMixin
+from .mu_subscriptions import MuSubscriptionsMixin
 from .mus_registry import MusRegistryMixin
 from .pill_reminders import PillRemindersMixin
 from .pill_tracking import PillTrackingMixin
@@ -60,6 +61,7 @@ from .wealth import WealthMixin
 
 
 class Database(
+    MuSubscriptionsMixin,
     EcoDonationsMixin,
     DailyDmgMixin,
     GemsMixin,

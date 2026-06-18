@@ -17,7 +17,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from cogs.commands._base import citizen_autocomplete
+from cogs.commands._base import citizen_autocomplete, fmt_nl_time
 from services.api_client import APIClient
 
 if TYPE_CHECKING:
@@ -367,9 +367,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         # bot5 comes back in ASC order (worst first) — reverse for display
         bot5 = list(reversed(bot5))
 
-        updated_at = (
-            (top5[0].get("updated_at") or "")[:16].replace("T", " ") if top5 else "?"
-        )
+        updated_at = fmt_nl_time((top5[0].get("updated_at") or "") if top5 else "") or "?"
 
         embed = discord.Embed(
             title="🌍 Worldwide Luck Ranking",
@@ -418,7 +416,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         embed.set_footer(
             text=(
                 f"Odds: mythic 0.01% • legendary 0.04% • epic 0.85% • rare 7.1%  "
-                f"•  Min. 20 cases required  •  Updated: {updated_at} UTC  "
+                f"•  Min. 20 cases required  •  Updated: {updated_at}  "
                 f"•  Use /globalluck speler:name for player analysis"
             )
         )
@@ -480,7 +478,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         username = target.get("citizen_name") or target.get("user_id") or "?"
         user_id = target["user_id"]
         country_id = target.get("country_id", "")
-        rank_updated_at = (target.get("updated_at") or "")[:16].replace("T", " ")
+        rank_updated_at = fmt_nl_time(target.get("updated_at") or "") or "?"
 
         rank, _total = await db.get_global_luck_rank(user_id)
         elite_rank, elite_rank_total = await db.get_global_luck_rank_elite(user_id)
@@ -510,7 +508,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
             elite_counts = json.loads(elite_raw) if elite_raw else {}
             opens = target["opens_count"]
             luck_score = target["luck_score"]
-            analysis_note = f"Cache {rank_updated_at} UTC"
+            analysis_note = f"Cache {rank_updated_at}"
 
         sign = "+" if luck_score >= 0 else ""
         ind = _luck_indicator_overall(luck_score)
@@ -715,7 +713,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
                 f"Odds: mythic 0.01% • legendary 0.04% • epic 0.85% • rare 7.1%  "
                 f"Elite: mythic 0.5% • legendary 2.5% • epic 15% • rare 32% • uncommon 50%  •  "
                 f"Min. 20 cases required  •  Analysis: {analysis_note}  "
-                f"•  Rank updated: {rank_updated_at} UTC"
+                f"•  Rank updated: {rank_updated_at}"
             )
         )
         await interaction.followup.send(embed=embed)

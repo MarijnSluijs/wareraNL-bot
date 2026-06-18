@@ -146,9 +146,7 @@ class MUs(GenerateEmbeds, name="mus"):
                 return ch
         return fallback
 
-    @commands.hybrid_command(
-        name="mulijst", description="Post de MU lijst in het MU-kanaal."
-    )
+    @commands.command(name="mulijst")
     @has_mu_privilige()
     async def mulijst(self, context: Context) -> None:
         if not self.json_data or not self.json_data.get("embeds"):
@@ -269,23 +267,15 @@ class MUs(GenerateEmbeds, name="mus"):
         except Exception as exc:
             self.bot.logger.error("Failed to save MU JSON: %s", exc)
 
-    @app_commands.command(
-        name="repostmu",
-        description="Herplaats de MU-lijst en synchroniseer MU namen/thumbnails via API.",
-    )
+    @commands.command(name="repostmu")
     @has_mu_privilige()
-    async def repostmu(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
-        channel = await self._mu_channel(interaction.channel)
+    async def repostmu(self, ctx: Context) -> None:
+        channel = await self._mu_channel(ctx.channel)
         try:
             await self._repost_mu_list(channel)
-            await interaction.followup.send(
-                f"✅ MU-lijst herplaatst in {channel.mention}.", ephemeral=True
-            )
+            await ctx.send(f"✅ MU-lijst herplaatst in {channel.mention}.")
         except Exception as e:
-            await interaction.followup.send(
-                f"❌ Fout bij herplaatsen: {e}", ephemeral=True
-            )
+            await ctx.send(f"❌ Fout bij herplaatsen: {e}")
 
     async def _mu_id_autocomplete(
         self, interaction: discord.Interaction, current: str

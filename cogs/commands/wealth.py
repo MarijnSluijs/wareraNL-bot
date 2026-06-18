@@ -9,7 +9,7 @@ from typing import Optional
 import discord
 from discord import app_commands
 
-from cogs.commands._base import CommandCogBase
+from cogs.commands._base import CommandCogBase, _TZ_NL
 
 logger = logging.getLogger("discord_bot")
 
@@ -193,7 +193,8 @@ class WealthCog(CommandCogBase, name="wealth"):
         if updated_at_str:
             try:
                 dt = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
-                footer_text = f"Bijgewerkt op {dt.strftime('%d-%m-%Y %H:%M')} UTC"
+                dt_nl = dt.astimezone(_TZ_NL)
+                footer_text = f"Bijgewerkt op {dt_nl.strftime('%d-%m-%Y %H:%M')} {dt_nl.strftime('%Z')}"
                 if max_days > 0:
                     footer_text += f" · Historie beschikbaar: {max_days} dag(en)"
                 if not (dagen is None or max_days == 0):

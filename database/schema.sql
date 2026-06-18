@@ -614,6 +614,37 @@ CREATE TABLE IF NOT EXISTS data_freshness (
     duration_ms       INTEGER
 );
 
+-- ── MU channel subscriptions ─────────────────────────────────────────────────
+
+-- mu_weekly_report_subs: channels subscribed to automatic weekly MU damage reports
+--   posted every Monday at 01:00 NL time (just before the 02:00 weekly-damage reset).
+--   last_posted_at guards against double-posts on bot restart within the same hour.
+CREATE TABLE IF NOT EXISTS mu_weekly_report_subs (
+    channel_id     TEXT NOT NULL,
+    guild_id       TEXT NOT NULL,
+    mu_name        TEXT NOT NULL,
+    mu_id          TEXT NOT NULL,
+    last_posted_at TEXT,
+    added_at       TEXT NOT NULL,
+    PRIMARY KEY (channel_id, mu_name)
+);
+
+-- mu_auction_win_subs: channels that receive a ping when a specific MU wins an auction.
+--   seen_ids is a JSON list of already-notified auction IDs (trimmed to last 500).
+--   cutoff_at is the createdAt of the newest contract known at subscribe time;
+--   only contracts with createdAt strictly after this value are posted.
+CREATE TABLE IF NOT EXISTS mu_auction_win_subs (
+    channel_id TEXT NOT NULL,
+    guild_id   TEXT NOT NULL,
+    mu_name    TEXT NOT NULL,
+    mu_id      TEXT NOT NULL,
+    seen_ids   TEXT NOT NULL DEFAULT '[]',
+    initialized INTEGER NOT NULL DEFAULT 0,
+    cutoff_at  TEXT,
+    added_at   TEXT NOT NULL,
+    PRIMARY KEY (channel_id, mu_name)
+);
+
 -- ── Eco donations cache ───────────────────────────────────────────────────────
 -- Hourly snapshot of NL donation transactions, populated by eco_donations_poller.
 -- The /eco_donaties command reads from this table instead of calling the API live.

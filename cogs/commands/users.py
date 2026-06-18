@@ -23,6 +23,8 @@ from pathlib import Path
 
 import discord
 from discord import app_commands
+from discord.ext import commands
+from discord.ext.commands import Context
 
 from cogs.commands._base import CommandCogBase
 
@@ -551,31 +553,22 @@ class Users(CommandCogBase, name="users"):
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @app_commands.command(
-        name="discordid",
-        description="Toon Discord mapping(s) voor een in-game ID of profiel-URL",
-    )
-    @app_commands.describe(
-        in_game_id="In-game ID of profiel-URL (https://app.warera.io/user/{id})"
-    )
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def discord_id(self, interaction: discord.Interaction, in_game_id: str):
+    @commands.command(name="discordid")
+    @commands.has_permissions(manage_guild=True)
+    async def discord_id(self, ctx: Context, in_game_id: str):
         try:
             normalized = self._normalize_ingame_id(in_game_id)
         except ValueError as e:
-            await interaction.response.send_message(str(e), ephemeral=True)
+            await ctx.send(str(e))
             return
 
         db = await self._get_db()
         links = await db.get_identity_links_by_ingame(
             in_game_user_id=normalized,
-            guild_id=str(interaction.guild_id),
+            guild_id=str(ctx.guild.id) if ctx.guild else "",
         )
         if not links:
-            await interaction.response.send_message(
-                f"Geen Discord mapping gevonden voor in-game ID `{normalized}`.",
-                ephemeral=True,
-            )
+            await ctx.send(f"Geen Discord mapping gevonden voor in-game ID `{normalized}`.")
             return
 
         embed = discord.Embed(
@@ -596,7 +589,7 @@ class Users(CommandCogBase, name="users"):
             )
         if len(links) > 10:
             embed.set_footer(text=f"Toont 10 van {len(links)} resultaten")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await ctx.send(embed=embed)
 
     @app_commands.command(
         name="usercount",

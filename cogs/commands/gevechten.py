@@ -26,6 +26,8 @@ from typing import Optional
 
 import discord
 from discord import app_commands
+from discord.ext import commands
+from discord.ext.commands import Context
 
 from cogs.commands._base import CommandCogBase
 
@@ -202,22 +204,14 @@ class GevechtenCog(CommandCogBase, name="gevechten"):
 
     def __init__(self, bot) -> None:
         self.bot = bot
-    @app_commands.command(
-        name="gevechten",
-        description="Toon de geschatte resterende tijd van actieve gevechten.",
-    )
-    @app_commands.describe(
-        gevecht="Optioneel: gevecht-ID of URL (bijv. https://app.warera.io/battle/...)",
-    )
+    @commands.command(name="gevechten")
     async def gevechten(
         self,
-        interaction: discord.Interaction,
+        ctx: Context,
         gevecht: Optional[str] = None,
     ) -> None:
-        await interaction.response.defer(thinking=True)
-
         if not self._client or self._client.is_available is False:
-            await interaction.followup.send(embed=self._api_offline_embed(), ephemeral=True)
+            await ctx.send(embed=self._api_offline_embed())
             return
 
         nl_id: str = str(self.config.get("nl_country_id") or "")
@@ -230,7 +224,7 @@ class GevechtenCog(CommandCogBase, name="gevechten"):
             )
         except Exception as exc:
             logger.warning("gevechten: getBattles failed: %s", exc)
-            await interaction.followup.send("Kon gevechten niet ophalen.", ephemeral=True)
+            await ctx.send("Kon gevechten niet ophalen.")
             return
 
         data = _unwrap(raw)
@@ -346,24 +340,14 @@ class GevechtenCog(CommandCogBase, name="gevechten"):
             embeds.append(s_embed)
 
         if not embeds:
-            await interaction.followup.send(
-                "Geen actieve gevechten gevonden voor Nederland of zijn bondgenoten.",
-                ephemeral=True,
-            )
+            await ctx.send("Geen actieve gevechten gevonden voor Nederland of zijn bondgenoten.")
             return
 
         embeds[-1].set_footer(text="Schatting op basis van huidige terreinstand")
         embeds[-1].timestamp = datetime.now(timezone.utc)
 
-        # Send in chunks of 10 (Discord limit)
-        first = True
         for i in range(0, len(embeds), 10):
-            chunk = embeds[i : i + 10]
-            if first:
-                await interaction.followup.send(embeds=chunk)
-                first = False
-            else:
-                await interaction.channel.send(embeds=chunk)
+            await ctx.send(embeds=embeds[i : i + 10])
 
 
 async def setup(bot) -> None:

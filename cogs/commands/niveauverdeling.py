@@ -12,7 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
 
-from cogs.commands._base import CommandCogBase, country_autocomplete
+from cogs.commands._base import CommandCogBase, country_autocomplete, fmt_nl_time
 from services.country_utils import country_id as cid_of
 from services.country_utils import find_country
 
@@ -161,7 +161,7 @@ class NiveauverdelingCog(CommandCogBase, name="niveauverdeling"):
             footer_parts.append("█ groen = actief")
         if last_updated:
             footer_parts.append(
-                f"Bijgewerkt: {last_updated[:16].replace('T', ' ')} UTC"
+                f"Bijgewerkt: {fmt_nl_time(last_updated)}"
             )
         footer_text = "  •  ".join(footer_parts)
 
