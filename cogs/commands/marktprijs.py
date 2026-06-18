@@ -15,6 +15,7 @@ from typing import Optional
 import discord
 from discord import app_commands
 from discord.ext import commands
+from discord.ext.commands import Context
 
 from cogs.commands._base import CommandCogBase
 from services.db.trades import aggregate, rank_matches
@@ -47,22 +48,15 @@ FIXED_ITEM_RARITY: dict[str, str] = {
 }
 
 
-def _can_clear_trading_records(interaction: discord.Interaction) -> bool:
-    if interaction.user.id in _CLEAR_TRADING_RECORDS_ALLOWED_USER_IDS:
-        return True
-    permissions = getattr(interaction.user, "guild_permissions", None)
-    return bool(permissions and permissions.manage_guild)
-
-
 def clear_trading_records_check():
-    async def predicate(interaction: discord.Interaction) -> bool:
-        if _can_clear_trading_records(interaction):
+    async def predicate(ctx: Context) -> bool:
+        if ctx.author.id in _CLEAR_TRADING_RECORDS_ALLOWED_USER_IDS:
             return True
-        raise app_commands.CheckFailure(
-            "Je hebt Manage Server nodig om trading records te wissen."
-        )
-
-    return app_commands.check(predicate)
+        perms = getattr(ctx.author, "guild_permissions", None)
+        if perms and perms.manage_guild:
+            return True
+        raise commands.CheckFailure("Je hebt Manage Server nodig om trading records te wissen.")
+    return commands.check(predicate)
 
 
 def _unwrap(resp) -> dict | list:
@@ -577,24 +571,18 @@ class MarktprijsCog(CommandCogBase):
             return []
         return [app_commands.Choice(name=c, value=c) for c in codes]
 
-    @app_commands.command(
-        name="cleartradingrecords",
-        description="Wis alle opgeslagen itemMarket trade records.",
-    )
+    @commands.command(name="cleartradingrecords")
     @clear_trading_records_check()
-    async def clear_trading_records(self, interaction: discord.Interaction) -> None:
+    async def clear_trading_records(self, ctx: Context) -> None:
         if not self._db:
-            await self._send_api_offline(interaction, "Database nog niet gereed.")
+            await ctx.send("Database nog niet gereed.")
             return
 
         try:
             deleted = await self._db.clear_item_trades()
         except Exception:
             logger.exception("cleartradingrecords: DB error")
-            await self._send_api_offline(
-                interaction,
-                "DB-fout bij wissen van trading records.",
-            )
+            await ctx.send("DB-fout bij wissen van trading records.")
             return
 
         embed = discord.Embed(
@@ -602,7 +590,7 @@ class MarktprijsCog(CommandCogBase):
             description=f"Er zijn **{deleted}** itemMarket trade records verwijderd.",
             colour=self._embed_colour("success"),
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await ctx.send(embed=embed)
 
 
 async def setup(bot) -> None:

@@ -94,6 +94,10 @@ class DatabaseBase:
             ("discord_allies", "country_name TEXT"),
             # pill_reminders — in_game_user_id added post-launch; expires_at made nullable
             ("pill_reminders", "in_game_user_id TEXT NOT NULL DEFAULT ''"),
+            # mu_auction_win_subs — initialized flag added to prevent posting old auctions
+            ("mu_auction_win_subs", "initialized INTEGER NOT NULL DEFAULT 0"),
+            # mu_auction_win_subs — cutoff_at: createdAt of newest contract at subscribe time
+            ("mu_auction_win_subs", "cutoff_at TEXT"),
         ]
         for table, column_def in migrations:
             try:

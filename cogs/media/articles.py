@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+from discord.ext.commands import Context
 
 from services.api_client import APIClient
 from services.db import Database
@@ -410,58 +411,44 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
     # Test command                                                         #
     # ------------------------------------------------------------------ #
 
-    @app_commands.command(
-        name="nieuwste_artikel",
-        description="[TEST] Post het nieuwste Nederlandse artikel naar het artikelkanaal.",
-    )
-    @app_commands.check(_owner_check)
-    async def nieuwste_artikel(self, interaction: discord.Interaction) -> None:
+    @commands.command(name="nieuwste_artikel")
+    @commands.is_owner()
+    async def nieuwste_artikel(self, ctx: Context) -> None:
         """Fetch and post the single newest Dutch article. Test server only."""
         if not self.bot.testing:
-            await interaction.response.send_message(
-                "Dit commando is alleen beschikbaar op de testserver.", ephemeral=True
-            )
+            await ctx.send("Dit commando is alleen beschikbaar op de testserver.")
             return
 
         if not self._client or not self._db:
-            await interaction.response.send_message(
-                "Services zijn nog niet gereed, probeer het later opnieuw.",
-                ephemeral=True,
-            )
+            await ctx.send("Services zijn nog niet gereed, probeer het later opnieuw.")
             return
-
-        await interaction.response.defer(ephemeral=True)
 
         try:
             resp = await self._client.get(
                 "/article.getArticlesPaginated",
                 params={
                     "input": json.dumps({"type": "last", "limit": 1})
-                },  # no language filter
+                },
             )
         except Exception as exc:
-            await interaction.followup.send(f"API-fout: {exc}", ephemeral=True)
+            await ctx.send(f"API-fout: {exc}")
             return
 
         data = _unwrap(resp)
         items = data.get("items") or data.get("articles") or []
         if not items:
-            await interaction.followup.send("Geen artikelen gevonden.", ephemeral=True)
+            await ctx.send("Geen artikelen gevonden.")
             return
 
         channel_id = self.config.get("channels", {}).get("articles")
         if not channel_id:
-            await interaction.followup.send(
-                "Geen artikelkanaal geconfigureerd.", ephemeral=True
-            )
+            await ctx.send("Geen artikelkanaal geconfigureerd.")
             return
 
         article = items[0]
         aid = str(article.get("id") or article.get("_id") or "")
         await self._post_article(article, aid, channel_id)
-        await interaction.followup.send(
-            f"Artikel `{aid}` gepost naar <#{channel_id}>.", ephemeral=True
-        )
+        await ctx.send(f"Artikel `{aid}` gepost naar <#{channel_id}>.")
 
 
 async def setup(bot) -> None:

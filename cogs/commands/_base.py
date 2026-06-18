@@ -6,13 +6,39 @@ Provides safe access to shared services and common Discord utilities.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Union
+from zoneinfo import ZoneInfo
+
+_TZ_NL = ZoneInfo("Europe/Amsterdam")
+
+
+def fmt_nl_time(utc_iso: str, fmt: str = "%d-%m-%Y %H:%M") -> str:
+    """Convert a UTC ISO timestamp string to Dutch time (CET/CEST)."""
+    if not utc_iso:
+        return ""
+    try:
+        s = utc_iso.strip().replace("Z", "+00:00")
+        if "+" not in s and len(s) <= 19:
+            s += "+00:00"
+        dt = datetime.fromisoformat(s)
+        nl_dt = dt.astimezone(_TZ_NL)
+        return nl_dt.strftime(fmt) + " " + nl_dt.strftime("%Z")
+    except (ValueError, TypeError):
+        return utc_iso[:16].replace("T", " ")
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
+
+_DIVISION_PREFIX_RE = re.compile(r"^\[D\d\] ")
+
+
+def strip_division_prefix(name: str) -> str:
+    """Strip a war-guild division prefix (e.g. '[D1] ') from a display name."""
+    return _DIVISION_PREFIX_RE.sub("", name)
 
 from services.country_utils import (
     _COUNTRY_ALIASES,

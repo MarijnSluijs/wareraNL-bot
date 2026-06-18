@@ -18,7 +18,7 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
 
-from cogs.commands._base import CommandCogBase, citizen_autocomplete
+from cogs.commands._base import CommandCogBase, citizen_autocomplete, fmt_nl_time
 from services.damage_calc import fmt_damage
 
 if TYPE_CHECKING:
@@ -106,8 +106,8 @@ class WeeklydmgCog(CommandCogBase, name="weeklydmg"):
                     inline=False,
                 )
 
-            ts = (updated_at or last_updated or "")[:19].replace("T", " ")
-            embed.set_footer(text=f"Bijgewerkt: {ts} UTC")
+            ts = fmt_nl_time(updated_at or last_updated or "")
+            embed.set_footer(text=f"Bijgewerkt: {ts}")
             await ctx.send(embed=embed)
             return
 
@@ -136,7 +136,7 @@ class WeeklydmgCog(CommandCogBase, name="weeklydmg"):
         )
         if last_updated:
             embed.set_footer(
-                text=f"Bijgewerkt: {last_updated[:19].replace('T', ' ')} UTC · elk uur ververst"
+                text=f"Bijgewerkt: {fmt_nl_time(last_updated)} · elk uur ververst"
             )
         await ctx.send(embed=embed)
 

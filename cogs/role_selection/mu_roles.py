@@ -10,6 +10,7 @@ from typing import Any
 import discord
 from discord import app_commands
 from discord.ext import commands
+from discord.ext.commands import Context
 
 from cogs.role_selection.roles import RoleToggleView, load_roles_template, mu_roles_path
 from cogs.welcome import Welcome
@@ -120,77 +121,46 @@ class MuRoles(commands.Cog, name="mu_roles"):
             for page in _chunk_buttons_for_view(self.template["buttons"]):
                 self.bot.add_view(RoleToggleView(page, exclusive=True))
 
-    @app_commands.command(name="muroles", description="Post de MU-rolknoppen.")
+    @commands.command(name="muroles")
     @has_privileged_role()
-    async def muroles(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
-
+    async def muroles(self, ctx: Context) -> None:
         mu_channel_id = self.bot.config.get("channels", {}).get("military_unit")
         target_channel = (
-            interaction.guild.get_channel(mu_channel_id) if mu_channel_id else None
-        ) or interaction.channel
+            ctx.guild.get_channel(mu_channel_id) if mu_channel_id and ctx.guild else None
+        ) or ctx.channel
 
         mus_cog = self.bot.cogs.get("mus")
         if mus_cog:
             try:
                 await mus_cog._repost_mu_list(target_channel)
-                await interaction.followup.send(
-                    f"✅ MU-lijst + knoppen opnieuw gepost in {target_channel.mention}.",
-                    ephemeral=True,
-                )
+                await ctx.send(f"✅ MU-lijst + knoppen opnieuw gepost in {target_channel.mention}.")
                 return
             except Exception as exc:
-                await interaction.followup.send(
-                    f"❌ Herposten van MU-lijst mislukt: {exc}", ephemeral=True
-                )
+                await ctx.send(f"❌ Herposten van MU-lijst mislukt: {exc}")
                 return
 
-        # path = mu_roles_path(getattr(self.bot, "testing", False))
-        # self.template = load_roles_template(path)
-        # buttons = self.template.get("buttons", [])
-        # if not buttons:
-        #     await interaction.followup.send(
-        #         "Geen knoppen geconfigureerd in de MU-template.", ephemeral=True
-        #     )
-        #     return
+        await ctx.send(f"✅ MU-rolknoppen gepost in {target_channel.mention}.")
 
-        # color = int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16)
-        # await post_or_edit_buttons(target_channel, self.template, path, color)
-        await interaction.followup.send(
-            f"✅ MU-rolknoppen gepost in {target_channel.mention}.", ephemeral=True
-        )
-
-    @app_commands.command(
-        name="muwachtlijst",
-        description="Tel het aantal mensen op de wachtlijst voor MU's.",
-    )
+    @commands.command(name="muwachtlijst")
     @has_privileged_role()
-    async def muwachtlijst(self, interaction: discord.Interaction) -> None:
-        guild = interaction.guild
+    async def muwachtlijst(self, ctx: Context) -> None:
+        guild = ctx.guild
         if not guild:
-            await interaction.response.send_message(
-                "❌ Guild not found.", ephemeral=True
-            )
+            await ctx.send("❌ Guild not found.")
             return
 
         wachtlijst_role_id = self.bot.config.get("roles", {}).get("wachtlijst")
         if not wachtlijst_role_id:
-            await interaction.response.send_message(
-                "❌ Wachtlijst role not configured.", ephemeral=True
-            )
+            await ctx.send("❌ Wachtlijst role not configured.")
             return
 
         wachtlijst_role = guild.get_role(wachtlijst_role_id)
         if not wachtlijst_role:
-            await interaction.response.send_message(
-                "❌ Wachtlijst role not found.", ephemeral=True
-            )
+            await ctx.send("❌ Wachtlijst role not found.")
             return
 
         count = len(wachtlijst_role.members)
-        await interaction.response.send_message(
-            f"📋 Er zijn momenteel {count} mensen op de wachtlijst voor MU's."
-        )
+        await ctx.send(f"📋 Er zijn momenteel {count} mensen op de wachtlijst voor MU's.")
 
     def _load_mus_entries(self) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
         path = mus_json_path(getattr(self.bot, "testing", False))

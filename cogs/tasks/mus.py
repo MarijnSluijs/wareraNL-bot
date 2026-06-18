@@ -11,7 +11,8 @@ from typing import Any
 
 import discord
 from discord import app_commands
-from discord.ext import tasks
+from discord.ext import commands, tasks
+from discord.ext.commands import Context
 
 from cogs.tasks._base import TaskCogBase
 from utils.checks import has_privileged_role
@@ -349,27 +350,17 @@ class MUTasks(TaskCogBase, name="mu_tasks"):
             "age_seconds": 0.0,
         }
 
-    @app_commands.command(
-        name="refreshmuinfo",
-        description="Forceer direct een refresh van MU namen en thumbnails.",
-    )
+    @commands.command(name="refreshmuinfo")
     @has_privileged_role()
-    async def refreshmuinfo(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
+    async def refreshmuinfo(self, ctx: Context) -> None:
         try:
             result = await self.refresh_mu_info(force=True)
-            await interaction.followup.send(
-                (
-                    "✅ MU-info geforceerd ververst "
-                    f"({result.get('entries', 0)} entries, {result.get('updated', 0)} velden aangepast)."
-                ),
-                ephemeral=True,
+            await ctx.send(
+                "✅ MU-info geforceerd ververst "
+                f"({result.get('entries', 0)} entries, {result.get('updated', 0)} velden aangepast)."
             )
         except Exception as exc:
-            await interaction.followup.send(
-                f"❌ MU refresh mislukt: {exc}",
-                ephemeral=True,
-            )
+            await ctx.send(f"❌ MU refresh mislukt: {exc}")
 
 
 async def setup(bot) -> None:

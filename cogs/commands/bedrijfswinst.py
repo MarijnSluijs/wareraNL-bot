@@ -20,7 +20,7 @@ from typing import Optional
 import discord
 from discord import app_commands
 
-from cogs.commands._base import CommandCogBase, citizen_autocomplete
+from cogs.commands._base import CommandCogBase, citizen_autocomplete, strip_division_prefix
 
 logger = logging.getLogger("discord_bot")
 
@@ -811,7 +811,7 @@ class BedrijfswinstCog(CommandCogBase, name="bedrijfswinst"):
             return
 
         # Resolve player ------------------------------------------------
-        query = speler or interaction.user.display_name
+        query = speler or strip_division_prefix(interaction.user.display_name)
         user_id, profile = await self._resolve_user(query)
 
         if user_id is None or profile is None:

@@ -110,12 +110,8 @@ class General(commands.Cog, name="general"):
             embed.set_footer(text=str(base_url))
         return embed
 
-    @app_commands.command(
-        name="apiping",
-        description="Ping de WarEra API en toon of realtime data beschikbaar is.",
-    )
-    async def apiping(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
+    @commands.command(name="apiping")
+    async def apiping(self, ctx: Context) -> None:
         client = getattr(self.bot, "_ext_client", None)
         if not client or not hasattr(client, "ping"):
             embed = discord.Embed(
@@ -125,13 +121,10 @@ class General(commands.Cog, name="general"):
                     self.config.get("colors", {}).get("warning", "0xF59E42"), 16
                 ),
             )
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await ctx.send(embed=embed)
             return
         status = await client.ping()
-        await interaction.followup.send(
-            embed=self._api_status_embed(status),
-            ephemeral=True,
-        )
+        await ctx.send(embed=self._api_status_embed(status))
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
@@ -508,10 +501,7 @@ class General(commands.Cog, name="general"):
             return True
         return False
 
-    @commands.hybrid_command(
-        name="botinfo",
-        description="Laat nuttige informatie over de bot zien.",
-    )
+    @commands.command(name="botinfo")
     async def botinfo(self, context: Context) -> None:
         """
         Get some useful (or not) information about the bot.
@@ -623,11 +613,7 @@ class General(commands.Cog, name="general"):
     #     except discord.Forbidden:
     #         await context.send(embed=embed)
 
-    @commands.hybrid_command(
-        name="8ball",
-        description="Stel de bot een willekeurige vraag.",
-    )
-    @app_commands.describe(question="De vraag die je wilt stellen.")
+    @commands.command(name="8ball")
     async def eight_ball(self, context: Context, *, question: str) -> None:
         """
         Ask any question to the bot.
@@ -697,34 +683,22 @@ class General(commands.Cog, name="general"):
     #                 )
     #             await context.send(embed=embed)
 
-    @app_commands.command(
-        name="feedback", description="Dien feedback in voor de eigenaars van de bot."
-    )
-    @app_commands.checks.cooldown(1, 60.0, key=lambda i: i.user.id)
-    async def feedback(self, interaction: discord.Interaction) -> None:
-        """
-        Submit a feedback for the owners of the bot.
-
-        :param context: The hybrid command context.
-        """
-        feedback_form = FeedbackForm()
-        await interaction.response.send_modal(feedback_form)
-
-        await feedback_form.wait()
-        interaction = feedback_form.interaction
-        await interaction.response.send_message(
+    @commands.command(name="feedback")
+    @commands.cooldown(1, 60, commands.BucketType.user)
+    async def feedback(self, context: Context, *, feedback_text: str) -> None:
+        """Submit feedback to the bot owners."""
+        await context.send(
             embed=discord.Embed(
                 description="Bedankt voor je feedback, de eigenaren zijn op de hoogte gesteld.",
                 color=self.color,
             )
         )
-
         app_owner = (await self.bot.application_info()).owner
         await app_owner.send(
             embed=discord.Embed(
                 title="Nieuwe Feedback",
-                description=f"{interaction.user} (<@{interaction.user.id}>) heeft nieuwe "
-                f"feedback ingediend:\n```\n{feedback_form.answer}\n```",
+                description=f"{context.author} (<@{context.author.id}>) heeft nieuwe "
+                f"feedback ingediend:\n```\n{feedback_text}\n```",
                 color=self.color,
             )
         )
