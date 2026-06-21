@@ -189,6 +189,8 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
         pill_state["button_message_id"] = pill_msg.id
         _pill_save_state(pill_state, self.bot.testing)
 
+        await interaction.followup.send("✅ Rollen-knoppen gepost.", ephemeral=True)
+
 async def setup(bot) -> None:
     """Add the GeneralRoles cog to the bot."""
     await bot.add_cog(GeneralRoles(bot))

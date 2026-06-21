@@ -32,6 +32,9 @@ _INACTIVITY_DAYS = 3  # days without login → flagged in audit (≈72 h)
 # Marijn's Discord user ID (receives the weekly audit DM)
 _MARIJN_DISCORD_ID = 565626197048819731
 
+# Members with this role are guests (no in-game account) and must never appear in audits
+_GUEST_ROLE_ID = 1518315102967697610
+
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -353,6 +356,7 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
             }
             discord_to_ingame: dict[str, str] = {v: k for k, v in ingame_to_discord.items()}
 
+            guest_role = guild.get_role(_GUEST_ROLE_ID)
             holders = [m for m in guild.members if nederlander_role in m.roles and not m.bot]
             holder_ingame_ids = [
                 discord_to_ingame[str(m.id)]
@@ -367,6 +371,9 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
                 details = {}
 
             for member in holders:
+                if guest_role and guest_role in member.roles:
+                    continue  # guests have no in-game account by design
+
                 discord_id = str(member.id)
                 in_game_id = discord_to_ingame.get(discord_id)
 
@@ -453,6 +460,8 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
 
                 member = guild.get_member(int(discord_id))
                 if member is None or member.bot:
+                    continue
+                if guest_role and guest_role in member.roles:
                     continue
 
                 if nederlander_role not in member.roles:

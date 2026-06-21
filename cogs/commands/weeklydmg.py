@@ -86,11 +86,12 @@ class WeeklydmgCog(CommandCogBase, name="weeklydmg"):
             player_in_top5 = False
             for rank, (r_uid, r_name, r_dmg) in enumerate(top_rows, 1):
                 prefix = medal.get(rank, f"`{rank}.`")
+                url = f"https://app.warera.io/user/{r_uid}"
                 if r_uid == uid:
-                    top_lines.append(f"{prefix} **__{r_name}__** — {fmt_damage(r_dmg)}")
+                    top_lines.append(f"{prefix} **__[{r_name}]({url})__** — {fmt_damage(r_dmg)}")
                     player_in_top5 = True
                 else:
-                    top_lines.append(f"{prefix} **{r_name}** — {fmt_damage(r_dmg)}")
+                    top_lines.append(f"{prefix} **[{r_name}]({url})** — {fmt_damage(r_dmg)}")
 
             embed = discord.Embed(
                 title="⚔️ Wekelijkse schade Nederland — Top 5",
@@ -127,7 +128,8 @@ class WeeklydmgCog(CommandCogBase, name="weeklydmg"):
         medal = {1: "🥇", 2: "🥈", 3: "🥉"}
         for rank, (uid, name, dmg) in enumerate(rows, 1):
             prefix = medal.get(rank, f"`{rank:>2}.`")
-            lines.append(f"{prefix} **{name}** — {fmt_damage(dmg)}")
+            url = f"https://app.warera.io/user/{uid}"
+            lines.append(f"{prefix} **[{name}]({url})** — {fmt_damage(dmg)}")
 
         embed = discord.Embed(
             title=f"⚔️ Wekelijkse schade — Top {len(rows)} Nederland",
