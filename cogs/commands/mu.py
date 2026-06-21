@@ -19,6 +19,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from cogs.tasks.war_guild_divisions import DIVISION_MUS
 from services.api_client import APIClient
 
 if TYPE_CHECKING:
@@ -153,6 +154,60 @@ class MU(commands.Cog, name="mu"):
 
         return sorted(mus, key=lambda m: m.get("name", "").lower())
 
+    async def _get_division_mu_data(self) -> list[tuple[int, str, dict]]:
+        """Return [(division_num, mu_name, mu_data)] for all MUs in DIVISION_MUS.
+
+        IDs are resolved from the known_mus DB table, falling back to mus.json.
+        """
+        # Build name→id map from DB (known_mus)
+        db_id_map: dict[str, str] = {}
+        shared_db = getattr(self.bot, "_ext_db", None)
+        if shared_db:
+            try:
+                for mu_id, mu_name, _ in await shared_db.get_all_known_mu_ids():
+                    db_id_map[mu_name.lower()] = mu_id
+            except Exception as exc:
+                logger.warning("_get_division_mu_data: DB lookup failed: %s", exc)
+
+        # Fallback: name→id from mus.json
+        json_id_map: dict[str, str] = {}
+        try:
+            with open(self._mus_path(), "r", encoding="utf-8") as f:
+                for e in json.load(f).get("embeds", []):
+                    if e.get("id") and e.get("name"):
+                        json_id_map[e["name"].lower()] = str(e["id"])
+        except Exception:
+            pass
+
+        # Collect ordered (div, name, id) tuples
+        ordered: list[tuple[int, str, str]] = []
+        for div, names in DIVISION_MUS.items():
+            for name in names:
+                key = name.lower()
+                mu_id = db_id_map.get(key) or json_id_map.get(key)
+                if mu_id:
+                    ordered.append((div, name, mu_id))
+                else:
+                    logger.warning("_get_division_mu_data: no ID for %r", name)
+
+        if not ordered:
+            return []
+
+        client = await self._get_client()
+        inputs = [{"muId": mu_id} for _, _, mu_id in ordered]
+        try:
+            results = await client.batch_get("/mu.getById", inputs)
+        except Exception as exc:
+            logger.error("_get_division_mu_data: batch_get failed: %s", exc)
+            return []
+
+        out: list[tuple[int, str, dict]] = []
+        for (div, name, _mu_id), raw in zip(ordered, results):
+            data = _unwrap(raw) if isinstance(raw, dict) else raw
+            if isinstance(data, dict):
+                out.append((div, name, data))
+        return out
+
     # ------------------------------------------------------------------ #
     # /muplek
     # ------------------------------------------------------------------ #
@@ -162,81 +217,56 @@ class MU(commands.Cog, name="mu"):
         description="Laat zien hoeveel plekken er vrij zijn in de Nederlandse MU's.",
     )
     async def muplek(self, interaction: discord.Interaction) -> None:
-        """Show how many free spots are available in Dutch MUs, grouped by type."""
+        """Show free spots in Dutch division MUs, grouped by division."""
         await interaction.response.defer()
 
-        mus = await self._get_all_dutch_mus()
-        if not mus:
+        div_mu_data = await self._get_division_mu_data()
+        if not div_mu_data:
             await self._send_api_offline(
                 interaction,
                 "Kon geen Nederlandse MU's ophalen. De API is mogelijk tijdelijk niet beschikbaar.",
             )
             return
 
-        # Build id→type map from the template so we can group by type.
-        mu_type_map: dict[str, str] = {}
-        try:
-            with open(self._mus_path(), "r", encoding="utf-8") as _f:
-                _tpl = json.load(_f)
-            for _entry in _tpl.get("embeds", []):
-                if isinstance(_entry, dict) and _entry.get("id"):
-                    mu_type_map[str(_entry["id"])] = str(
-                        _entry.get("type") or "Standaard"
-                    )
-        except Exception as exc:
-            logger.warning(
-                "muplek: failed to read type map from %s: %s", self._mus_path(), exc
-            )
-
-        # Row: (mu_id, name, type, members, capacity, free)
-        rows: list[tuple[str, str, str, int, int, int]] = []
-        for mu in mus:
-            mu_id = str(mu.get("_id") or mu.get("id") or "")
-            name = mu.get("name", "?")
-            mu_type = mu_type_map.get(mu_id, "Standaard")
+        # Row: (div, name, members, capacity, free)
+        rows: list[tuple[int, str, int, int, int]] = []
+        for div, name, mu in div_mu_data:
             members = len(mu.get("members", []))
-            dorm_lvl = mu.get("activeUpgradeLevels", {}).get("dormitories", 1)
+            dorm_lvl = (mu.get("activeUpgradeLevels") or {}).get("dormitories", 1)
             capacity = DORM_CAPACITY.get(dorm_lvl, dorm_lvl * 5)
             free = max(0, capacity - members)
-            rows.append((mu_id, name, mu_type, members, capacity, free))
+            rows.append((div, name, members, capacity, free))
 
-        total_free = sum(r[5] for r in rows)
-        total_members = sum(r[3] for r in rows)
-        total_capacity = sum(r[4] for r in rows)
+        total_free = sum(r[4] for r in rows)
+        total_members = sum(r[2] for r in rows)
+        total_capacity = sum(r[3] for r in rows)
 
-        # Display order for types
-        TYPE_ORDER = ["Elite", "Eco", "Standaard"]
+        # Sort: by division, then most free spots first, then name
+        rows.sort(key=lambda r: (r[0], -r[4], r[1].lower()))
 
-        def _type_sort_key(t: str) -> int:
-            try:
-                return TYPE_ORDER.index(t)
-            except ValueError:
-                return len(TYPE_ORDER)
-
-        rows.sort(key=lambda r: (_type_sort_key(r[2]), -r[5], r[1].lower()))
-
-        # Build per-type sections
-        max_mu_name = 22
-        col1 = min(max((len(r[1]) for r in rows), default=4), max_mu_name)
+        col1 = min(max((len(r[1]) for r in rows), default=4), 22)
         col1 = max(col1, len("MU"))
-
         _row_suffix = "  Leden  Max  Vrij"
         separator = "─" * (col1 + len(_row_suffix))
 
-        lines: list[str] = []
-        type_labels = {"Elite": "🎖️ Elite", "Eco": "💰 Eco", "Standaard": "🪖 Standaard"}
+        DIV_LABELS = {
+            1: "🟡 Divisie 1",
+            2: "🔵 Divisie 2",
+            3: "🟢 Divisie 3",
+            4: "🔴 Divisie 4",
+            5: "🟣 Divisie 5",
+        }
 
-        prev_type: str | None = None
-        for _mu_id, name, mu_type, members, capacity, free in rows:
-            if mu_type != prev_type:
+        lines: list[str] = []
+        prev_div: int | None = None
+        for div, name, members, capacity, free in rows:
+            if div != prev_div:
                 if lines:
                     lines.append("")
-                label = type_labels.get(mu_type, mu_type)
-                mu_col_hdr = f"{label} MU"
-                header = f"{mu_col_hdr:<{col1}}{_row_suffix}"
-                lines.append(header)
+                label = DIV_LABELS.get(div, f"Divisie {div}")
+                lines.append(f"{label + ' MU':<{col1}}{_row_suffix}")
                 lines.append(separator)
-                prev_type = mu_type
+                prev_div = div
             free_str = f"+{free}" if free > 0 else " 0"
             lines.append(
                 f"{name[:col1]:<{col1}}  {members:>5}  {capacity:>3}  {free_str:>4}"
@@ -257,7 +287,7 @@ class MU(commands.Cog, name="mu"):
             timestamp=datetime.now(timezone.utc),
         )
         embed.set_footer(
-            text=f"{len(mus)} MU's • Capaciteit gebaseerd op kazernesniveau"
+            text=f"{len(rows)} MU's • Capaciteit gebaseerd op kazernesniveau"
         )
         await interaction.followup.send(embed=embed)
 
