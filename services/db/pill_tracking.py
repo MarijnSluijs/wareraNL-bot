@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Optional
 
-_DEBUFF_DURATION = 16 * 3600  # seconds
+_DEBUFF_DURATION = 15.5 * 3600  # seconds
 
 
 class PillTrackingMixin:

@@ -113,7 +113,7 @@ class PillRemindersMixin:
         ``status`` is ``"buff"``, ``"debuff"``, or ``"none"``.
         """
         now = int(time.time())
-        debuff_duration = 16 * 3600
+        debuff_duration = 15.5 * 3600
 
         async with self._conn.execute(
             "SELECT expires_at FROM pill_reminders WHERE in_game_user_id = ?",
