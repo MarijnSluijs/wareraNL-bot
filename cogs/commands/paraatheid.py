@@ -237,7 +237,7 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
                         except Exception:
                             pill_val = "💊 In buff"
                     else:
-                        debuff_duration = 16 * 3600
+                        debuff_duration = 15.5 * 3600
                         if buff_end_at:
                             try:
                                 from datetime import datetime as _dt

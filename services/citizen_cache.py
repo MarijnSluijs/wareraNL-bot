@@ -141,7 +141,7 @@ class CitizenCache:
         now = datetime.now(timezone.utc)
         now_ts = now.timestamp()
         now_utc_str = now.isoformat()
-        debuff_duration = 16 * 3600  # seconds
+        debuff_duration = 15.5 * 3600  # seconds
         players: list[dict] = []
         tracking_rows: list[tuple] = []
         no_pill_entries: list[tuple[int, str]] = []  # (player_list_index, user_id)
