@@ -41,7 +41,7 @@ class CitizensMixin:
             "  level                = excluded.level,"
             "  skill_mode           = COALESCE(excluded.skill_mode, citizen_levels.skill_mode),"
             "  last_skills_reset_at = COALESCE(excluded.last_skills_reset_at, citizen_levels.last_skills_reset_at),"
-            "  citizen_name         = excluded.citizen_name,"
+            "  citizen_name         = COALESCE(excluded.citizen_name, citizen_levels.citizen_name),"
             "  last_login_at        = COALESCE(excluded.last_login_at, citizen_levels.last_login_at),"
             "  mu_id   = COALESCE(excluded.mu_id,   citizen_levels.mu_id),"
             "  mu_name = COALESCE(excluded.mu_name, citizen_levels.mu_name),"
@@ -1054,6 +1054,21 @@ class CitizensMixin:
         async with self._conn.execute(sql, user_ids) as cur:
             async for row in cur:
                 result[str(row[0])] = (str(row[1]), float(row[2]))
+        return result
+
+    async def get_levels_for_users(self, user_ids: list[str]) -> dict[str, int]:
+        """Return {user_id: level} for each id found in citizen_levels."""
+        if not user_ids:
+            return {}
+        placeholders = ",".join("?" for _ in user_ids)
+        sql = (
+            f"SELECT user_id, level FROM citizen_levels "
+            f"WHERE user_id IN ({placeholders}) AND level IS NOT NULL"
+        )
+        result: dict[str, int] = {}
+        async with self._conn.execute(sql, user_ids) as cur:
+            async for row in cur:
+                result[str(row[0])] = int(row[1])
         return result
 
     async def get_top_countries_by_population(self, limit: int) -> list[dict]:

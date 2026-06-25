@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+from discord.ext.commands import Context
 
 from cogs.tasks._base import TaskCogBase
 from cogs.tasks.war_guild_divisions import DIVISION_MUS
@@ -195,45 +196,55 @@ class MuSubscriptionsCog(TaskCogBase, name="mu_subscriptions"):
         members = _mu_members(mu_data)
 
         weekly_map: dict[str, tuple[str, float]] = {}
+        level_map: dict[str, int] = {}
         if self._db and members:
             try:
                 weekly_map = await self._db.get_weekly_damages_for_users(members)
             except Exception as exc:
                 logger.warning("mu_subscriptions: weekly_map DB lookup failed: %s", exc)
+            try:
+                level_map = await self._db.get_levels_for_users(members)
+            except Exception as exc:
+                logger.warning("mu_subscriptions: level DB lookup failed: %s", exc)
 
-        rows: list[tuple[str, float]] = []
+        rows: list[tuple[str, float, int]] = []
         for uid in members:
             if uid in weekly_map:
                 name, weekly = weekly_map[uid]
                 if weekly > 0:
-                    rows.append((name, weekly))
+                    level = level_map.get(uid, 0)
+                    rows.append((name, weekly, level))
         rows.sort(key=lambda r: r[1], reverse=True)
 
         if rows:
-            name_w = min(max(len(r[0]) for r in rows), 20)
+            name_w = min(max(len(r[0]) for r in rows), 16)
             name_w = max(name_w, 4)
             W = 10
-            header = f"{'#':>3}  {'Naam':<{name_w}}  {'Wekelijks':>{W}}"
+            L = 3
+            E = 8
+            header = (
+                f"{'#':>3}  {'Naam':<{name_w}}  {'Wekelijks':>{W}}"
+                f"  {'Lvl':>{L}}  {'W/Per lvl':>{E}}"
+            )
             sep = "─" * len(header)
             lines = [header, sep]
-            for i, (name, weekly) in enumerate(rows, 1):
+            for i, (name, weekly, level) in enumerate(rows, 1):
                 display = name[:name_w] if len(name) > name_w else name
-                lines.append(f"{i:>3}  {display:<{name_w}}  {fmt_damage(weekly):>{W}}")
+                l_str = str(level) if level else "─"
+                e_str = fmt_damage(weekly / level) if weekly and level else "─"
+                lines.append(
+                    f"{i:>3}  {display:<{name_w}}  {fmt_damage(weekly):>{W}}"
+                    f"  {l_str:>{L}}  {e_str:>{E}}"
+                )
             table = "```\n" + "\n".join(lines) + "\n```"
         else:
             table = "*Geen schadedata beschikbaar.*"
 
-        embed = discord.Embed(
-            title=f"⚔️ Weekschade {mu_name}",
-            description=table,
-            colour=self._embed_colour(),
-        )
-        embed.set_footer(
-            text=f"Totaal MU: {fmt_damage(weekly_total)} · Wekelijkse schade reset om 02:00 NL-tijd"
-        )
+        footer_line = f"Totaal MU: {fmt_damage(weekly_total)} · Wekelijkse schade reset om 02:00 NL-tijd"
+        content = f"**⚔️ Weekschade {mu_name}**\n{table}\n_{footer_line}_"
 
         try:
-            await channel.send(embed=embed)
+            await channel.send(content)
         except Exception as exc:
             logger.warning(
                 "mu_subscriptions: failed to send weekly embed for %s: %s", mu_name, exc
@@ -514,6 +525,33 @@ class MuSubscriptionsCog(TaskCogBase, name="mu_subscriptions"):
             )
 
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+    @commands.command(name="weekschade_preview", hidden=True)
+    @commands.check(lambda ctx: ctx.bot.is_owner(ctx.author) if not isinstance(ctx.author, discord.Member)
+                    else ctx.bot.is_owner(ctx.author))
+    async def weekschade_preview(self, ctx: Context, *, mu: str) -> None:
+        """Preview the weekschade message for a MU in the current channel. Owner-only."""
+        if not await ctx.bot.is_owner(ctx.author):
+            await ctx.send("❌ Dit commando is alleen voor de bot-eigenaar.", delete_after=5)
+            return
+        if not self._db:
+            await ctx.send("❌ Database niet beschikbaar.")
+            return
+
+        mu_id, canonical = await self._resolve_mu(mu)
+        if not mu_id:
+            await ctx.send(f"❌ MU **{mu}** niet gevonden in de database.")
+            return
+
+        mu_name = canonical or mu
+        fake_sub = {
+            "channel_id": str(ctx.channel.id),
+            "mu_id": mu_id,
+            "mu_name": mu_name,
+        }
+        await ctx.send(f"*Preview weekschade voor **{mu_name}**:*")
+        await self._post_weekly_damage(fake_sub)
 
 
 async def setup(bot: commands.Bot) -> None:
