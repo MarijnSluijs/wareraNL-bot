@@ -216,12 +216,18 @@ class MudmgCog(CommandCogBase, name="mudmg"):
     )
     @app_commands.describe(
         mu="Optioneel: naam van een specifieke MU voor een ledendetailoverzicht.",
+        sorteren="Sorteren op wekelijkse schade (standaard) of totale schade.",
     )
     @app_commands.autocomplete(mu=mu_autocomplete)
+    @app_commands.choices(sorteren=[
+        app_commands.Choice(name="Wekelijks (standaard)", value="weekly"),
+        app_commands.Choice(name="Totaal", value="total"),
+    ])
     async def mudmg(
         self,
         ctx: Context,
         mu: Optional[str] = None,
+        sorteren: str = "weekly",
     ) -> None:
         """Show MU damage overview or per-member breakdown."""
         if not self._client:
@@ -239,12 +245,14 @@ class MudmgCog(CommandCogBase, name="mudmg"):
         if mu:
             await self._send_mu_detail(ctx, mu, entries)
         else:
-            await self._send_mu_overview(ctx, entries)
+            await self._send_mu_overview(ctx, entries, sort_by_total=sorteren == "total")
 
     # ── Overview (no MU arg) ──────────────────────────────────────────────────
 
-    async def _send_mu_overview(self, ctx: Context, entries: list[dict]) -> None:
-        """Fetch all MU stats and send a flat ranked overview by weekly damage."""
+    async def _send_mu_overview(
+        self, ctx: Context, entries: list[dict], sort_by_total: bool = False
+    ) -> None:
+        """Fetch all MU stats and send a flat ranked overview."""
         inputs = [{"muId": e["id"]} for e in entries]
         try:
             results = await self._client.batch_get("/mu.getById", inputs)
@@ -264,8 +272,9 @@ class MudmgCog(CommandCogBase, name="mudmg"):
             grand_weekly += w
             grand_total += t
 
-        # Sort by weekly damage descending
-        rows.sort(key=lambda r: r[2], reverse=True)
+        # Sort by selected column descending
+        sort_col = 3 if sort_by_total else 2
+        rows.sort(key=lambda r: r[sort_col], reverse=True)
 
         # Build code-block table that fits in an embed description (max 4096 chars)
         _CAT_ICON = {"D1": "🟡", "D2": "🔵", "D3": "🟢", "D4": "🔴", "D5": "🟣"}
@@ -306,8 +315,9 @@ class MudmgCog(CommandCogBase, name="mudmg"):
                 chunks.append("```\n" + "\n".join(chunk_lines) + "\n```")
 
         legend = "🟡 D1  •  🔵 D2  •  🟢 D3  •  🔴 D4  •  🟣 D5"
+        sort_label = "totale schade" if sort_by_total else "wekelijkse schade"
         for i, chunk in enumerate(chunks):
-            title = "⚔️ Nederlandse MUs — Ranking wekelijkse schade"
+            title = f"⚔️ Nederlandse MUs — Ranking {sort_label}"
             if len(chunks) > 1:
                 title += f" ({i + 1}/{len(chunks)})"
             embed = discord.Embed(
@@ -373,47 +383,59 @@ class MudmgCog(CommandCogBase, name="mudmg"):
         # Build total damage lookup: uid → total damage
         total_map = _extract_total_damage_map(total_resp)
 
-        # Look up per-member weekly damage from the DB
+        # Look up per-member weekly damage and levels from the DB
         if self._db and members:
             try:
                 weekly_map = await self._db.get_weekly_damages_for_users(members)
             except Exception as exc:
                 logger.warning("mudmg detail: DB lookup failed: %s", exc)
                 weekly_map = {}
+            try:
+                level_map = await self._db.get_levels_for_users(members)
+            except Exception as exc:
+                logger.warning("mudmg detail: level DB lookup failed: %s", exc)
+                level_map = {}
         else:
             weekly_map = {}
+            level_map = {}
 
-        # Build rows: (citizen_name, weekly_dmg, total_dmg), sorted by weekly desc
-        rows: list[tuple[str, float, float]] = []
+        # Build rows: (citizen_name, weekly_dmg, total_dmg, level), sorted by weekly desc
+        rows: list[tuple[str, float, float, int]] = []
         for uid in members:
             name: Optional[str] = None
             weekly = 0.0
             if uid in weekly_map:
                 name, weekly = weekly_map[uid]
             total_dmg = total_map.get(uid, 0.0)
+            level = level_map.get(uid, 0)
             if name or total_dmg:
-                rows.append((name or uid, weekly, total_dmg))
+                rows.append((name or uid, weekly, total_dmg, level))
         rows.sort(key=lambda r: r[1], reverse=True)
 
         # Format as a fixed-width code-block table
-        # Keep total width ≤ 43 chars so Discord embed lines don't wrap:
-        #   3 (#) + 2 + 16 (Naam) + 2 + 9 (Wekelijks) + 2 + 9 (Totaal) = 43
+        # # + Naam + Wekelijks + Totaal + Lvl + Per lvl
         if rows:
-            name_w = min(max(len(r[0]) for r in rows), 16)
+            name_w = min(max(len(r[0]) for r in rows), 14)
             name_w = max(name_w, 4)
             W = 9
             T = 9
+            L = 3
+            E = 8
             header = (
                 f"{'#':>3}  {'Naam':<{name_w}}  {'Wekelijks':>{W}}  {'Totaal':>{T}}"
+                f"  {'Lvl':>{L}}  {'W/Per lvl':>{E}}"
             )
             sep = "\u2500" * len(header)
             tbl_lines = [header, sep]
-            for i, (name, weekly, total) in enumerate(rows, 1):
+            for i, (name, weekly, total, level) in enumerate(rows, 1):
                 display = name[:name_w] if len(name) > name_w else name
                 w_str = fmt_damage(weekly) if weekly else "\u2014"
                 t_str = fmt_damage(total) if total else "\u2014"
+                l_str = str(level) if level else "\u2014"
+                e_str = fmt_damage(weekly / level) if weekly and level else "\u2014"
                 tbl_lines.append(
                     f"{i:>3}  {display:<{name_w}}  {w_str:>{W}}  {t_str:>{T}}"
+                    f"  {l_str:>{L}}  {e_str:>{E}}"
                 )
             table = "```\n" + "\n".join(tbl_lines) + "\n```"
         else:
@@ -421,15 +443,6 @@ class MudmgCog(CommandCogBase, name="mudmg"):
                 "*Geen schadedata beschikbaar voor leden van deze MU.\n"
                 "Enkel NL-burgers die via /peil zijn opgehaald zijn zichtbaar.*"
             )
-
-        embed = discord.Embed(
-            title=f"⚔️ {entry['name']} — Ledenschade",
-            description=table,
-            colour=self._embed_colour(),
-        )
-
-        if entry.get("thumbnail"):
-            embed.set_thumbnail(url=entry["thumbnail"])
 
         w_str = fmt_damage(weekly_total) if weekly_total else "—"
         t_str = fmt_damage(dmg_total) if dmg_total else "—"
@@ -439,12 +452,12 @@ class MudmgCog(CommandCogBase, name="mudmg"):
         footer_parts = [f"MU totaal — week: {w_str} | totaal: {t_str}"]
         if members_total:
             footer_parts.append(f"{members_shown}/{members_total} leden met schadedata")
-        footer_parts.append(
-            "Schade per lid sinds lidmaatschap is niet beschikbaar via de API"
-        )
-        embed.set_footer(text=" · ".join(footer_parts))
+        footer_line = " · ".join(footer_parts)
 
-        await ctx.send(embed=embed)
+        # Send as a plain message (wider than embed description)
+        content = f"**⚔️ {entry['name']} — Ledenschade**\n{table}\n_{footer_line}_"
+        await ctx.send(content)
+
 
 
 async def setup(bot) -> None:

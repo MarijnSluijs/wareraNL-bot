@@ -658,3 +658,39 @@ CREATE TABLE IF NOT EXISTS eco_donations (
 );
 CREATE INDEX IF NOT EXISTS idx_eco_donations_created_at ON eco_donations(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_eco_donations_mu_name    ON eco_donations(mu_name);
+
+-- ── Online history log ────────────────────────────────────────────────────────
+-- Every 12 hours, snapshot whether each citizen was seen online (lastConnectionAt
+-- within the past 12 hours). Used to draw an online-activity chart on player pages.
+CREATE TABLE IF NOT EXISTS citizen_online_log (
+    user_id    TEXT NOT NULL,
+    checked_at TEXT NOT NULL,  -- ISO8601 UTC timestamp of the snapshot
+    was_online INTEGER NOT NULL DEFAULT 0,  -- 1 = online in last 12h, 0 = offline
+    PRIMARY KEY (user_id, checked_at)
+);
+CREATE INDEX IF NOT EXISTS idx_citizen_online_log_user ON citizen_online_log(user_id, checked_at DESC);
+
+-- ── Country paraatheid (war-readiness) daily log ──────────────────────────────
+-- Once per day, snapshot war/eco counts for every known country so we can draw
+-- a "paraatheid over time" graph on the country detail page.
+CREATE TABLE IF NOT EXISTS country_paraatheid_log (
+    country_id    TEXT NOT NULL,
+    snapshot_date TEXT NOT NULL,  -- YYYY-MM-DD
+    total_count   INTEGER NOT NULL DEFAULT 0,
+    war_count     INTEGER NOT NULL DEFAULT 0,
+    eco_count     INTEGER NOT NULL DEFAULT 0,
+    war_pct       REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (country_id, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_country_para_log ON country_paraatheid_log(country_id, snapshot_date DESC);
+
+-- ── Citizen level history log ─────────────────────────────────────────────────
+-- One row per level-up event (only inserted when the level changes from the
+-- previous snapshot), so the table stays small and charts show step-wise growth.
+CREATE TABLE IF NOT EXISTS citizen_level_log (
+    user_id       TEXT NOT NULL,
+    snapshot_date TEXT NOT NULL,  -- YYYY-MM-DD of the day the new level was first seen
+    level         INTEGER NOT NULL,
+    PRIMARY KEY (user_id, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_citizen_level_log ON citizen_level_log(user_id, snapshot_date DESC);
