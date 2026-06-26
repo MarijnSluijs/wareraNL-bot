@@ -59,6 +59,7 @@ class CitizenCache:
             last_login = self._extract_last_login_at(obj)
             name = self._extract_name(obj)
             mu_id, mu_name = self._extract_mu_info(obj)
+            avatar_url = self._extract_avatar_url(obj)
             if lvl is not None:
                 await self._db.upsert_citizen_level(
                     uid,
@@ -71,6 +72,7 @@ class CitizenCache:
                     last_login_at=last_login,
                     mu_id=mu_id,
                     mu_name=mu_name,
+                    avatar_url=avatar_url,
                 )
                 recorded += 1
 
@@ -128,7 +130,7 @@ class CitizenCache:
         if not mu_id:
             return None, []
 
-        member_ids, live_name = await self._fetch_mu_members_and_name(mu_id)
+        member_ids, live_name, _avatar = await self._fetch_mu_members_and_name(mu_id)
         effective_name = live_name or mu_name
         if not member_ids:
             return effective_name, []
@@ -280,10 +282,10 @@ class CitizenCache:
         updated = 0
         now_iso = datetime.now(timezone.utc).isoformat()
         for mu_id, mu_name in mu_entries:
-            member_ids, live_name = await self._fetch_mu_members_and_name(mu_id)
+            member_ids, live_name, mu_avatar = await self._fetch_mu_members_and_name(mu_id)
             effective_name = live_name or mu_name
             # Tag this MU as belonging to country_id in the known_mus registry
-            await self._db.upsert_known_mu(mu_id, effective_name, now_iso, country_id)
+            await self._db.upsert_known_mu(mu_id, effective_name, now_iso, country_id, avatar_url=mu_avatar)
             for uid in member_ids:
                 await self._db.update_citizen_mu(uid, mu_id, effective_name, country_id)
                 updated += 1
@@ -326,7 +328,7 @@ class CitizenCache:
         citizens_updated = 0
 
         for idx, (mu_id, mu_name, existing_country_id) in enumerate(mu_rows):
-            member_ids, live_name = await self._fetch_mu_members_and_name(mu_id)
+            member_ids, live_name, mu_avatar = await self._fetch_mu_members_and_name(mu_id)
             effective_name = live_name or mu_name
 
             inferred_country_id: str | None = existing_country_id
@@ -343,7 +345,7 @@ class CitizenCache:
                     citizens_updated += 1
                 await self._db.flush_citizen_levels()
 
-            await self._db.upsert_known_mu(mu_id, effective_name, now_iso, inferred_country_id)
+            await self._db.upsert_known_mu(mu_id, effective_name, now_iso, inferred_country_id, avatar_url=mu_avatar)
             if inferred_country_id:
                 mus_tagged += 1
 
@@ -368,10 +370,11 @@ class CitizenCache:
 
     async def _fetch_mu_members_and_name(
         self, mu_id: str
-    ) -> tuple[list[str], str | None]:
-        """Call /mu.getById and return (member user IDs, MU name)."""
+    ) -> tuple[list[str], str | None, str | None]:
+        """Call /mu.getById and return (member user IDs, MU name, avatarUrl)."""
         user_ids: list[str] = []
         mu_name: str | None = None
+        avatar_url: str | None = None
         # mu.getById returns the full MU including its members list
         try:
             resp = await self._client.get(
@@ -398,6 +401,9 @@ class CitizenCache:
             raw_name = data.get("name") or data.get("title")
             if isinstance(raw_name, str) and raw_name:
                 mu_name = raw_name
+            raw_avatar = data.get("avatarUrl")
+            if isinstance(raw_avatar, str) and raw_avatar:
+                avatar_url = raw_avatar
             for key in ("members", "citizenIds", "userIds", "users"):
                 v = data.get(key)
                 if isinstance(v, list):
@@ -417,7 +423,7 @@ class CitizenCache:
                 if uid:
                     user_ids.append(str(uid))
 
-        return user_ids, mu_name
+        return user_ids, mu_name, avatar_url
 
     async def _fetch_user_ids(self, country_id: str) -> list[str]:
         """Paginate /user.getUsersByCountry and return all user IDs."""
@@ -585,6 +591,13 @@ class CitizenCache:
             return None
 
         return "eco" if eco_pts >= war_pts else "war"
+
+    @staticmethod
+    def _extract_avatar_url(obj: Any) -> str | None:
+        """Pull the avatarUrl from a getUserLite result."""
+        if not isinstance(obj, dict):
+            return None
+        return obj.get("avatarUrl") or None
 
     @staticmethod
     def _extract_name(obj: Any) -> str | None:

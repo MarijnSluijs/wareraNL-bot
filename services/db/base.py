@@ -98,6 +98,9 @@ class DatabaseBase:
             ("mu_auction_win_subs", "initialized INTEGER NOT NULL DEFAULT 0"),
             # mu_auction_win_subs — cutoff_at: createdAt of newest contract at subscribe time
             ("mu_auction_win_subs", "cutoff_at TEXT"),
+            # avatar URLs — added to citizen_levels and known_mus
+            ("citizen_levels", "avatar_url TEXT"),
+            ("known_mus", "avatar_url TEXT"),
         ]
         for table, column_def in migrations:
             try:

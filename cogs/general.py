@@ -154,8 +154,8 @@ class General(commands.Cog, name="general"):
                 )
         words = content.lower().split()
 
-        # fish / vis → send fishSTEER emoji as message
-        if any(w in words for w in ("fish", "vis")):
+        # fish / vis → send fishSTEER emoji as message (10% chance)
+        if any(w in words for w in ("fish", "vis")) and random.random() < 0.10:
             fish_emoji = discord.utils.get(message.guild.emojis, name="fishSTEER") if message.guild else None
             try:
                 await message.channel.send(str(fish_emoji) if fish_emoji else ":fish:")

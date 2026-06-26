@@ -25,6 +25,7 @@ class CitizensMixin:
         last_login_at: Optional[str] = None,
         mu_id: Optional[str] = None,
         mu_name: Optional[str] = None,
+        avatar_url: Optional[str] = None,
     ) -> None:
         """Insert or update a citizen's level and related info.
 
@@ -34,8 +35,8 @@ class CitizensMixin:
         await self._conn.execute(
             "INSERT INTO citizen_levels"
             "(user_id, country_id, level, skill_mode, last_skills_reset_at, "
-            "citizen_name, last_login_at, mu_id, mu_name, updated_at)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "citizen_name, last_login_at, mu_id, mu_name, updated_at, avatar_url)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(user_id) DO UPDATE SET"
             "  country_id           = excluded.country_id,"
             "  level                = excluded.level,"
@@ -43,9 +44,10 @@ class CitizensMixin:
             "  last_skills_reset_at = COALESCE(excluded.last_skills_reset_at, citizen_levels.last_skills_reset_at),"
             "  citizen_name         = COALESCE(excluded.citizen_name, citizen_levels.citizen_name),"
             "  last_login_at        = COALESCE(excluded.last_login_at, citizen_levels.last_login_at),"
-            "  mu_id   = COALESCE(excluded.mu_id,   citizen_levels.mu_id),"
-            "  mu_name = COALESCE(excluded.mu_name, citizen_levels.mu_name),"
-            "  updated_at           = excluded.updated_at",
+            "  mu_id      = COALESCE(excluded.mu_id,      citizen_levels.mu_id),"
+            "  mu_name    = COALESCE(excluded.mu_name,    citizen_levels.mu_name),"
+            "  avatar_url = COALESCE(excluded.avatar_url, citizen_levels.avatar_url),"
+            "  updated_at = excluded.updated_at",
             (
                 user_id,
                 country_id,
@@ -57,6 +59,7 @@ class CitizensMixin:
                 mu_id,
                 mu_name,
                 updated_at,
+                avatar_url,
             ),
         )
 
