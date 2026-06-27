@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS deposit_top (
 CREATE TABLE IF NOT EXISTS known_mus (
     mu_id      TEXT PRIMARY KEY,
     mu_name    TEXT NOT NULL,
-    updated_at TEXT
+    updated_at TEXT,
+    avatar_url TEXT
 );
 
 -- war_mu_roles: Discord role IDs created for Dutch-owned MUs in the war guild
@@ -103,7 +104,8 @@ CREATE TABLE IF NOT EXISTS citizen_levels (
     last_login_at        TEXT,
     mu_id                TEXT,
     mu_name              TEXT,
-    updated_at           TEXT NOT NULL
+    updated_at           TEXT NOT NULL,
+    avatar_url           TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_citizen_levels_country ON citizen_levels(country_id);
 CREATE INDEX IF NOT EXISTS idx_citizen_levels_mu_name ON citizen_levels(mu_name) WHERE mu_name IS NOT NULL;
@@ -694,3 +696,15 @@ CREATE TABLE IF NOT EXISTS citizen_level_log (
     PRIMARY KEY (user_id, snapshot_date)
 );
 CREATE INDEX IF NOT EXISTS idx_citizen_level_log ON citizen_level_log(user_id, snapshot_date DESC);
+
+-- ── Citizen name history ──────────────────────────────────────────────────────
+-- One row per unique name a citizen has ever had (captured from today onwards).
+-- inserted the first time we see the name, so first_seen_date is approximate.
+CREATE TABLE IF NOT EXISTS citizen_name_history (
+    user_id         TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    first_seen_date TEXT NOT NULL,  -- YYYY-MM-DD
+    PRIMARY KEY (user_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_citizen_name_history_user ON citizen_name_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_citizen_name_history_name ON citizen_name_history(name COLLATE NOCASE);

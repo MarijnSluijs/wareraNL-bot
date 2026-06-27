@@ -1,0 +1,59 @@
+{
+  "embeds": [
+    {
+      "title": "🎮 Game rollen",
+      "color": "0x9b59b6",
+      "description": "Klik op een knop om de rol voor dat spel te krijgen of te verwijderen.\nMet deze rollen kun je anderen pinGen om samen te spelen.",
+      "buttons": [
+        {
+          "label": "Haxball",
+          "role_id": 1520546321726177370,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "WH40K",
+          "role_id": 1520546547358634205,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Satisfactory",
+          "role_id": 1520546626081394829,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Meccha-Chameleon",
+          "role_id": 1520546763411423322,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Skribbl",
+          "role_id": 1520547160586719253,
+          "style": "primary",
+          "row": 0
+        },
+        {
+          "label": "Among Us",
+          "role_id": 1520547264945328188,
+          "style": "primary",
+          "row": 1
+        },
+        {
+          "label": "GTA6",
+          "role_id": 1520547396692480060,
+          "style": "primary",
+          "row": 1
+        },
+        {
+          "label": "Runescape",
+          "role_id": 1520547496072319036,
+          "style": "primary",
+          "row": 1
+        }
+      ]
+    }
+  ]
+}

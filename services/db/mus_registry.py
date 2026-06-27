@@ -12,17 +12,19 @@ class MusRegistryMixin:
         mu_name: str,
         updated_at: str,
         country_id: str | None = None,
+        avatar_url: str | None = None,
     ) -> None:
         await self._conn.execute(
             """
-            INSERT INTO known_mus (mu_id, mu_name, updated_at, country_id)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO known_mus (mu_id, mu_name, updated_at, country_id, avatar_url)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(mu_id) DO UPDATE SET
                 mu_name    = excluded.mu_name,
                 updated_at = excluded.updated_at,
-                country_id = COALESCE(excluded.country_id, known_mus.country_id)
+                country_id = COALESCE(excluded.country_id, known_mus.country_id),
+                avatar_url = COALESCE(excluded.avatar_url, known_mus.avatar_url)
             """,
-            (mu_id, mu_name, updated_at, country_id),
+            (mu_id, mu_name, updated_at, country_id, avatar_url),
         )
 
     async def flush_known_mus(self) -> None:
