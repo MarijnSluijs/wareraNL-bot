@@ -3,7 +3,7 @@
     {
       "title": "🎮 Game rollen",
       "color": "0x9b59b6",
-      "description": "Klik op een knop om de rol voor dat spel te krijgen of te verwijderen.\nMet deze rollen kun je anderen pinGen om samen te spelen.",
+      "description": "Klik op een knop om de rol voor dat spel te krijgen of te verwijderen.\nMet deze rollen kun je anderen pingen om samen te spelen.",
       "buttons": [
         {
           "label": "Haxball",
