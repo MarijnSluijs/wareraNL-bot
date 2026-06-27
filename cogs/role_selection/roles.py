@@ -28,6 +28,13 @@ def general_roles_path(testing: bool = False) -> str:
     return f"{TEMPLATES_PATH}/roles.json"
 
 
+def games_roles_path(testing: bool = False) -> str:
+    """Return the correct games roles JSON path for the current mode."""
+    if testing:
+        return f"{TEMPLATES_PATH}/games_roles.testing.json"
+    return f"{TEMPLATES_PATH}/games_roles.json"
+
+
 def load_roles_template(path: str = f"{TEMPLATES_PATH}/mu_roles.json") -> dict:
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:

@@ -16,7 +16,7 @@ from cogs.commands.pillreminder import _load_state as _pill_load_state
 from cogs.commands.pillreminder import _save_state as _pill_save_state
 from utils.checks import has_privileged_role
 
-from .roles import RoleToggleView, general_roles_path, load_roles_template
+from .roles import RoleToggleView, games_roles_path, general_roles_path, load_roles_template
 
 
 class GeneralRoles(commands.Cog, name="general_role_selection"):
@@ -38,6 +38,18 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
                         )
             elif template.get("buttons"):
                 self.bot.add_view(RoleToggleView(template["buttons"], exclusive=False))
+        except Exception:
+            pass
+
+        try:
+            games_tpl = load_roles_template(
+                games_roles_path(getattr(bot, "testing", False))
+            )
+            for embed_data in games_tpl.get("embeds", []):
+                if embed_data.get("buttons"):
+                    self.bot.add_view(
+                        RoleToggleView(embed_data["buttons"], exclusive=False)
+                    )
         except Exception:
             pass
 
@@ -190,6 +202,66 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
         _pill_save_state(pill_state, self.bot.testing)
 
         await interaction.followup.send("✅ Rollen-knoppen gepost.", ephemeral=True)
+
+    @app_commands.command(
+        name="gamesroles",
+        description="Post de game-rolknoppen in het games-kanaal.",
+    )
+    @has_privileged_role()
+    async def gamesroles(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        testing = getattr(self.bot, "testing", False)
+        path = games_roles_path(testing)
+        template = load_roles_template(path)
+        embeds = template.get("embeds", [])
+
+        if not embeds:
+            await interaction.followup.send(
+                "❌ Geen embeds geconfigureerd in games_roles.json.", ephemeral=True
+            )
+            return
+
+        _GAMES_CHANNEL_ID = 1520543859820724254
+        target_channel = self.bot.get_channel(_GAMES_CHANNEL_ID)
+        if target_channel is None:
+            await interaction.followup.send(
+                "❌ Games-kanaal niet gevonden.", ephemeral=True
+            )
+            return
+
+        try:
+            await target_channel.purge(
+                limit=50,
+                check=lambda m: m.author == self.bot.user,
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+        color = int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16)
+
+        for embed_data in embeds:
+            buttons = embed_data.get("buttons", [])
+            if not buttons:
+                continue
+            embed_color_raw = embed_data.get("color")
+            if embed_color_raw:
+                embed_color = int(embed_color_raw, 16) if isinstance(embed_color_raw, str) else int(embed_color_raw)
+            else:
+                embed_color = color
+            embed = discord.Embed(
+                title=embed_data.get("title", "Game rollen"),
+                description=embed_data.get("description", "Klik op een knop om een rol te toggelen."),
+                color=embed_color,
+            )
+            await target_channel.send(
+                embed=embed, view=RoleToggleView(buttons, exclusive=False)
+            )
+
+        await interaction.followup.send(
+            f"✅ Game-rolknoppen gepost in <#{_GAMES_CHANNEL_ID}>.", ephemeral=True
+        )
+
 
 async def setup(bot) -> None:
     """Add the GeneralRoles cog to the bot."""
