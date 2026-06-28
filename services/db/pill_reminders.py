@@ -169,3 +169,110 @@ class PillRemindersMixin:
         )
         await self._conn.commit()
 
+    # ── 30-minute subscription ────────────────────────────────────────────────
+
+    async def subscribe_pill_reminder_30(
+        self, discord_user_id: str, in_game_user_id: str
+    ) -> None:
+        await self._conn.execute(
+            """
+            INSERT OR REPLACE INTO pill_reminders_30
+                (discord_user_id, in_game_user_id, expires_at, reminded)
+            VALUES (?, ?, NULL, 0)
+            """,
+            (discord_user_id, in_game_user_id),
+        )
+        await self._conn.commit()
+
+    async def remove_pill_reminder_30(self, discord_user_id: str) -> bool:
+        cursor = await self._conn.execute(
+            "DELETE FROM pill_reminders_30 WHERE discord_user_id = ?",
+            (discord_user_id,),
+        )
+        await self._conn.commit()
+        return cursor.rowcount > 0
+
+    async def is_pill_reminder_30_subscriber(self, discord_user_id: str) -> bool:
+        async with self._conn.execute(
+            "SELECT 1 FROM pill_reminders_30 WHERE discord_user_id = ?",
+            (discord_user_id,),
+        ) as cur:
+            return await cur.fetchone() is not None
+
+    async def get_pill_reminder_30_subscriber(self, discord_user_id: str) -> dict | None:
+        async with self._conn.execute(
+            "SELECT discord_user_id, in_game_user_id, expires_at, reminded "
+            "FROM pill_reminders_30 WHERE discord_user_id = ?",
+            (discord_user_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            if row is None:
+                return None
+            return {
+                "discord_user_id": row[0],
+                "in_game_user_id": row[1],
+                "expires_at": row[2],
+                "reminded": row[3],
+            }
+
+    async def get_all_pill_reminder_30_subscribers(self) -> list[dict]:
+        rows: list[dict] = []
+        async with self._conn.execute(
+            "SELECT discord_user_id, in_game_user_id, expires_at, reminded "
+            "FROM pill_reminders_30"
+        ) as cur:
+            async for row in cur:
+                rows.append({
+                    "discord_user_id": row[0],
+                    "in_game_user_id": row[1],
+                    "expires_at": row[2],
+                    "reminded": row[3],
+                })
+        return rows
+
+    async def update_pill_reminder_30_expires_at(
+        self,
+        discord_user_id: str,
+        expires_at: int | None,
+        *,
+        reset_reminded: bool = False,
+    ) -> None:
+        if reset_reminded:
+            await self._conn.execute(
+                "UPDATE pill_reminders_30 SET expires_at = ?, reminded = 0 "
+                "WHERE discord_user_id = ?",
+                (expires_at, discord_user_id),
+            )
+        else:
+            await self._conn.execute(
+                "UPDATE pill_reminders_30 SET expires_at = ? WHERE discord_user_id = ?",
+                (expires_at, discord_user_id),
+            )
+        await self._conn.commit()
+
+    async def get_due_pill_reminders_30(self) -> list[dict]:
+        """Return 30-min subscribers whose pill buff expires within 30 minutes."""
+        now = int(time.time())
+        cutoff = now + 1800  # 30 minutes from now
+        rows: list[dict] = []
+        async with self._conn.execute(
+            """
+            SELECT discord_user_id, expires_at FROM pill_reminders_30
+            WHERE reminded = 0
+              AND expires_at IS NOT NULL
+              AND expires_at > ?
+              AND expires_at <= ?
+            """,
+            (now, cutoff),
+        ) as cur:
+            async for row in cur:
+                rows.append({"discord_user_id": row[0], "expires_at": row[1]})
+        return rows
+
+    async def mark_pill_reminder_30_reminded(self, discord_user_id: str) -> None:
+        await self._conn.execute(
+            "UPDATE pill_reminders_30 SET reminded = 1 WHERE discord_user_id = ?",
+            (discord_user_id,),
+        )
+        await self._conn.commit()
+

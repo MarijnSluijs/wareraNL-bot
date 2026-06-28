@@ -467,6 +467,15 @@ CREATE TABLE IF NOT EXISTS pill_reminders (
 );
 CREATE INDEX IF NOT EXISTS idx_pill_reminders_expires ON pill_reminders(expires_at);
 
+-- pill_reminders_30: same as pill_reminders but fires 30 minutes before expiry.
+CREATE TABLE IF NOT EXISTS pill_reminders_30 (
+    discord_user_id TEXT PRIMARY KEY,
+    in_game_user_id TEXT NOT NULL DEFAULT '',
+    expires_at      INTEGER,
+    reminded        INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_pill_reminders_30_expires ON pill_reminders_30(expires_at);
+
 -- ── Citizen Wealth ────────────────────────────────────────────────────────────
 
 -- citizen_wealth: wealth per NL citizen (active + inactive company wealth)
