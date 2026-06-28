@@ -189,10 +189,9 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
             title="💊 Pill buff herinnering",
             description=(
                 "Wil je een DM ontvangen als je **pill buff** bijna verloopt?\n\n"
-                "Klik op de knop hieronder om je aan te melden. "
-                "De bot stuurt je een DM "
-                "op het moment dat er nog precies **10 minuten** over zijn.\n\n"
-                "Klik nogmaals op de knop om je af te melden."
+                "**10 minuten**: De bot stuurt je een DM wanneer er nog **10 minuten** over zijn.\n"
+                "**30 minuten**: De bot stuurt je een DM wanneer er nog **30 minuten** over zijn.\n\n"
+                "Klik op een knop om je aan te melden. Klik nogmaals om je af te melden."
             ),
             colour=discord.Colour.green(),
         )

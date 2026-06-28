@@ -19,8 +19,9 @@ from cogs.tasks._base import TaskCogBase
 
 logger = logging.getLogger("discord_bot")
 
-_PILL_ITEM_CODE = "cocain"
-_WARN_SECONDS   = 600   # 10 minutes
+_PILL_ITEM_CODE  = "cocain"
+_WARN_SECONDS_10 = 600   # 10 minutes
+_WARN_SECONDS_30 = 1800  # 30 minutes
 
 
 def _parse_iso(ts: str | None) -> int | None:
@@ -62,11 +63,24 @@ class PillReminderTask(TaskCogBase, name="pill_reminder_task"):
         await self._wait_for_services()
 
     async def _run_scan(self) -> None:
-        subscribers = await self._db.get_all_pill_subscribers()
-        if not subscribers:
+        import time as _time
+        now = int(_time.time())
+
+        subs_10 = await self._db.get_all_pill_subscribers()
+        subs_30 = await self._db.get_all_pill_reminder_30_subscribers()
+
+        # Build a deduplicated map: in_game_user_id → list of (table, subscriber_dict)
+        ingame_map: dict[str, list[tuple[str, dict]]] = {}
+        for s in subs_10:
+            ingame_map.setdefault(s["in_game_user_id"], []).append(("10", s))
+        for s in subs_30:
+            ingame_map.setdefault(s["in_game_user_id"], []).append(("30", s))
+
+        if not ingame_map:
             return
 
-        inputs = [{"userId": s["in_game_user_id"]} for s in subscribers]
+        unique_ids = list(ingame_map.keys())
+        inputs = [{"userId": uid} for uid in unique_ids]
 
         try:
             results = await self._client.batch_get("user.getUserLite", inputs)
@@ -74,44 +88,34 @@ class PillReminderTask(TaskCogBase, name="pill_reminder_task"):
             logger.error("pill_buff_scan: batch API call failed: %s", exc)
             return
 
-        import time as _time
-        now = int(_time.time())
-
-        for subscriber, user_data in zip(subscribers, results):
-            discord_user_id = subscriber["discord_user_id"]
-
+        for in_game_id, user_data in zip(unique_ids, results):
             if not isinstance(user_data, dict):
                 continue
 
             buffs = user_data.get("buffs") or {}
             buff_codes: list = buffs.get("buffCodes") or []
             buff_end_at_raw: str | None = buffs.get("buffEndAt")
+            new_expires_at = _parse_iso(buff_end_at_raw) if (_PILL_ITEM_CODE in buff_codes and buff_end_at_raw) else None
 
-            if _PILL_ITEM_CODE in buff_codes and buff_end_at_raw:
-                new_expires_at = _parse_iso(buff_end_at_raw)
-                if new_expires_at is None:
-                    continue
-
+            for table, subscriber in ingame_map[in_game_id]:
+                discord_user_id = subscriber["discord_user_id"]
                 old_expires_at = subscriber.get("expires_at")
-                # Reset reminded flag if this is a new/different pill buff
-                is_new_buff = (old_expires_at is None or old_expires_at != new_expires_at)
+                is_new_buff = new_expires_at is not None and (old_expires_at is None or old_expires_at != new_expires_at)
 
-                await self._db.update_pill_expires_at(
-                    discord_user_id,
-                    new_expires_at,
-                    reset_reminded=is_new_buff,
-                )
-                if is_new_buff:
-                    expires_dt = datetime.fromtimestamp(new_expires_at, tz=timezone.utc)
-                    logger.info(
-                        "pill_buff_scan: %s has active pill, expires %s",
-                        discord_user_id,
-                        expires_dt.isoformat(),
-                    )
-            else:
-                # No active pill buff — clear expires_at if it was set
-                if subscriber.get("expires_at") is not None and subscriber.get("expires_at", 0) > now:
-                    await self._db.update_pill_expires_at(discord_user_id, None)
+                if table == "10":
+                    if new_expires_at is not None:
+                        await self._db.update_pill_expires_at(discord_user_id, new_expires_at, reset_reminded=is_new_buff)
+                        if is_new_buff:
+                            logger.info("pill_buff_scan: %s (10m) active pill, expires %s", discord_user_id, new_expires_at)
+                    elif old_expires_at is not None and old_expires_at > now:
+                        await self._db.update_pill_expires_at(discord_user_id, None)
+                else:
+                    if new_expires_at is not None:
+                        await self._db.update_pill_reminder_30_expires_at(discord_user_id, new_expires_at, reset_reminded=is_new_buff)
+                        if is_new_buff:
+                            logger.info("pill_buff_scan: %s (30m) active pill, expires %s", discord_user_id, new_expires_at)
+                    elif old_expires_at is not None and old_expires_at > now:
+                        await self._db.update_pill_reminder_30_expires_at(discord_user_id, None)
 
     # ── 30-second DM check ────────────────────────────────────────────────────
 
@@ -130,8 +134,13 @@ class PillReminderTask(TaskCogBase, name="pill_reminder_task"):
 
     async def _run_check(self) -> None:
         import time as _time
-        due = await self._db.get_due_pill_reminders()
-        for entry in due:
+        due_10 = await self._db.get_due_pill_reminders()
+        due_30 = await self._db.get_due_pill_reminders_30()
+
+        # (entry, table_label) pairs
+        all_due = [(e, "10") for e in due_10] + [(e, "30") for e in due_30]
+
+        for entry, table in all_due:
             discord_user_id: str = entry["discord_user_id"]
             expires_at: int = entry["expires_at"]
 
@@ -146,7 +155,10 @@ class PillReminderTask(TaskCogBase, name="pill_reminder_task"):
                     "pill_reminder_check: could not fetch user %s, removing subscription",
                     discord_user_id,
                 )
-                await self._db.remove_pill_reminder(discord_user_id)
+                if table == "10":
+                    await self._db.remove_pill_reminder(discord_user_id)
+                else:
+                    await self._db.remove_pill_reminder_30(discord_user_id)
                 continue
 
             embed = discord.Embed(
@@ -164,24 +176,24 @@ class PillReminderTask(TaskCogBase, name="pill_reminder_task"):
             try:
                 await user.send(embed=embed)
                 logger.info(
-                    "pill_reminder_check: DM sent to %s (%s), expires %s",
-                    user,
-                    discord_user_id,
-                    expires_dt.isoformat(),
+                    "pill_reminder_check: DM sent to %s (%s) [%sm], expires %s",
+                    user, discord_user_id, table, expires_dt.isoformat(),
                 )
             except discord.Forbidden:
                 logger.warning(
                     "pill_reminder_check: cannot DM %s (%s) — DMs disabled",
-                    user,
-                    discord_user_id,
+                    user, discord_user_id,
                 )
             except discord.HTTPException as exc:
                 logger.error(
                     "pill_reminder_check: DM failed for %s: %s", discord_user_id, exc
                 )
-                continue  # Don't mark as reminded if send failed
+                continue
 
-            await self._db.mark_pill_reminded(discord_user_id)
+            if table == "10":
+                await self._db.mark_pill_reminded(discord_user_id)
+            else:
+                await self._db.mark_pill_reminder_30_reminded(discord_user_id)
 
 
 async def setup(bot) -> None:

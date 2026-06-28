@@ -21,7 +21,8 @@ from discord.ext import commands
 
 logger = logging.getLogger("discord_bot")
 
-BUTTON_CUSTOM_ID = "pill_reminder:toggle"
+BUTTON_CUSTOM_ID    = "pill_reminder:toggle"
+BUTTON_CUSTOM_ID_30 = "pill_reminder_30:toggle"
 
 _STATE_FILE         = "templates/pillreminder_state.json"
 _STATE_FILE_TESTING = "templates/pillreminder_state.testing.json"
@@ -62,6 +63,10 @@ class SpelernaamModal(discord.ui.Modal, title="Aanmelden voor pill buff herinner
         min_length=1,
         max_length=64,
     )
+
+    def __init__(self, minutes: int = 10) -> None:
+        super().__init__(title=f"Aanmelden voor pill buff herinnering ({minutes} min)")
+        self.minutes = minutes
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
@@ -105,24 +110,25 @@ class SpelernaamModal(discord.ui.Modal, title="Aanmelden voor pill buff herinner
             )
             return
 
-        await db.subscribe_pill_reminder(discord_user_id, game_user_id)
+        if self.minutes == 30:
+            await db.subscribe_pill_reminder_30(discord_user_id, game_user_id)
+        else:
+            await db.subscribe_pill_reminder(discord_user_id, game_user_id)
 
         embed = discord.Embed(
             title="✅ Aangemeld voor pill buff herinnering",
             description=(
                 f"**In-game naam:** {discord.utils.escape_markdown(spelersnaam)}\n\n"
-                "De bot stuurt je een DM "
-                "op het moment dat er nog precies **10 minuten** over zijn.\n\n"
+                f"De bot stuurt je een DM "
+                f"op het moment dat er nog precies **{self.minutes} minuten** over zijn.\n\n"
                 "Klik opnieuw op de knop om je af te melden."
             ),
             colour=discord.Colour.green(),
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
         logger.info(
-            "pill_reminder: %s subscribed via modal as %r (game_id=%s)",
-            interaction.user,
-            spelersnaam,
-            game_user_id,
+            "pill_reminder: %s subscribed via modal as %r (game_id=%s, minutes=%d)",
+            interaction.user, spelersnaam, game_user_id, self.minutes,
         )
 
 
@@ -180,14 +186,67 @@ class PillReminderButton(discord.ui.Button):
                 game_user_id,
             )
         else:
-            # No verified identity → ask via modal
-            await interaction.response.send_modal(SpelernaamModal())
+            await interaction.response.send_modal(SpelernaamModal(minutes=10))
+
+
+class PillReminderButton30(discord.ui.Button):
+    def __init__(self) -> None:
+        super().__init__(
+            label="Pill buff herinnering (30 min)",
+            style=discord.ButtonStyle.success,
+            custom_id=BUTTON_CUSTOM_ID_30,
+            emoji="💊",
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        db = getattr(interaction.client, "_ext_db", None)
+        if db is None:
+            await interaction.response.send_message(
+                "❌ Database is momenteel niet beschikbaar. Probeer het later opnieuw.",
+                ephemeral=True,
+            )
+            return
+
+        discord_user_id = str(interaction.user.id)
+
+        if await db.is_pill_reminder_30_subscriber(discord_user_id):
+            await db.remove_pill_reminder_30(discord_user_id)
+            await interaction.response.send_message(
+                "✅ Je bent afgemeld van de 30-minuten pill buff herinnering.",
+                ephemeral=True,
+            )
+            logger.info("pill_reminder_30: %s unsubscribed", interaction.user)
+            return
+
+        identity = await db.get_identity_link_by_discord(discord_user_id)
+        if identity and identity.get("in_game_user_id"):
+            game_user_id = identity["in_game_user_id"]
+            await db.subscribe_pill_reminder_30(discord_user_id, game_user_id)
+            embed = discord.Embed(
+                title="✅ Aangemeld voor pill buff herinnering (30 min)",
+                description=(
+                    "Je WarEra-account is automatisch gekoppeld via je geverifieerde identiteit.\n\n"
+                    "De bot stuurt je een DM "
+                    "op het moment dat er nog precies **30 minuten** over zijn.\n\n"
+                    "Klik opnieuw op de knop om je af te melden."
+                ),
+                colour=discord.Colour.green(),
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            logger.info(
+                "pill_reminder_30: %s auto-subscribed via identity_links (game_id=%s)",
+                interaction.user,
+                game_user_id,
+            )
+        else:
+            await interaction.response.send_modal(SpelernaamModal(minutes=30))
 
 
 class PillReminderView(discord.ui.View):
     def __init__(self) -> None:
         super().__init__(timeout=None)
         self.add_item(PillReminderButton())
+        self.add_item(PillReminderButton30())
 
 
 # ── Cog ──────────────────────────────────────────────────────────────────────
