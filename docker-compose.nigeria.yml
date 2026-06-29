@@ -1,0 +1,19 @@
+services:
+
+  # ── Nigerian WarEra verification bot ────────────────────────────────────────
+  # Handles Nigerian/Dutch citizen and embassy verification for the Nigerian server.
+  #
+  # Run with:
+  #   docker compose -f docker-compose.nigeria.yml up -d --force-recreate nigeria-bot
+  #
+  # Required .env values:
+  #   TOKEN_NIGERIA   Discord bot token for the Nigerian verification application
+
+  nigeria-bot:
+    build: .
+    image: warera-nl:latest
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./database:/bot/database
+    command: ["python", "-m", "nigeria_bot.bot"]
