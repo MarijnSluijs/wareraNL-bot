@@ -137,14 +137,6 @@ Environment overrides: `RW_HOST`, `RW_PORT` (default `8484`), `RW_DB_PATH`, `RW_
 ### nigeria-bot
 
 Verification bot for the Nigerian WarEra Discord server (ID `1495375733323989074`).
-Handles Nigerian citizen, Dutch citizen, and embassy verification via ticket channels.
-
-**Verification flow:**
-
-1. User clicks 🇳🇬 / 🇳🇱 / 🏛️ button → private ticket channel created in the **🔐 Verificaties** category.
-2. Bot asks the user to send a screenshot of their WarEra profile.
-3. Staff reviews the screenshot, then runs `/approve @user url:https://app.warera.io/user/<id>`.
-4. Bot fetches the in-game username, grants roles, sets the Discord nickname, and deletes the ticket.
 
 **Staff commands:**
 
