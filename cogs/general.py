@@ -154,8 +154,8 @@ class General(commands.Cog, name="general"):
                 )
         words = content.lower().split()
 
-        # fish / vis → send fishSTEER emoji as message (10% chance)
-        if any(w in words for w in ("fish", "vis")) and random.random() < 0.10:
+        # fish / vis → send fishSTEER emoji as message (20% chance)
+        if any(w in words for w in ("fish", "vis")) and random.random() < 0.20:
             fish_emoji = discord.utils.get(message.guild.emojis, name="fishSTEER") if message.guild else None
             try:
                 await message.channel.send(str(fish_emoji) if fish_emoji else ":fish:")
@@ -222,14 +222,21 @@ class General(commands.Cog, name="general"):
             except discord.HTTPException:
                 pass
 
-        # belgië / belgie → send GIF, 5% chance
+        # belgië / belgie → send GIF, 20% chance
         # Normalise accented variants (ë → e, ï → i) then check for exact word "belgie"
         _belgie_words = content.lower().replace("ë", "e").replace("ï", "i").split()
-        if "belgie" in _belgie_words and random.random() < 0.05:
+        if "belgie" in _belgie_words and random.random() < 0.20:
             try:
                 await message.channel.send("https://tenor.com/view/mchammerlalmb-gif-20535511")
             except discord.HTTPException as e:
                 self.bot.logger.error(f"Failed to send belgië gif for message {message.id}: {e}")
+
+        # fiets / mountainbike → send trauma GIF, 20% chance
+        if any(w in words for w in ("fiets", "mountainbike")) and random.random() < 0.20:
+            try:
+                await message.channel.send("https://klipy.com/gifs/trauma-soldier")
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to send fiets gif for message {message.id}: {e}")
 
         # water → send funny GIF, 10% chance
         if "water" in words and random.random() < 0.10:

@@ -1128,3 +1128,58 @@ class BattleRankingsMixin:
         ) as cur:
             row = await cur.fetchone()
             return row[0] if row and row[0] else None
+
+    async def get_mu_damage_in_range(
+        self, mu_ids: list[str], start_iso: str, end_iso: str
+    ) -> dict[str, float]:
+        """Return {mu_id: total_damage} for the given MU IDs and date range.
+
+        Uses battle_mu_hits which stores per-MU damage per battle.
+        """
+        if not mu_ids:
+            return {}
+        placeholders = ",".join("?" for _ in mu_ids)
+        result: dict[str, float] = {}
+        async with self._conn.execute(
+            f"""
+            SELECT mu_id, SUM(damage) AS total_damage
+            FROM battle_mu_hits
+            WHERE mu_id IN ({placeholders})
+              AND battle_created_at >= ?
+              AND battle_created_at < ?
+            GROUP BY mu_id
+            """,
+            (*mu_ids, start_iso, end_iso),
+        ) as cur:
+            async for row in cur:
+                result[row[0]] = float(row[1] or 0)
+        return result
+
+    async def get_player_damage_in_range(
+        self, user_ids: list[str], start_iso: str, end_iso: str
+    ) -> dict[str, tuple[str, float]]:
+        """Return {user_id: (citizen_name, total_damage)} for the given players and date range.
+
+        Uses battle_hits joined with citizen_levels for names.
+        """
+        if not user_ids:
+            return {}
+        placeholders = ",".join("?" for _ in user_ids)
+        result: dict[str, tuple[str, float]] = {}
+        async with self._conn.execute(
+            f"""
+            SELECT bh.user_id,
+                   COALESCE(MAX(cl.citizen_name), bh.user_id) AS citizen_name,
+                   SUM(bh.damage) AS total_damage
+            FROM battle_hits bh
+            LEFT JOIN citizen_levels cl ON cl.user_id = bh.user_id
+            WHERE bh.user_id IN ({placeholders})
+              AND bh.battle_created_at >= ?
+              AND bh.battle_created_at < ?
+            GROUP BY bh.user_id
+            """,
+            (*user_ids, start_iso, end_iso),
+        ) as cur:
+            async for row in cur:
+                result[str(row[0])] = (str(row[1]), float(row[2] or 0))
+        return result

@@ -15,6 +15,7 @@ WareraNL is a Discord bot implemented in Python using cogs for modular features.
 - `database/` — SQLite schema and database backups.
 - `services/` — service modules used by cogs (DB client, API client, workers).
 - `verification_bot/` — verifier bot; see [verification_bot/README.md](verification_bot/README.md).
+- `nigeria_bot/` — Nigerian WarEra verification bot; see [Nigeria bot](#nigeria-bot) below.
 
 ## Configuration
 
@@ -44,6 +45,8 @@ cp .env.example .env
 | `VERIFIER_SECRET` | Shared secret — `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `VERIFIER_GUILD_ID` | Production server ID |
 | `VERIFIER_ROLE_ID` | Nederlander role ID in the production server |
+| `TOKEN_NIGERIA` | Token for the Nigerian verification bot |
+| `WARERA_API_KEY` | (Optional) WarEra API key — used by the Nigeria bot to fetch in-game usernames |
 
 **3. Create `_api_keys.json`**
 
@@ -128,6 +131,32 @@ docker compose -f docker-compose.websites.yml stop rijksoverheid-web
 ```
 
 Environment overrides: `RW_HOST`, `RW_PORT` (default `8484`), `RW_DB_PATH`, `RW_CONFIG_PATH`.
+
+---
+
+### nigeria-bot
+
+Verification bot for the Nigerian WarEra Discord server (ID `1495375733323989074`).
+
+**Staff commands:**
+
+| Command | Description |
+|---------|-------------|
+| `/postverificatie` | Post the 3 verification buttons in the configured channel |
+| `/approve @user url:<url>` | Approve a ticket — fetches username, gives roles, sets nickname |
+| `/deny @user [reden]` | Deny a ticket — DMs the user and closes the channel |
+| `/setup_ambassades` | Create missing embassy channels for existing ambassador roles |
+
+```bash
+# Recreate
+docker build -t warera-nl:latest . && docker compose -f docker-compose.nigeria.yml up -d --force-recreate nigeria-bot
+
+# Logs
+docker compose -f docker-compose.nigeria.yml logs -f nigeria-bot
+
+# Stop
+docker compose -f docker-compose.nigeria.yml stop nigeria-bot
+```
 
 ---
 

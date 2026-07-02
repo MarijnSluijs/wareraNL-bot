@@ -11,7 +11,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional
+from zoneinfo import ZoneInfo
 
 import discord
 from discord import app_commands
@@ -22,6 +24,28 @@ from cogs.commands._base import CommandCogBase
 from cogs.tasks.mus import mus_path
 from cogs.tasks.war_guild_divisions import DIVISION_MUS
 from services.damage_calc import fmt_damage
+
+_TZ_NL = ZoneInfo("Europe/Amsterdam")
+
+
+def _nl_week_range(weeks_ago: int = 1) -> tuple[str, str]:
+    """Return (start_iso, end_iso) UTC strings for a past WarEra weekly damage window.
+
+    WarEra resets weekly damage on Monday 02:00 NL time.
+    weeks_ago=1 → last week's window (Mon 02:00 → Mon 02:00).
+    """
+    now_nl = datetime.now(_TZ_NL)
+    days_since_monday = now_nl.weekday()  # Monday = 0
+    this_monday_nl = (now_nl - timedelta(days=days_since_monday)).replace(
+        hour=2, minute=0, second=0, microsecond=0
+    )
+    end_nl = this_monday_nl - timedelta(weeks=weeks_ago - 1)
+    start_nl = end_nl - timedelta(weeks=1)
+    fmt = "%Y-%m-%dT%H:%M:%S"
+    return (
+        start_nl.astimezone(timezone.utc).strftime(fmt),
+        end_nl.astimezone(timezone.utc).strftime(fmt),
+    )
 
 if TYPE_CHECKING:
     from bot import DiscordBot
@@ -217,6 +241,7 @@ class MudmgCog(CommandCogBase, name="mudmg"):
     @app_commands.describe(
         mu="Optioneel: naam van een specifieke MU voor een ledendetailoverzicht.",
         sorteren="Sorteren op wekelijkse schade (standaard) of totale schade.",
+        vorige_week="Toon de schade van vorige week in plaats van deze week.",
     )
     @app_commands.autocomplete(mu=mu_autocomplete)
     @app_commands.choices(sorteren=[
@@ -228,6 +253,7 @@ class MudmgCog(CommandCogBase, name="mudmg"):
         ctx: Context,
         mu: Optional[str] = None,
         sorteren: str = "weekly",
+        vorige_week: bool = False,
     ) -> None:
         """Show MU damage overview or per-member breakdown."""
         if not self._client:
@@ -243,34 +269,48 @@ class MudmgCog(CommandCogBase, name="mudmg"):
             return
 
         if mu:
-            await self._send_mu_detail(ctx, mu, entries)
+            await self._send_mu_detail(ctx, mu, entries, last_week=vorige_week)
         else:
-            await self._send_mu_overview(ctx, entries, sort_by_total=sorteren == "total")
+            await self._send_mu_overview(ctx, entries, sort_by_total=sorteren == "total" and not vorige_week, last_week=vorige_week)
 
     # ── Overview (no MU arg) ──────────────────────────────────────────────────
 
     async def _send_mu_overview(
-        self, ctx: Context, entries: list[dict], sort_by_total: bool = False
+        self, ctx: Context, entries: list[dict], sort_by_total: bool = False, last_week: bool = False
     ) -> None:
         """Fetch all MU stats and send a flat ranked overview."""
-        inputs = [{"muId": e["id"]} for e in entries]
-        try:
-            results = await self._client.batch_get("/mu.getById", inputs)
-        except Exception as exc:
-            logger.warning("mudmg overview: batch_get failed: %s", exc)
-            await self._send_api_offline(ctx)
-            return
-
-        # Build a flat list of (name, category, weekly, total)
         rows: list[tuple[str, str, float, float]] = []
         grand_weekly = 0.0
         grand_total = 0.0
-        for entry, payload in zip(entries, results):
-            w, t = _mu_rankings(payload if isinstance(payload, dict) else {})
-            cat = entry.get("type", "Standaard")
-            rows.append((entry["name"], cat, w, t))
-            grand_weekly += w
-            grand_total += t
+
+        if last_week:
+            start_iso, end_iso = _nl_week_range(weeks_ago=1)
+            mu_ids = [e["id"] for e in entries]
+            try:
+                dmg_map = await self._db.get_mu_damage_in_range(mu_ids, start_iso, end_iso)
+            except Exception as exc:
+                logger.warning("mudmg overview last_week: DB query failed: %s", exc)
+                await self._send_api_offline(ctx)
+                return
+            for entry in entries:
+                w = dmg_map.get(entry["id"], 0.0)
+                cat = entry.get("type", "Standaard")
+                rows.append((entry["name"], cat, w, 0.0))
+                grand_weekly += w
+        else:
+            inputs = [{"muId": e["id"]} for e in entries]
+            try:
+                results = await self._client.batch_get("/mu.getById", inputs)
+            except Exception as exc:
+                logger.warning("mudmg overview: batch_get failed: %s", exc)
+                await self._send_api_offline(ctx)
+                return
+            for entry, payload in zip(entries, results):
+                w, t = _mu_rankings(payload if isinstance(payload, dict) else {})
+                cat = entry.get("type", "Standaard")
+                rows.append((entry["name"], cat, w, t))
+                grand_weekly += w
+                grand_total += t
 
         # Sort by selected column descending
         sort_col = 3 if sort_by_total else 2
@@ -315,7 +355,12 @@ class MudmgCog(CommandCogBase, name="mudmg"):
                 chunks.append("```\n" + "\n".join(chunk_lines) + "\n```")
 
         legend = "🟡 D1  •  🔵 D2  •  🟢 D3  •  🔴 D4  •  🟣 D5"
-        sort_label = "totale schade" if sort_by_total else "wekelijkse schade"
+        if last_week:
+            start_iso, _ = _nl_week_range(weeks_ago=1)
+            week_label = datetime.fromisoformat(start_iso).strftime("week van %d-%m")
+            sort_label = f"schade vorige week ({week_label})"
+        else:
+            sort_label = "totale schade" if sort_by_total else "wekelijkse schade"
         for i, chunk in enumerate(chunks):
             title = f"⚔️ Nederlandse MUs — Ranking {sort_label}"
             if len(chunks) > 1:
@@ -332,7 +377,7 @@ class MudmgCog(CommandCogBase, name="mudmg"):
     # ── Detail (MU arg) ───────────────────────────────────────────────────────
 
     async def _send_mu_detail(
-        self, ctx: Context, mu_name: str, entries: list[dict]
+        self, ctx: Context, mu_name: str, entries: list[dict], last_week: bool = False
     ) -> None:
         """Fetch members of one MU and show per-member weekly + total damage."""
         # Fuzzy match: exact name first, then substring
@@ -380,24 +425,28 @@ class MudmgCog(CommandCogBase, name="mudmg"):
         weekly_total, dmg_total = _mu_rankings(mu_data)
         members = _mu_members(mu_data)
 
-        # Build total damage lookup: uid → total damage
-        total_map = _extract_total_damage_map(total_resp)
+        # Build total damage lookup: uid → total damage (only used for current week)
+        total_map = _extract_total_damage_map(total_resp) if not last_week else {}
 
-        # Look up per-member weekly damage and levels from the DB
+        # Look up per-member damage and levels from the DB
+        weekly_map: dict = {}
+        level_map: dict = {}
         if self._db and members:
-            try:
-                weekly_map = await self._db.get_weekly_damages_for_users(members)
-            except Exception as exc:
-                logger.warning("mudmg detail: DB lookup failed: %s", exc)
-                weekly_map = {}
+            if last_week:
+                start_iso, end_iso = _nl_week_range(weeks_ago=1)
+                try:
+                    weekly_map = await self._db.get_player_damage_in_range(members, start_iso, end_iso)
+                except Exception as exc:
+                    logger.warning("mudmg detail last_week: DB lookup failed: %s", exc)
+            else:
+                try:
+                    weekly_map = await self._db.get_weekly_damages_for_users(members)
+                except Exception as exc:
+                    logger.warning("mudmg detail: DB lookup failed: %s", exc)
             try:
                 level_map = await self._db.get_levels_for_users(members)
             except Exception as exc:
                 logger.warning("mudmg detail: level DB lookup failed: %s", exc)
-                level_map = {}
-        else:
-            weekly_map = {}
-            level_map = {}
 
         # Build rows: (citizen_name, weekly_dmg, total_dmg, level), sorted by weekly desc
         rows: list[tuple[str, float, float, int]] = []
@@ -408,7 +457,7 @@ class MudmgCog(CommandCogBase, name="mudmg"):
                 name, weekly = weekly_map[uid]
             total_dmg = total_map.get(uid, 0.0)
             level = level_map.get(uid, 0)
-            if name or total_dmg:
+            if name or total_dmg or weekly:
                 rows.append((name or uid, weekly, total_dmg, level))
         rows.sort(key=lambda r: r[1], reverse=True)
 
@@ -444,18 +493,24 @@ class MudmgCog(CommandCogBase, name="mudmg"):
                 "Enkel NL-burgers die via /peil zijn opgehaald zijn zichtbaar.*"
             )
 
-        w_str = fmt_damage(weekly_total) if weekly_total else "—"
-        t_str = fmt_damage(dmg_total) if dmg_total else "—"
         members_shown = len(rows)
         members_total = len(members)
 
-        footer_parts = [f"MU totaal — week: {w_str} | totaal: {t_str}"]
+        if last_week:
+            start_iso, _ = _nl_week_range(weeks_ago=1)
+            week_label = datetime.fromisoformat(start_iso).strftime("week van %d-%m")
+            title_suffix = f"— Ledenschade ({week_label})"
+            footer_parts = [f"Schade uit database ({week_label})"]
+        else:
+            w_str = fmt_damage(weekly_total) if weekly_total else "—"
+            t_str = fmt_damage(dmg_total) if dmg_total else "—"
+            title_suffix = "— Ledenschade"
+            footer_parts = [f"MU totaal — week: {w_str} | totaal: {t_str}"]
         if members_total:
             footer_parts.append(f"{members_shown}/{members_total} leden met schadedata")
         footer_line = " · ".join(footer_parts)
 
-        # Send as a plain message (wider than embed description)
-        content = f"**⚔️ {entry['name']} — Ledenschade**\n{table}\n_{footer_line}_"
+        content = f"**⚔️ {entry['name']} {title_suffix}**\n{table}\n_{footer_line}_"
         await ctx.send(content)
 
 
