@@ -79,10 +79,11 @@ async def _fetch_warera_username(user_id: str) -> str | None:
     """Fetch the in-game username for a WarEra user ID. Returns None on failure."""
     url = f"{WARERA_API_BASE}/user.getUserLite"
     params = {"input": json.dumps({"userId": user_id})}
-    headers = {"x-api-key": WARERA_API_KEY} if WARERA_API_KEY else {}
+    # Do NOT send the API key — this endpoint is publicly accessible and the shared
+    # key pool gets rate-limited by the main bot, causing 429s here.
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status != 200:
                     return None
                 data = await resp.json()
