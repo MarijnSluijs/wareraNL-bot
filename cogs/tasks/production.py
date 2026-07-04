@@ -353,32 +353,46 @@ class ProductionTasks(TaskCogBase, name="production_tasks"):
         except Exception:
             prev = None
 
-        prev_bonus = float(prev.get("production_bonus") or 0) if prev else 0.0
-        prev_name = prev.get("country_name") if prev else None
-
-        # Also check in-memory cache — guards against DB write failures causing
-        # repeated notifications when the persisted value lags behind reality.
+        # Fast path: in-memory cache (guards against stale DB reads within this process lifetime).
         cached = self._last_known_leader.get(item)
-        if cached:
-            cached_name, cached_bonus = cached
-            if cached_name == country_name and abs(cached_bonus - bonus) <= 0.01:
-                # We already notified about this leader in this process lifetime.
-                # Still try to persist (so the DB catches up) but skip the notification.
-                if self._db:
-                    try:
-                        await self._db.set_top_specialization(
-                            item, country_id, country_name, float(bonus), now,
-                            strategic_bonus=strategic_bonus,
-                            ethic_bonus=ethic_bonus,
-                            ethic_deposit_bonus=ethic_deposit_bonus,
-                        )
-                    except Exception:
-                        logger.warning("Failed to persist leader for %s (will retry)", item)
-                return None
+        if cached and cached[0] == country_name and abs(cached[1] - bonus) <= 0.01:
+            if self._db:
+                try:
+                    await self._db.set_top_specialization(
+                        item, country_id, country_name, float(bonus), now,
+                        strategic_bonus=strategic_bonus,
+                        ethic_bonus=ethic_bonus,
+                        ethic_deposit_bonus=ethic_deposit_bonus,
+                    )
+                except Exception:
+                    logger.warning("Failed to persist leader for %s (will retry)", item)
+            return None
 
-        changed = prev is None or (bonus > prev_bonus + 0.01)
-        changed = changed and (country_name != prev_name if prev else True)
+        # DB-backed check: last_notified_country is ONLY written on notification,
+        # never overwritten by regular poll writes — restart-safe deduplication.
+        prev_notified_name: str | None = prev.get("last_notified_country") if prev else None
+        prev_notified_bonus: float = float(prev.get("last_notified_bonus") or 0) if prev else 0.0
 
+        already_notified = (
+            prev_notified_name is not None
+            and prev_notified_name == country_name
+            and abs(prev_notified_bonus - bonus) <= 0.01
+        )
+        if already_notified:
+            self._last_known_leader[item] = (country_name, bonus)
+            if self._db:
+                try:
+                    await self._db.set_top_specialization(
+                        item, country_id, country_name, float(bonus), now,
+                        strategic_bonus=strategic_bonus,
+                        ethic_bonus=ethic_bonus,
+                        ethic_deposit_bonus=ethic_deposit_bonus,
+                    )
+                except Exception:
+                    logger.warning("Failed to persist leader for %s (will retry)", item)
+            return None
+
+        # Persist updated leader stats before notifying.
         if self._db:
             try:
                 await self._db.set_top_specialization(
@@ -394,11 +408,10 @@ class ProductionTasks(TaskCogBase, name="production_tasks"):
             except Exception:
                 logger.exception("Failed to persist permanent leader for %s", item)
 
-        if changed and prev is not None:
-            # Update in-memory cache immediately so restarts within the same
-            # process don't re-notify if the DB write above failed.
+        if prev_notified_name is not None:
+            # Leader changed from the last notified state — send notification.
             self._last_known_leader[item] = (country_name, bonus)
-            old_desc = f"{prev_name} ({prev_bonus}%)"
+            old_desc = f"{prev_notified_name} ({prev_notified_bonus}%)"
             for guild in self.bot.guilds:
                 channel = guild.get_channel(channel_id)
                 if channel:
@@ -410,11 +423,22 @@ class ProductionTasks(TaskCogBase, name="production_tasks"):
                         logger.exception(
                             "Failed sending permanent leader update for %s", item
                         )
+            if self._db:
+                try:
+                    await self._db.set_last_notified_leader(item, country_name, float(bonus))
+                except Exception:
+                    logger.warning("Failed to persist notification record for %s", item)
             return (item, old_desc, f"{country_name} ({bonus}%)")
-        elif not changed:
-            # Keep cache in sync with what the DB shows even if we didn't notify.
+        else:
+            # First time tracking this item (last_notified_country was NULL) — start
+            # silently so we don't announce leaders that existed before the bot launched.
             self._last_known_leader[item] = (country_name, bonus)
-        return None
+            if self._db:
+                try:
+                    await self._db.set_last_notified_leader(item, country_name, float(bonus))
+                except Exception:
+                    logger.warning("Failed to init notification record for %s", item)
+            return None
 
     async def _handle_deposit_top(
         self,

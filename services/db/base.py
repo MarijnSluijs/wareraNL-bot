@@ -101,6 +101,9 @@ class DatabaseBase:
             # avatar URLs — added to citizen_levels and known_mus
             ("citizen_levels", "avatar_url TEXT"),
             ("known_mus", "avatar_url TEXT"),
+            # specialization_top — last-notified record (only updated on notification, never by poll)
+            ("specialization_top", "last_notified_country TEXT"),
+            ("specialization_top", "last_notified_bonus REAL"),
         ]
         for table, column_def in migrations:
             try:

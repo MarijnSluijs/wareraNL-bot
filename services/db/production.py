@@ -57,7 +57,8 @@ class ProductionMixin:
         """Get the top specialization for a specific item."""
         async with self._conn.execute(
             "SELECT country_id, country_name, production_bonus, strategic_bonus, "
-            "ethic_bonus, ethic_deposit_bonus, updated_at "
+            "ethic_bonus, ethic_deposit_bonus, updated_at, "
+            "last_notified_country, last_notified_bonus "
             "FROM specialization_top WHERE item = ?",
             (item,),
         ) as cur:
@@ -72,6 +73,8 @@ class ProductionMixin:
                 "ethic_bonus": row[4],
                 "ethic_deposit_bonus": row[5],
                 "updated_at": row[6],
+                "last_notified_country": row[7],
+                "last_notified_bonus": row[8],
             }
 
     async def get_all_tops(self) -> list[dict]:
@@ -108,12 +111,20 @@ class ProductionMixin:
         ethic_bonus: Optional[float] = None,
         ethic_deposit_bonus: Optional[float] = None,
     ) -> None:
-        """Insert or replace a specialization top record."""
+        """Upsert the current specialization leader stats without touching last_notified_* columns."""
         await self._conn.execute(
-            "INSERT OR REPLACE INTO specialization_top"
+            "INSERT INTO specialization_top"
             "(item, country_id, country_name, production_bonus, "
             "strategic_bonus, ethic_bonus, ethic_deposit_bonus, updated_at)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(item) DO UPDATE SET"
+            "  country_id = excluded.country_id,"
+            "  country_name = excluded.country_name,"
+            "  production_bonus = excluded.production_bonus,"
+            "  strategic_bonus = excluded.strategic_bonus,"
+            "  ethic_bonus = excluded.ethic_bonus,"
+            "  ethic_deposit_bonus = excluded.ethic_deposit_bonus,"
+            "  updated_at = excluded.updated_at",
             (
                 item,
                 country_id,
@@ -124,6 +135,26 @@ class ProductionMixin:
                 ethic_deposit_bonus,
                 updated_at,
             ),
+        )
+        await self._conn.commit()
+
+    async def set_last_notified_leader(
+        self,
+        item: str,
+        country_name: str,
+        production_bonus: float,
+    ) -> None:
+        """Record that a notification was sent for this item's leader.
+
+        Uses UPDATE only — set_top_specialization must have been called first to
+        ensure the row exists. Intentionally separate from the stats write so that
+        even if stats are overwritten by a stale read, this column stays correct.
+        """
+        await self._conn.execute(
+            "UPDATE specialization_top"
+            " SET last_notified_country = ?, last_notified_bonus = ?"
+            " WHERE item = ?",
+            (country_name, production_bonus, item),
         )
         await self._conn.commit()
 
