@@ -401,7 +401,7 @@ class Owner(commands.Cog, name="owner"):
             )
             return
 
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
 
         def _status_embed(description: str) -> discord.Embed:
             return discord.Embed(description=description, color=self.color)
@@ -409,7 +409,7 @@ class Owner(commands.Cog, name="owner"):
         channel_ids = self.bot.config.get("channels", {})
         congres_channel_id = channel_ids.get("congres")
         if not congres_channel_id:
-            await interaction.followup.send("❌ `congres` channel niet geconfigureerd.", ephemeral=True)
+            await interaction.followup.send("❌ `congres` channel niet geconfigureerd.")
             return
 
         assert interaction.guild is not None
@@ -419,12 +419,16 @@ class Owner(commands.Cog, name="owner"):
         from collections import Counter, defaultdict
         from statistics import mean, median
 
-        # ── Single status message in the channel, edited at every step ─────
         assert interaction.channel is not None
         reacties_label = "berichten + reacties" if met_reacties else "berichten"
-        status_msg = await interaction.followup.send(
-            embed=_status_embed(f"⏳ **Stap 1/3** — Congres kanaal wordt geanalyseerd ({reacties_label})..."),
-            wait=True,
+        # Acknowledge the interaction (resolves the "thinking…" state).
+        await interaction.followup.send(
+            embed=_status_embed(f"🔍 Analyse gestart voor **{date_label}** ({reacties_label})."),
+        )
+        # All further progress via channel.send() — no 15-min interaction token limit.
+        ch = interaction.channel
+        status_msg = await ch.send(
+            embed=_status_embed(f"⏳ **Stap 1/3** — Congres kanaal wordt gelezen...")
         )
 
         try:
@@ -450,9 +454,12 @@ class Owner(commands.Cog, name="owner"):
                 )
 
             # ── Step 1: congres channel ───────────────────────────────────────
+            _s1_msgs = 0
+            _s1_reactions = 0
             async for message in self.bot.get_channel(congres_channel_id).history(
                 limit=None, after=start_time
             ):
+                _s1_msgs += 1
                 if _is_congress_member(message.author):
                     uid = message.author.id
                     day = message.created_at.strftime("%Y-%m-%d")
@@ -463,8 +470,18 @@ class Owner(commands.Cog, name="owner"):
                 if met_reacties:
                     for reaction in message.reactions:
                         async for user in reaction.users():
+                            _s1_reactions += 1
                             if _is_congress_member(user):
                                 user_congres_reactions[user.id] += 1
+                if _s1_msgs % 200 == 0:
+                    await status_msg.edit(embed=_status_embed(
+                        f"⏳ **Stap 1/3** — Congres kanaal: **{_s1_msgs}** berichten gelezen"
+                        + (f", **{_s1_reactions}** reactie-users gecontroleerd" if met_reacties else "") + "..."
+                    ))
+            await status_msg.edit(embed=_status_embed(
+                f"✅ **Stap 1/3 klaar** — **{_s1_msgs}** berichten gelezen uit congres kanaal"
+                + (f" ({_s1_reactions} reactie-users gecontroleerd)" if met_reacties else "") + "."
+            ))
 
             # ── Step 2: debat forum ───────────────────────────────────────────
             debate_channel_id = channel_ids.get("debat")
@@ -472,21 +489,25 @@ class Owner(commands.Cog, name="owner"):
                 await status_msg.edit(embed=_status_embed("❌ `debat` channel niet geconfigureerd."))
                 return
 
-            await status_msg.edit(
-                embed=_status_embed(f"⏳ **Stap 2/3** — Debat kanaal (actieve + gesloten threads, {reacties_label}) wordt geanalyseerd...")
-            )
-
             debat_channel = self.bot.get_channel(debate_channel_id)
             all_threads = list(debat_channel.threads)
             async for thread in debat_channel.archived_threads(limit=None):
                 all_threads.append(thread)
 
+            _s2_status = await ch.send(embed=_status_embed(
+                f"⏳ **Stap 2/3** — Debat kanaal: **{len(all_threads)}** threads gevonden, worden geanalyseerd ({reacties_label})..."
+            ))
+
             # Process threads concurrently (max 5 at a time) to avoid sequential slowness
             sem = asyncio.Semaphore(5)
+            _s2_done = [0]
+            _s2_msgs = [0]
+            _s2_reactions = [0]
 
             async def _process_thread(thread: discord.Thread) -> None:
                 async with sem:
                     async for message in thread.history(limit=None, after=start_time):
+                        _s2_msgs[0] += 1
                         if _is_congress_member(message.author):
                             uid = message.author.id
                             day = message.created_at.strftime("%Y-%m-%d")
@@ -498,10 +519,21 @@ class Owner(commands.Cog, name="owner"):
                         if met_reacties:
                             for reaction in message.reactions:
                                 async for user in reaction.users():
+                                    _s2_reactions[0] += 1
                                     if _is_congress_member(user):
                                         user_debat_reactions[user.id] += 1
+                    _s2_done[0] += 1
+                    await _s2_status.edit(embed=_status_embed(
+                        f"⏳ **Stap 2/3** — **{_s2_done[0]}/{len(all_threads)}** threads verwerkt"
+                        f" ({_s2_msgs[0]} berichten"
+                        + (f", {_s2_reactions[0]} reactie-users" if met_reacties else "") + ")..."
+                    ))
 
             await asyncio.gather(*[_process_thread(t) for t in all_threads])
+            await _s2_status.edit(embed=_status_embed(
+                f"✅ **Stap 2/3 klaar** — **{len(all_threads)}** threads, **{_s2_msgs[0]}** berichten"
+                + (f" ({_s2_reactions[0]} reactie-users gecontroleerd)" if met_reacties else "") + "."
+            ))
 
             # ── Build combined activity embed(s) per member ───────────────────
             all_users = set(user_congres_msgs.keys()) | set(user_debat_msgs.keys()) | set(user_congres_reactions.keys()) | set(user_debat_reactions.keys())
@@ -597,17 +629,19 @@ class Owner(commands.Cog, name="owner"):
             # ── Step 3: stembureau reactions ──────────────────────────────────
             stembureau_channel_id = channel_ids.get("stembureau")
             if not stembureau_channel_id:
-                await status_msg.edit(embed=_status_embed("❌ `stembureau` channel niet geconfigureerd."))
+                await ch.send(embed=_status_embed("❌ `stembureau` channel niet geconfigureerd."))
                 return
 
-            await status_msg.edit(
-                embed=_status_embed("⏳ **Stap 3/3** — Stembureau kanaal (reacties) wordt geanalyseerd...")
-            )
+            _s3_status = await ch.send(embed=_status_embed(
+                "⏳ **Stap 3/3** — Stembureau kanaal (reacties) wordt geanalyseerd..."
+            ))
 
             vote_count: Counter[int] = Counter()
+            _s3_msgs = 0
             async for message in self.bot.get_channel(stembureau_channel_id).history(
                 limit=None, after=start_time
             ):
+                _s3_msgs += 1
                 users_counted: list[int] = []
                 for reaction in message.reactions:
                     async for user in reaction.users():
@@ -619,6 +653,13 @@ class Owner(commands.Cog, name="owner"):
                             continue
                         users_counted.append(user.id)
                         vote_count[user.id] += 1
+                if _s3_msgs % 50 == 0:
+                    await _s3_status.edit(embed=_status_embed(
+                        f"⏳ **Stap 3/3** — Stembureau: **{_s3_msgs}** berichten gecontroleerd..."
+                    ))
+            await _s3_status.edit(embed=_status_embed(
+                f"✅ **Stap 3/3 klaar** — **{_s3_msgs}** berichten gecontroleerd in stembureau."
+            ))
 
             # Batch-resolve stembureau voters → in-game names
             vote_ingame: dict[str, str] = {}
@@ -638,27 +679,23 @@ class Owner(commands.Cog, name="owner"):
                     for user_id, count in vote_count.most_common()
                 ]
             ) or "*Geen stemmen gevonden.*"
-            await interaction.channel.send(embed=discord.Embed(  # type: ignore[union-attr]
+            await ch.send(embed=discord.Embed(
                 title="Stembureau Analyse",
                 description=f"Votes in de stembureau channel sinds {date_label}:\n{results}",
                 color=self.color,
             ))
 
-            await status_msg.edit(embed=_status_embed("✅ Analyse voltooid!"))
+            await ch.send(embed=_status_embed("✅ **Analyse voltooid!**"))
 
         except discord.HTTPException as exc:
-            await status_msg.edit(
-                embed=_status_embed(
-                    f"❌ Discord API tijdelijk niet beschikbaar (HTTP {exc.status}). "
-                    "Probeer het later opnieuw."
-                )
-            )
+            await ch.send(embed=_status_embed(
+                f"❌ Discord API tijdelijk niet beschikbaar (HTTP {exc.status}). "
+                "Probeer het later opnieuw."
+            ))
         except Exception as exc:
-            await status_msg.edit(
-                embed=_status_embed(
-                    f"❌ Onverwachte fout: `{type(exc).__name__}: {exc}`"
-                )
-            )
+            await ch.send(embed=_status_embed(
+                f"❌ Onverwachte fout: `{type(exc).__name__}: {exc}`"
+            ))
 
     @app_commands.command(
         name="wakkerdam-analyse",
