@@ -408,8 +408,15 @@ class ProductionTasks(TaskCogBase, name="production_tasks"):
             except Exception:
                 logger.exception("Failed to persist permanent leader for %s", item)
 
-        if prev_notified_name is not None:
-            # Leader changed from the last notified state — send notification.
+        # Only notify when the bonus actually improved and a different country leads.
+        # Same bonus with a different country is a reshuffle, not a new high.
+        should_notify = (
+            prev_notified_name is not None
+            and bonus > prev_notified_bonus + 0.01
+            and country_name != prev_notified_name
+        )
+
+        if should_notify:
             self._last_known_leader[item] = (country_name, bonus)
             old_desc = f"{prev_notified_name} ({prev_notified_bonus}%)"
             for guild in self.bot.guilds:
@@ -430,14 +437,14 @@ class ProductionTasks(TaskCogBase, name="production_tasks"):
                     logger.warning("Failed to persist notification record for %s", item)
             return (item, old_desc, f"{country_name} ({bonus}%)")
         else:
-            # First time tracking this item (last_notified_country was NULL) — start
-            # silently so we don't announce leaders that existed before the bot launched.
             self._last_known_leader[item] = (country_name, bonus)
-            if self._db:
-                try:
-                    await self._db.set_last_notified_leader(item, country_name, float(bonus))
-                except Exception:
-                    logger.warning("Failed to init notification record for %s", item)
+            if prev_notified_name is None:
+                # First time tracking this item — initialize silently without notifying.
+                if self._db:
+                    try:
+                        await self._db.set_last_notified_leader(item, country_name, float(bonus))
+                    except Exception:
+                        logger.warning("Failed to init notification record for %s", item)
             return None
 
     async def _handle_deposit_top(
