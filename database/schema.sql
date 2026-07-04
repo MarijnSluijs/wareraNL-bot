@@ -313,13 +313,15 @@ CREATE INDEX IF NOT EXISTS idx_battle_drops_battle  ON battle_drops(battle_id);
 
 -- battle_mu_hits: per-MU damage per battle side, fetched via type="mu" rankings
 CREATE TABLE IF NOT EXISTS battle_mu_hits (
-    battle_id         TEXT NOT NULL,
-    mu_id             TEXT NOT NULL,
-    side              TEXT NOT NULL,       -- 'attacker' | 'defender'
-    mu_name           TEXT,
-    damage            REAL NOT NULL DEFAULT 0,
-    battle_created_at TEXT,
-    recorded_at       TEXT,
+    battle_id             TEXT NOT NULL,
+    mu_id                 TEXT NOT NULL,
+    side                  TEXT NOT NULL,       -- 'attacker' | 'defender'
+    mu_name               TEXT,
+    damage                REAL NOT NULL DEFAULT 0,
+    battle_created_at     TEXT,
+    recorded_at           TEXT,
+    attacker_country_id   TEXT,
+    defender_country_id   TEXT,
     PRIMARY KEY (battle_id, mu_id, side)
 );
 CREATE INDEX IF NOT EXISTS idx_battle_mu_hits_mu      ON battle_mu_hits(mu_id);
@@ -339,6 +341,21 @@ CREATE TABLE IF NOT EXISTS battle_country_hits (
 );
 CREATE INDEX IF NOT EXISTS idx_battle_country_hits_country  ON battle_country_hits(country_id);
 CREATE INDEX IF NOT EXISTS idx_battle_country_hits_created  ON battle_country_hits(battle_created_at);
+
+-- mu_battle_member_damage: per-member damage per battle, populated by the web
+--   gevechten service when an MU's gevechten tab is visited.  Acts as a lazy
+--   cache: re-fetched if the battle is still active and data is stale.
+CREATE TABLE IF NOT EXISTS mu_battle_member_damage (
+    battle_id         TEXT NOT NULL,
+    mu_id             TEXT NOT NULL,
+    user_id           TEXT NOT NULL,
+    damage            REAL NOT NULL DEFAULT 0,
+    battle_created_at TEXT,
+    recorded_at       TEXT NOT NULL,
+    PRIMARY KEY (battle_id, mu_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mu_bmember_mu     ON mu_battle_member_damage(mu_id);
+CREATE INDEX IF NOT EXISTS idx_mu_bmember_battle ON mu_battle_member_damage(battle_id, mu_id);
 
 -- ── Pill tracking ─────────────────────────────────────────────────────────────
 

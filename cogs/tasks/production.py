@@ -110,6 +110,7 @@ class ProductionTasks(TaskCogBase, name="production_tasks"):
             cid_to_country: dict[str, dict] = {cid_of(c): c for c in country_list}
 
             items_to_poll: set[str] = set()
+            snapshot_rows: list[tuple] = []
             for country in country_list:
                 item = (
                     country.get("specializedItem")
@@ -121,20 +122,20 @@ class ProductionTasks(TaskCogBase, name="production_tasks"):
                 items_to_poll.add(item)
                 if self._db:
                     pb = self._get_permanent_bonus(country)
-                    try:
-                        await self._db.save_country_snapshot(
-                            cid_of(country),
-                            country.get("code"),
-                            country.get("name"),
-                            item,
-                            pb,
-                            json.dumps(country, default=str),
-                            now,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Failed to save snapshot for country %s", cid_of(country)
-                        )
+                    snapshot_rows.append((
+                        cid_of(country),
+                        country.get("code"),
+                        country.get("name"),
+                        item,
+                        pb,
+                        json.dumps(country, default=str),
+                        now,
+                    ))
+            if self._db and snapshot_rows:
+                try:
+                    await self._db.save_country_snapshots_batch(snapshot_rows)
+                except Exception:
+                    logger.exception("Failed to save country snapshots batch")
 
             region_to_cid: dict[str, str] = {}
             region_to_name: dict[str, str] = {}
@@ -355,20 +356,7 @@ class ProductionTasks(TaskCogBase, name="production_tasks"):
             country_name != prev.get("country_name") if prev else True
         )
 
-        if changed and prev is not None:
-            old_desc = f"{prev.get('country_name')} ({prev.get('production_bonus')}%)"
-            for guild in self.bot.guilds:
-                channel = guild.get_channel(channel_id)
-                if channel:
-                    try:
-                        await channel.send(
-                            f"🏭 **{item}** nieuwe langetermijnleider: **{country_name}** ({bonus}%) — was {old_desc}"
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Failed sending permanent leader update for %s", item
-                        )
-
+        saved = False
         if self._db:
             try:
                 await self._db.set_top_specialization(
@@ -381,11 +369,23 @@ class ProductionTasks(TaskCogBase, name="production_tasks"):
                     ethic_bonus=ethic_bonus,
                     ethic_deposit_bonus=ethic_deposit_bonus,
                 )
+                saved = True
             except Exception:
                 logger.exception("Failed to persist permanent leader for %s", item)
 
-        if changed and prev is not None:
+        if changed and prev is not None and saved:
             old_desc = f"{prev.get('country_name')} ({prev.get('production_bonus')}%)"
+            for guild in self.bot.guilds:
+                channel = guild.get_channel(channel_id)
+                if channel:
+                    try:
+                        await channel.send(
+                            f"🏭 **{item}** nieuwe langetermijnleider: **{country_name}** ({bonus}%) — was {old_desc}"
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Failed sending permanent leader update for %s", item
+                        )
             return (item, old_desc, f"{country_name} ({bonus}%)")
         return None
 

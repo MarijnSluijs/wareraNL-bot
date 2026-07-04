@@ -1077,15 +1077,24 @@ class BattleRankingsMixin:
         damage: float,
         battle_created_at: str,
         recorded_at: str,
+        attacker_country_id: Optional[str] = None,
+        defender_country_id: Optional[str] = None,
     ) -> None:
         """Upsert a single MU-side-battle damage entry."""
         await self._conn.execute(
             """
-            INSERT OR REPLACE INTO battle_mu_hits
-                (battle_id, mu_id, side, mu_name, damage, battle_created_at, recorded_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO battle_mu_hits
+                (battle_id, mu_id, side, mu_name, damage, battle_created_at, recorded_at,
+                 attacker_country_id, defender_country_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(battle_id, mu_id, side) DO UPDATE SET
+                damage              = excluded.damage,
+                recorded_at         = excluded.recorded_at,
+                attacker_country_id = COALESCE(excluded.attacker_country_id, attacker_country_id),
+                defender_country_id = COALESCE(excluded.defender_country_id, defender_country_id)
             """,
-            (battle_id, mu_id, side, mu_name, damage, battle_created_at, recorded_at),
+            (battle_id, mu_id, side, mu_name, damage, battle_created_at, recorded_at,
+             attacker_country_id, defender_country_id),
         )
 
     async def commit_battle_mu_hits(self) -> None:
@@ -1154,6 +1163,340 @@ class BattleRankingsMixin:
             async for row in cur:
                 result[row[0]] = float(row[1] or 0)
         return result
+
+    # ------------------------------------------------------------------ #
+    # mu_battle_member_damage helpers
+    # ------------------------------------------------------------------ #
+
+    async def upsert_mu_battle_members(
+        self,
+        battle_id: str,
+        mu_id: str,
+        members: list[tuple[str, float]],  # [(user_id, damage), ...]
+        battle_created_at: str,
+        recorded_at: str,
+    ) -> None:
+        """Bulk-upsert per-member damage for a single battle+MU."""
+        for user_id, damage in members:
+            await self._conn.execute(
+                """
+                INSERT OR REPLACE INTO mu_battle_member_damage
+                    (battle_id, mu_id, user_id, damage, battle_created_at, recorded_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (battle_id, mu_id, user_id, damage, battle_created_at, recorded_at),
+            )
+        await self._conn.commit()
+
+    async def get_mu_battle_members(
+        self, battle_id: str, mu_id: str
+    ) -> list[dict]:
+        """Return per-member damage for a battle+MU, sorted by damage desc."""
+        rows: list[dict] = []
+        async with self._conn.execute(
+            """
+            SELECT mbmd.user_id,
+                   COALESCE(cl.citizen_name, mbmd.user_id) AS citizen_name,
+                   mbmd.damage,
+                   mbmd.recorded_at
+            FROM mu_battle_member_damage mbmd
+            LEFT JOIN citizen_levels cl ON cl.user_id = mbmd.user_id
+            WHERE mbmd.battle_id = ? AND mbmd.mu_id = ?
+            ORDER BY mbmd.damage DESC
+            """,
+            (battle_id, mu_id),
+        ) as cur:
+            async for row in cur:
+                rows.append({
+                    "user_id": row[0],
+                    "citizen_name": row[1],
+                    "damage": float(row[2] or 0),
+                    "recorded_at": row[3],
+                })
+        return rows
+
+    async def get_member_recorded_at(
+        self, battle_id: str, mu_id: str
+    ) -> Optional[str]:
+        """Return the recorded_at timestamp of the most recent member entry for a battle+MU."""
+        async with self._conn.execute(
+            """
+            SELECT MAX(recorded_at) FROM mu_battle_member_damage
+            WHERE battle_id = ? AND mu_id = ?
+            """,
+            (battle_id, mu_id),
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else None
+
+    async def get_mu_battle_damage(
+        self, battle_id: str, mu_id: str, side: str
+    ) -> Optional[float]:
+        """Return stored MU damage for a specific battle+mu+side, or None."""
+        async with self._conn.execute(
+            "SELECT damage FROM battle_mu_hits WHERE battle_id=? AND mu_id=? AND side=?",
+            (battle_id, mu_id, side),
+        ) as cur:
+            row = await cur.fetchone()
+            return float(row[0]) if row else None
+
+    async def search_citizen_ids_by_name(
+        self, name_query: str, mu_id: str
+    ) -> list[str]:
+        """Return user_ids from mu_battle_member_damage for *mu_id* whose
+        citizen_name LIKE %name_query%."""
+        rows: list[str] = []
+        async with self._conn.execute(
+            """
+            SELECT DISTINCT mbmd.user_id
+            FROM mu_battle_member_damage mbmd
+            JOIN citizen_levels cl ON cl.user_id = mbmd.user_id
+            WHERE mbmd.mu_id = ? AND cl.citizen_name LIKE ?
+            """,
+            (mu_id, f"%{name_query}%"),
+        ) as cur:
+            async for row in cur:
+                rows.append(row[0])
+        return rows
+
+    async def get_mu_battles_paged(
+        self,
+        mu_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        att_country_ids: Optional[list[str]] = None,
+        def_country_ids: Optional[list[str]] = None,
+        player_user_ids: Optional[list[str]] = None,
+        exclude_battle_ids: Optional[list[str]] = None,
+        min_damage: Optional[float] = None,
+    ) -> tuple[list[dict], int]:
+        """Return paginated battles for a MU from battle_mu_hits + processed_battles.
+
+        JOIN params must come before WHERE params in SQLite's positional binding,
+        so we build join_params and where_params separately and concatenate them.
+
+        Returns (rows, total_count).
+        """
+        join_extra = ""
+        join_params: list = []
+        conds: list[str] = ["bmh.mu_id = ?"]
+        where_params: list = [mu_id]
+
+        # JOIN for player filter (must appear before WHERE in SQL → params first)
+        if player_user_ids:
+            ph = ",".join("?" * len(player_user_ids))
+            join_extra = f"""
+            JOIN mu_battle_member_damage mbmd2
+              ON mbmd2.battle_id = bmh.battle_id AND mbmd2.mu_id = bmh.mu_id
+             AND mbmd2.user_id IN ({ph})
+            """
+            join_params.extend(player_user_ids)
+
+        if att_country_ids or def_country_ids:
+            sub_conds = []
+            if att_country_ids:
+                ph = ",".join("?" * len(att_country_ids))
+                sub_conds.append(f"pb.attacker_country_id IN ({ph})")
+                where_params.extend(att_country_ids)
+            if def_country_ids:
+                ph = ",".join("?" * len(def_country_ids))
+                sub_conds.append(f"pb.defender_country_id IN ({ph})")
+                where_params.extend(def_country_ids)
+            conds.append(f"({' OR '.join(sub_conds)})")
+
+        if exclude_battle_ids:
+            ph = ",".join("?" * len(exclude_battle_ids))
+            conds.append(f"bmh.battle_id NOT IN ({ph})")
+            where_params.extend(exclude_battle_ids)
+
+        if min_damage is not None and min_damage > 0:
+            conds.append("bmh.damage >= ?")
+            where_params.append(min_damage)
+
+        conds.append(
+            "EXISTS (SELECT 1 FROM mu_battle_member_damage"
+            " WHERE battle_id = bmh.battle_id AND mu_id = bmh.mu_id)"
+        )
+
+        where = "WHERE " + " AND ".join(conds)
+        all_params = join_params + where_params
+
+        # pb JOIN is only needed for country-filter WHERE conditions
+        pb_join = (
+            "LEFT JOIN processed_battles pb ON pb.battle_id = bmh.battle_id"
+            if (att_country_ids or def_country_ids)
+            else ""
+        )
+
+        total = 0
+        async with self._conn.execute(
+            f"""
+            SELECT COUNT(DISTINCT bmh.battle_id || '|' || bmh.side)
+            FROM battle_mu_hits bmh
+            {pb_join}
+            {join_extra}
+            {where}
+            """,
+            all_params,
+        ) as cur:
+            row = await cur.fetchone()
+            total = row[0] if row else 0
+
+        rows: list[dict] = []
+        async with self._conn.execute(
+            f"""
+            SELECT bmh.battle_id, bmh.side, bmh.damage, bmh.battle_created_at,
+                   bmh.attacker_country_id, bmh.defender_country_id
+            FROM battle_mu_hits bmh
+            {pb_join}
+            {join_extra}
+            {where}
+            ORDER BY bmh.battle_created_at DESC, bmh.battle_id DESC
+            LIMIT ? OFFSET ?
+            """,
+            all_params + [limit, offset],
+        ) as cur:
+            async for row in cur:
+                rows.append({
+                    "battle_id": row[0],
+                    "side": row[1],
+                    "mu_damage": float(row[2] or 0),
+                    "battle_created_at": row[3] or "",
+                    "att_country_id": row[4] or "",
+                    "def_country_id": row[5] or "",
+                })
+        return rows, total
+
+    async def get_tracked_mu_members_in_battles(
+        self, battle_ids: list[str]
+    ) -> list[tuple[str, str, str, str]]:
+        """Return (battle_id, mu_id, side, user_id) for MUs that:
+          1. participated in *battle_ids* (in battle_mu_hits),
+          2. have at least one member in citizen_levels, AND
+          3. have been visited before (have any row in mu_battle_member_damage).
+
+        Condition 3 avoids re-fetching data for thousands of historic MUs that
+        nobody has visited. First-visit data is seeded by the fire-and-forget path.
+        """
+        if not battle_ids:
+            return []
+        ph = ",".join("?" * len(battle_ids))
+        rows: list[tuple[str, str, str, str]] = []
+        async with self._conn.execute(
+            f"""
+            SELECT DISTINCT bmh.battle_id, bmh.mu_id, bmh.side, cl.user_id
+            FROM battle_mu_hits bmh
+            JOIN citizen_levels cl ON cl.mu_id = bmh.mu_id
+            WHERE bmh.battle_id IN ({ph})
+              AND EXISTS (
+                  SELECT 1 FROM mu_battle_member_damage
+                  WHERE mu_id = bmh.mu_id
+              )
+            """,
+            battle_ids,
+        ) as cur:
+            async for row in cur:
+                rows.append((row[0], row[1], row[2], row[3]))
+        return rows
+
+    async def get_battles_without_members(
+        self,
+        mu_id: str,
+        limit: int = 100,
+        min_created_at: Optional[str] = None,
+    ) -> list[tuple[str, str, str]]:
+        """Return (battle_id, side, battle_created_at) for battles of *mu_id*
+        that have no entry in mu_battle_member_damage yet, newest first.
+
+        min_created_at: if given, only battles on or after this ISO timestamp.
+        """
+        rows: list[tuple[str, str, str]] = []
+        if min_created_at:
+            sql = """
+                SELECT bmh.battle_id, bmh.side, bmh.battle_created_at
+                FROM battle_mu_hits bmh
+                WHERE bmh.mu_id = ?
+                  AND bmh.battle_created_at >= ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM mu_battle_member_damage
+                      WHERE battle_id = bmh.battle_id AND mu_id = bmh.mu_id
+                  )
+                ORDER BY bmh.battle_created_at DESC
+                LIMIT ?
+            """
+            params: tuple = (mu_id, min_created_at, limit)
+        else:
+            sql = """
+                SELECT bmh.battle_id, bmh.side, bmh.battle_created_at
+                FROM battle_mu_hits bmh
+                WHERE bmh.mu_id = ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM mu_battle_member_damage
+                      WHERE battle_id = bmh.battle_id AND mu_id = bmh.mu_id
+                  )
+                ORDER BY bmh.battle_created_at DESC
+                LIMIT ?
+            """
+            params = (mu_id, limit)
+        async with self._conn.execute(sql, params) as cur:
+            async for row in cur:
+                rows.append((row[0], row[1], row[2] or ""))
+        return rows
+
+    async def get_mu_member_battle_count(self, mu_id: str) -> int:
+        """Return how many distinct battles already have member data for *mu_id*."""
+        async with self._conn.execute(
+            "SELECT COUNT(DISTINCT battle_id) FROM mu_battle_member_damage WHERE mu_id = ?",
+            (mu_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else 0
+
+    async def get_visited_mu_ids(self) -> list[str]:
+        """Return distinct mu_ids that have any entry in mu_battle_member_damage."""
+        rows: list[str] = []
+        async with self._conn.execute(
+            "SELECT DISTINCT mu_id FROM mu_battle_member_damage"
+        ) as cur:
+            async for row in cur:
+                rows.append(row[0])
+        return rows
+
+    async def get_all_tracked_mu_ids(self) -> list[str]:
+        """Return all mu_ids that have battles AND current members in citizen_levels.
+
+        Visited MUs (those with any member data already) are returned first so
+        the backfill continues filling them before starting on unvisited MUs.
+        """
+        rows: list[str] = []
+        async with self._conn.execute(
+            """
+            SELECT DISTINCT bmh.mu_id
+            FROM battle_mu_hits bmh
+            WHERE EXISTS (
+                SELECT 1 FROM citizen_levels cl WHERE cl.mu_id = bmh.mu_id
+            )
+            ORDER BY
+                EXISTS (
+                    SELECT 1 FROM mu_battle_member_damage mbd WHERE mbd.mu_id = bmh.mu_id
+                ) DESC,
+                bmh.mu_id
+            """
+        ) as cur:
+            async for row in cur:
+                rows.append(row[0])
+        return rows
+
+    async def get_mu_current_members(self, mu_id: str) -> list[str]:
+        """Return user_ids from citizen_levels whose current mu_id matches."""
+        rows: list[str] = []
+        async with self._conn.execute(
+            "SELECT user_id FROM citizen_levels WHERE mu_id = ?",
+            (mu_id,),
+        ) as cur:
+            async for row in cur:
+                rows.append(row[0])
+        return rows
 
     async def get_player_damage_in_range(
         self, user_ids: list[str], start_iso: str, end_iso: str
