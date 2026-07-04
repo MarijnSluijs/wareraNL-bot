@@ -426,10 +426,16 @@
                   "battleId": {
                     "type": "string",
                     "description": "The unique identifier of the battle"
+                  },
+                  "side": {
+                    "type": "string",
+                    "enum": ["attacker", "defender"],
+                    "description": "Which side's orders to retrieve"
                   }
                 },
                 "required": [
-                  "battleId"
+                  "battleId",
+                  "side"
                 ],
                 "additionalProperties": false
               }

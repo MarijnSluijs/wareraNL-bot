@@ -38,6 +38,19 @@ class ProductionMixin:
         )
         await self._conn.commit()
 
+    async def save_country_snapshots_batch(
+        self,
+        rows: list[tuple],
+    ) -> None:
+        """Insert or replace multiple country snapshots in one transaction."""
+        await self._conn.executemany(
+            "INSERT OR REPLACE INTO country_snapshots"
+            "(country_id, code, name, specialized_item, production_bonus, raw_json, updated_at)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        await self._conn.commit()
+
     # ── specialization_top ───────────────────────────────────────────────────
 
     async def get_top_specialization(self, item: str) -> Optional[dict]:
