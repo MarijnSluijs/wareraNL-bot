@@ -234,7 +234,7 @@ class General(commands.Cog, name="general"):
         # fiets / mountainbike → send trauma GIF, 20% chance
         if any(w in words for w in ("fiets", "mountainbike")) and random.random() < 0.20:
             try:
-                await message.channel.send("https://klipy.com/gifs/trauma-soldier")
+                await message.channel.send("https://i.imgur.com/aEtFHPS.gif")
             except discord.HTTPException as e:
                 self.bot.logger.error(f"Failed to send fiets gif for message {message.id}: {e}")
 
