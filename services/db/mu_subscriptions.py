@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 class MuSubscriptionsMixin:
@@ -68,6 +68,27 @@ class MuSubscriptionsMixin:
             (posted_at, channel_id, mu_name),
         )
         await self._conn.commit()
+
+    async def try_claim_weekly_post(
+        self, channel_id: str, mu_name: str
+    ) -> bool:
+        """Atomically mark this subscription as posted for the current week.
+
+        Returns True if the claim succeeded (caller should post).
+        Returns False if already posted within the last 6 days (caller should skip).
+        The write happens BEFORE the caller sends the Discord message so that a
+        failed send never causes a duplicate on the next loop iteration.
+        """
+        now = datetime.now(timezone.utc)
+        cutoff = (now - timedelta(days=6)).isoformat()
+        cur = await self._conn.execute(
+            "UPDATE mu_weekly_report_subs SET last_posted_at = ?"
+            " WHERE channel_id = ? AND mu_name = ?"
+            " AND (last_posted_at IS NULL OR last_posted_at < ?)",
+            (now.isoformat(), channel_id, mu_name, cutoff),
+        )
+        await self._conn.commit()
+        return (cur.rowcount or 0) > 0
 
     # ── Auction-win subscriptions ──────────────────────────────────────────────
 
