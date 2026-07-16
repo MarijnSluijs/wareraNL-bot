@@ -203,6 +203,149 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
         await interaction.followup.send("✅ Rollen-knoppen gepost.", ephemeral=True)
 
     @app_commands.command(
+        name="syncgamesroles",
+        description="Synchroniseer game-rolknoppen met de kanalen in de games-categorie.",
+    )
+    @has_privileged_role()
+    async def syncgamesroles(self, interaction: discord.Interaction) -> None:
+        """Scan the games category, create missing roles, drop stale buttons, repost."""
+        _GAMES_CHANNEL_ID = 1520543859820724254
+        _GAMES_CATEGORY_ID = 1517179213554385047
+
+        await interaction.response.defer(ephemeral=True)
+
+        guild = interaction.guild
+        if not guild:
+            await interaction.followup.send("❌ Guild niet gevonden.", ephemeral=True)
+            return
+
+        category = guild.get_channel(_GAMES_CATEGORY_ID)
+        if not isinstance(category, discord.CategoryChannel):
+            await interaction.followup.send(
+                "❌ Games-categorie niet gevonden.", ephemeral=True
+            )
+            return
+
+        channels = sorted(
+            [ch for ch in category.channels if isinstance(ch, discord.TextChannel)],
+            key=lambda c: c.position,
+        )
+        channel_names = {ch.name for ch in channels}
+
+        testing = getattr(self.bot, "testing", False)
+        path = games_roles_path(testing)
+        template = load_roles_template(path)
+
+        embeds = template.get("embeds") or []
+        if not embeds:
+            embeds = [{
+                "title": "🎮 Game rollen",
+                "color": "0x9b59b6",
+                "description": (
+                    "Klik op een knop om de rol voor dat spel te krijgen of te verwijderen.\n"
+                    "Met deze rollen kun je anderen pingen om samen te spelen."
+                ),
+                "buttons": [],
+            }]
+
+        existing_buttons: list[dict] = embeds[0].get("buttons", [])
+        existing_by_label: dict[str, dict] = {btn["label"]: btn for btn in existing_buttons}
+
+        new_buttons: list[dict] = []
+        created_roles: list[str] = []
+        errors: list[str] = []
+
+        for ch in channels:
+            label = ch.name
+            if label in existing_by_label:
+                new_buttons.append(existing_by_label[label])
+            else:
+                role = discord.utils.get(guild.roles, name=label)
+                if role is None:
+                    try:
+                        role = await guild.create_role(
+                            name=label,
+                            mentionable=True,
+                            reason=f"Aangemaakt door /syncgamesroles voor #{label}",
+                        )
+                        created_roles.append(label)
+                    except Exception as exc:
+                        errors.append(f"{label}: {exc}")
+                        continue
+                new_buttons.append({
+                    "label": label,
+                    "role_id": role.id,
+                    "style": "primary",
+                })
+
+        removed = [lbl for lbl in existing_by_label if lbl not in channel_names]
+
+        for idx, btn in enumerate(new_buttons):
+            btn["row"] = idx // 5
+
+        embeds[0]["buttons"] = new_buttons
+        template["embeds"] = embeds
+
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(template, f, indent=2, ensure_ascii=False)
+        except Exception as exc:
+            await interaction.followup.send(
+                f"❌ Opslaan games_roles.json mislukt: {exc}", ephemeral=True
+            )
+            return
+
+        self.bot.add_view(RoleToggleView(new_buttons, exclusive=False))
+
+        target_channel = self.bot.get_channel(_GAMES_CHANNEL_ID)
+        if target_channel is None:
+            await interaction.followup.send(
+                "❌ Games-kanaal niet gevonden.", ephemeral=True
+            )
+            return
+
+        try:
+            await target_channel.purge(
+                limit=50, check=lambda m: m.author == self.bot.user
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+        color = int(self.bot.config.get("colors", {}).get("primary", "0x154273"), 16)
+        embed_data = embeds[0]
+        embed_color_raw = embed_data.get("color")
+        if embed_color_raw:
+            embed_color = (
+                int(embed_color_raw, 16)
+                if isinstance(embed_color_raw, str)
+                else int(embed_color_raw)
+            )
+        else:
+            embed_color = color
+
+        embed = discord.Embed(
+            title=embed_data.get("title", "Game rollen"),
+            description=embed_data.get(
+                "description", "Klik op een knop om een rol te toggelen."
+            ),
+            color=embed_color,
+        )
+        await target_channel.send(
+            embed=embed, view=RoleToggleView(new_buttons, exclusive=False)
+        )
+
+        lines = [f"✅ Game-rolknoppen gesynchroniseerd in <#{_GAMES_CHANNEL_ID}>."]
+        lines.append(f"**{len(new_buttons)}** knoppen actief.")
+        if created_roles:
+            lines.append(f"**{len(created_roles)}** nieuwe rol(len) aangemaakt: {', '.join(created_roles)}.")
+        if removed:
+            lines.append(f"**{len(removed)}** knop(pen) verwijderd: {', '.join(removed)}.")
+        if errors:
+            lines.append(f"⚠️ Fouten bij aanmaken rollen: {'; '.join(errors)}.")
+
+        await interaction.followup.send("\n".join(lines), ephemeral=True)
+
+    @app_commands.command(
         name="gamesroles",
         description="Post de game-rolknoppen in het games-kanaal.",
     )
