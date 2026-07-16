@@ -227,7 +227,10 @@ class GeneralRoles(commands.Cog, name="general_role_selection"):
             return
 
         channels = sorted(
-            [ch for ch in category.channels if isinstance(ch, discord.TextChannel)],
+            [
+                ch for ch in category.channels
+                if isinstance(ch, discord.TextChannel) and ch.id != 1520543859820724254
+            ],
             key=lambda c: c.position,
         )
         channel_names = {ch.name for ch in channels}
