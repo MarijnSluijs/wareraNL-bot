@@ -99,9 +99,11 @@ class MuSubscriptionsCog(TaskCogBase, name="mu_subscriptions"):
         self.bot = bot
         self._country_names: dict[str, str] = {}
         self._country_names_refreshed_at: float = 0.0
-        # In-memory dedup for the weekly posting window.
-        # Keyed by (channel_id, mu_name); cleared when we exit the Monday 01:xx window.
+        # In-memory dedup: cleared when we exit the Monday 01:xx window.
         self._posted_this_week: set[tuple[str, str]] = set()
+        # In-memory seen auction IDs per (channel_id, mu_name), seeded from DB on
+        # first touch and updated immediately before each send. Survives stale DB reads.
+        self._seen_auction_ids: dict[tuple[str, str], set[str]] = {}
 
     async def _refresh_country_names(self) -> None:
         """Refresh country name cache at most once every 10 minutes."""
@@ -150,7 +152,7 @@ class MuSubscriptionsCog(TaskCogBase, name="mu_subscriptions"):
         nl_now = datetime.now(_TZ_NL)
         # Monday == 0, fire in the 01:00 hour
         if nl_now.weekday() != 0 or nl_now.hour != 1:
-            # Outside the posting window — clear the set so it's fresh for next Monday.
+            # Outside the posting window — reset so it's fresh for next Monday.
             if self._posted_this_week:
                 self._posted_this_week.clear()
             return
@@ -161,23 +163,25 @@ class MuSubscriptionsCog(TaskCogBase, name="mu_subscriptions"):
             return
         for sub in subs:
             key = (sub["channel_id"], sub["mu_name"])
-            # In-memory check: if we already posted this run of the Monday window,
-            # skip regardless of whether the DB write succeeded (prevents spam when
-            # update_weekly_report_posted fails due to a locked DB).
+            # Layer 1: in-memory guard — fastest, handles within-process repeated minutes.
             if key in self._posted_this_week:
                 continue
-            last = sub.get("last_posted_at")
-            if last:
-                try:
-                    last_dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
-                    if (datetime.now(timezone.utc) - last_dt).total_seconds() < 6 * 24 * 3600:
-                        self._posted_this_week.add(key)
-                        continue  # already posted within the last 6 days
-                except (ValueError, TypeError):
-                    pass
-            # Mark before posting so that even if the DB write fails on return,
-            # the next minute's iteration won't re-post.
+            # Layer 2: atomic DB claim — write last_posted_at BEFORE sending.
+            # If this fails we skip (safer than double-posting). If it returns False
+            # the DB already has a recent last_posted_at so we also skip.
+            try:
+                claimed = await self._db.try_claim_weekly_post(
+                    sub["channel_id"], sub["mu_name"]
+                )
+            except Exception as exc:
+                logger.warning(
+                    "mu_subscriptions: could not claim weekly slot for %s: %s",
+                    sub["mu_name"], exc,
+                )
+                continue
             self._posted_this_week.add(key)
+            if not claimed:
+                continue
             try:
                 await self._post_weekly_damage(sub)
             except Exception as exc:
@@ -265,15 +269,6 @@ class MuSubscriptionsCog(TaskCogBase, name="mu_subscriptions"):
             logger.warning(
                 "mu_subscriptions: failed to send weekly embed for %s: %s", mu_name, exc
             )
-            return
-
-        now_iso = datetime.now(timezone.utc).isoformat()
-        try:
-            await self._db.update_weekly_report_posted(sub["channel_id"], mu_name, now_iso)
-        except Exception as exc:
-            logger.warning(
-                "mu_subscriptions: failed to persist last_posted_at for %s: %s", mu_name, exc
-            )
 
     # ── Auction-win task ──────────────────────────────────────────────────────
 
@@ -306,6 +301,7 @@ class MuSubscriptionsCog(TaskCogBase, name="mu_subscriptions"):
         # Only contracts with _id strictly greater (i.e. created later) are posted.
         # ObjectID lexicographic order == chronological order (first 4 bytes = Unix timestamp).
         cutoff = sub["cutoff_at"]
+        channel_id = sub["channel_id"]
 
         try:
             resp = await self._client.post(
@@ -319,38 +315,56 @@ class MuSubscriptionsCog(TaskCogBase, name="mu_subscriptions"):
             )
             return
 
-        channel = self.bot.get_channel(int(sub["channel_id"]))
+        channel = self.bot.get_channel(int(channel_id))
         if channel is None:
             return
 
-        seen: set[str] = set(sub["seen_ids"])
-        new_auctions = []
-        updated_seen = list(sub["seen_ids"])
+        mem_key = (channel_id, mu_name)
+        # Seed the in-memory set from DB on first touch; kept warm between iterations.
+        if mem_key not in self._seen_auction_ids:
+            self._seen_auction_ids[mem_key] = set(sub["seen_ids"])
+        mem_seen = self._seen_auction_ids[mem_key]
+
+        # current_seen_list mirrors mem_seen for DB writes (capped to avoid unbounded growth)
+        current_seen_list: list[str] = list(sub["seen_ids"])
+        new_cutoff = cutoff
+
         for auction in auctions:
             auction_id = str(auction.get("_id") or "")
-            if not auction_id or auction_id in seen:
+            if not auction_id:
                 continue
-            # Client-side filter: only contracts won by our subscribed MU
+            # Layer 1: in-memory dedup — fastest, survives stale DB reads.
+            if auction_id in mem_seen:
+                continue
             if str(auction.get("currentWinner") or "") != mu_id:
                 continue
-            # Skip anything whose ObjectID is at or before the cutoff ID
             if cutoff and auction_id <= cutoff:
                 continue
-            new_auctions.append(auction)
-            seen.add(auction_id)
-            updated_seen.append(auction_id)
 
-        if not new_auctions:
-            return
+            # Layer 2: persist BEFORE sending.
+            # If the DB write fails we skip (prefer missing one ping over spamming).
+            mem_seen.add(auction_id)
+            current_seen_list.append(auction_id)
+            try:
+                await self._db.update_auction_seen_ids(channel_id, mu_name, current_seen_list)
+            except Exception as exc:
+                logger.warning(
+                    "mu_subscriptions: failed to persist seen auction %s for %s: %s",
+                    auction_id, mu_name, exc,
+                )
+                continue
 
-        for auction in new_auctions:
             await self._post_auction_won(channel, mu_name, auction)
+            if auction_id > new_cutoff:
+                new_cutoff = auction_id
 
-        await self._db.update_auction_seen_ids(sub["channel_id"], mu_name, updated_seen)
-        # Advance the cutoff to the newest _id posted so the baseline moves forward.
-        new_cutoff = max(str(a.get("_id") or "") for a in new_auctions)
         if new_cutoff > cutoff:
-            await self._db.update_auction_cutoff(sub["channel_id"], mu_name, new_cutoff)
+            try:
+                await self._db.update_auction_cutoff(channel_id, mu_name, new_cutoff)
+            except Exception as exc:
+                logger.warning(
+                    "mu_subscriptions: failed to update cutoff for %s: %s", mu_name, exc
+                )
 
     async def _post_auction_won(
         self, channel: discord.abc.Messageable, mu_name: str, auction: dict

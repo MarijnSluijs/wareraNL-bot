@@ -17,7 +17,7 @@ map-timeline/
 rijksoverheid_web/
 run_rijksoverheid_web.py
 *.code-workspace
-
+equipment-item-icons/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
