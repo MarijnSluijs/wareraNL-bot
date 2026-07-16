@@ -227,7 +227,7 @@ class General(commands.Cog, name="general"):
         _belgie_words = content.lower().replace("ë", "e").replace("ï", "i").split()
         if "belgie" in _belgie_words and random.random() < 0.20:
             try:
-                await message.channel.send("https://tenor.com/view/mchammerlalmb-gif-20535511")
+                await message.channel.send("https://klipy.com/gifs/bumpy-ride-1")
             except discord.HTTPException as e:
                 self.bot.logger.error(f"Failed to send belgië gif for message {message.id}: {e}")
 
@@ -276,6 +276,29 @@ class General(commands.Cog, name="general"):
                 await message.channel.send(f"{_nono_str} moet je bij <@1500230693186179084> zijn")
             except discord.HTTPException as e:
                 self.bot.logger.error(f"Failed to handle samenvatting papi for {message.id}: {e}")
+
+        # nigeria → money-rain GIF, 20% chance
+        if "nigeria" in words and random.random() < 0.20:
+            try:
+                await message.channel.send("https://klipy.com/gifs/money-rain-105")
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to send nigeria gif for message {message.id}: {e}")
+
+        # god → ping lolman, 20% chance
+        if "god" in words and random.random() < 0.20:
+            try:
+                await message.channel.send("<@1255474131281907733> Hij is Hem.")
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to send god message for message {message.id}: {e}")
+
+        # transparantie → mocking-case reply, 20% chance
+        if "transparantie" in words and random.random() < 0.20:
+            _patrick = discord.utils.get(message.guild.emojis, name="patrickdumb") if message.guild else None
+            _patrick_str = str(_patrick) if _patrick else ":patrickdumb:"
+            try:
+                await message.channel.send(f"tRanSPaRAntiE {_patrick_str}")
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to send transparantie message for message {message.id}: {e}")
 
         if "app.warera.io" not in content.lower():
             return
