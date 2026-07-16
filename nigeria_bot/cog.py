@@ -27,7 +27,7 @@ import aiosqlite
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from nigeria_bot.db import save_link, get_all_links
+from nigeria_bot.db import save_link, get_link, get_all_links, get_all_links_full
 
 logger = logging.getLogger("nigeria_bot.cog")
 
@@ -69,30 +69,89 @@ TICKET_CATEGORY_NAME = "🔐 Verificaties"
 WARERA_API_BASE      = "https://api2.warera.io/trpc"
 WARERA_API_KEY       = os.environ.get("WARERA_API_KEY", "")
 
+# Delay between consecutive API calls during bulk sync.
+# With API key: 0.15 s ≈ 400 req/min. Without: 0.7 s ≈ 85 req/min (under the 100/min anon limit).
+_SYNC_DELAY = 0.15 if WARERA_API_KEY else 0.7
+
+logger.info(
+    "WARERA_API_KEY %s — using %.2fs inter-request delay for nick sync",
+    "loaded" if WARERA_API_KEY else "NOT SET",
+    _SYNC_DELAY,
+)
+
 _WARERA_URL_RE = re.compile(
     r"https?://(?:app\.)?warera\.io/user/([0-9a-f]{24})", re.IGNORECASE
 )
 
 # ── WarEra API ────────────────────────────────────────────────────────────────
 
-async def _fetch_warera_username(user_id: str) -> str | None:
-    """Fetch the in-game username for a WarEra user ID. Returns None on failure."""
+async def _fetch_warera_username(
+    user_id: str,
+    session: aiohttp.ClientSession | None = None,
+) -> str | None:
+    """Fetch the in-game username for a WarEra user ID. Returns None on failure.
+
+    Sends the API key (x-api-key header) if WARERA_API_KEY is set, which raises
+    the rate limit from 100 req/min (anonymous) to the authenticated limit.
+    Retries once after a short wait on HTTP 429.
+    """
     url = f"{WARERA_API_BASE}/user.getUserLite"
     params = {"input": json.dumps({"userId": user_id})}
-    # Do NOT send the API key — this endpoint is publicly accessible and the shared
-    # key pool gets rate-limited by the main bot, causing 429s here.
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=8)) as resp:
-                if resp.status != 200:
+    headers = {"x-api-key": WARERA_API_KEY} if WARERA_API_KEY else {}
+
+    async def _do_fetch(sess: aiohttp.ClientSession) -> str | None:
+        for attempt in range(2):  # one retry on 429
+            try:
+                async with sess.get(
+                    url, params=params, headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 429:
+                        if attempt == 0:
+                            await asyncio.sleep(2)
+                            continue
+                        body = await resp.text()
+                        logger.warning(
+                            "_fetch_warera_username: still 429 after retry for %s — %s",
+                            user_id, body[:200],
+                        )
+                        return None
+                    if resp.status != 200:
+                        body = await resp.text()
+                        logger.warning(
+                            "_fetch_warera_username: HTTP %d for %s — %s",
+                            resp.status, user_id, body[:200],
+                        )
+                        return None
+                    data = await resp.json()
+                    inner = (
+                        data.get("result", {}).get("data")
+                        or data.get("result")
+                        or data
+                    )
+                    if isinstance(inner, dict):
+                        name = inner.get("username") or inner.get("name")
+                        if name:
+                            return str(name)
+                        logger.warning(
+                            "_fetch_warera_username: no username field for %s — keys: %s",
+                            user_id, list(inner.keys()),
+                        )
+                        return None
+                    logger.warning(
+                        "_fetch_warera_username: unexpected response type %s for %s",
+                        type(inner).__name__, user_id,
+                    )
                     return None
-                data = await resp.json()
-                inner = data.get("result", {}).get("data") or data.get("result") or data
-                if isinstance(inner, dict):
-                    return inner.get("username") or inner.get("name") or None
-    except Exception as exc:
-        logger.warning("_fetch_warera_username: failed for %s: %s", user_id, exc)
-    return None
+            except Exception as exc:
+                logger.warning("_fetch_warera_username: exception for %s: %s", user_id, exc)
+                return None
+        return None
+
+    if session is not None:
+        return await _do_fetch(session)
+    async with aiohttp.ClientSession() as sess:
+        return await _do_fetch(sess)
 
 
 def _extract_warera_id(url: str) -> str | None:
@@ -416,12 +475,11 @@ async def _execute_approve(
 
     username = await _fetch_warera_username(warera_id)
     if not username:
-        username = warera_id
         logger.warning("_execute_approve: could not fetch username for %s", warera_id)
 
     # Persist the Discord → WarEra ID link for daily nick sync
     if db:
-        await save_link(db, str(user.id), warera_id)
+        await save_link(db, str(user.id), warera_id, username=username)
 
     errors: list[str] = []
 
@@ -457,10 +515,13 @@ async def _execute_approve(
     else:
         return f"❌ Onbekend ticket type: `{ticket_type}`.", ""
 
-    try:
-        await user.edit(nick=username[:32], reason=f"WarEra naam ingesteld door {approver}")
-    except discord.Forbidden:
-        errors.append("Geen toegang om nickname in te stellen (hogere rol?).")
+    if username:
+        try:
+            await user.edit(nick=username[:32], reason=f"WarEra naam ingesteld door {approver}")
+        except discord.Forbidden:
+            errors.append("Geen toegang om nickname in te stellen (hogere rol?).")
+    else:
+        errors.append("WarEra gebruikersnaam kon niet worden opgehaald — nickname ongewijzigd.")
 
     result = f"✅ **{user.mention}** goedgekeurd."
     if errors:
@@ -659,30 +720,31 @@ class VerificationCog(commands.Cog, name="verification"):
         if not links:
             return
 
-        _SEM = asyncio.Semaphore(5)  # max 5 concurrent API calls
-
-        async def _sync_one(discord_id: str, warera_id: str) -> None:
-            async with _SEM:
+        updated = 0
+        async with aiohttp.ClientSession() as sess:
+            for i, (discord_id, warera_id) in enumerate(links):
+                if i > 0:
+                    await asyncio.sleep(_SYNC_DELAY)
                 member = guild.get_member(int(discord_id))
                 if not member:
-                    return
-                username = await _fetch_warera_username(warera_id)
+                    continue
+                username = await _fetch_warera_username(warera_id, session=sess)
                 if not username:
-                    return
+                    continue
+                await save_link(self._db, discord_id, warera_id, username=username)
                 current = member.nick or member.name
                 if current == username[:32]:
-                    return
+                    continue
                 try:
                     await member.edit(
                         nick=username[:32],
                         reason="Dagelijkse WarEra gebruikersnaam sync",
                     )
+                    updated += 1
                     logger.info("nick_sync: updated %s → %s", discord_id, username)
                 except discord.Forbidden:
-                    pass
-
-        await asyncio.gather(*(_sync_one(d, w) for d, w in links))
-        logger.info("nick_sync: ran for %d members", len(links))
+                    logger.warning("nick_sync: no permission to edit nick for %s", discord_id)
+        logger.info("nick_sync: ran for %d members, %d updated", len(links), updated)
 
     @nick_sync.before_loop
     async def _before_nick_sync(self) -> None:
@@ -827,6 +889,247 @@ class VerificationCog(commands.Cog, name="verification"):
         lines += ["", f"**Overgeslagen ({len(skipped)}):**"]
         lines += [f"• {s}" for s in skipped] or ["• Geen"]
         await interaction.followup.send("\n".join(lines), ephemeral=True)
+
+
+    # ── /syncnicks ────────────────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="syncnicks",
+        description="Forceer een directe synchronisatie van alle WarEra gebruikersnamen.",
+    )
+    @_staff_check()
+    async def syncnicks(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        guild = self.bot.get_guild(GUILD_ID)
+        if not guild:
+            await interaction.followup.send("❌ Guild niet gevonden.", ephemeral=True)
+            return
+
+        links = await get_all_links(self._db)
+        if not links:
+            await interaction.followup.send("Geen geverifieerde gebruikers gevonden.", ephemeral=True)
+            return
+
+        updated = 0
+        failed = 0
+        skipped = 0
+
+        async with aiohttp.ClientSession() as sess:
+            for i, (discord_id, warera_id) in enumerate(links):
+                if i > 0:
+                    await asyncio.sleep(_SYNC_DELAY)
+                member = guild.get_member(int(discord_id))
+                if not member:
+                    skipped += 1
+                    continue
+                username = await _fetch_warera_username(warera_id, session=sess)
+                if not username:
+                    failed += 1
+                    continue
+                await save_link(self._db, discord_id, warera_id, username=username)
+                current = member.nick or member.name
+                if current == username[:32]:
+                    skipped += 1
+                    continue
+                try:
+                    await member.edit(
+                        nick=username[:32],
+                        reason="Handmatige WarEra gebruikersnaam sync via /syncnicks",
+                    )
+                    updated += 1
+                    logger.info("syncnicks: updated %s → %s", discord_id, username)
+                except discord.Forbidden:
+                    failed += 1
+        await interaction.followup.send(
+            f"✅ Sync voltooid — **{updated}** bijgewerkt, **{skipped}** ongewijzigd, **{failed}** mislukt.",
+            ephemeral=True,
+        )
+
+    # ── /verificatiestatus ───────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="verificatiestatus",
+        description="Toon verificatiestatus van de server of een specifiek lid.",
+    )
+    @app_commands.describe(member="Optioneel: controleer één specifiek lid")
+    @_staff_check()
+    async def verificatiestatus(
+        self,
+        interaction: discord.Interaction,
+        member: Optional[discord.Member] = None,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        if member:
+            link = await get_link(self._db, str(member.id))
+            if link:
+                warera_id, warera_username = link
+                name_str = f"**{warera_username}**" if warera_username else f"`{warera_id}`"
+                embed = discord.Embed(
+                    title=f"✅ {member.display_name} — geverifieerd",
+                    description=(
+                        f"**Discord:** {member.mention}\n"
+                        f"**WarEra profiel:** {name_str}\n"
+                        f"**WarEra ID:** `{warera_id}`"
+                    ),
+                    colour=discord.Colour.green(),
+                )
+            else:
+                embed = discord.Embed(
+                    title=f"❌ {member.display_name} — niet geverifieerd",
+                    description=f"{member.mention} heeft geen gekoppeld WarEra-profiel.",
+                    colour=discord.Colour.red(),
+                )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        # Server-wide overview
+        all_links = await get_all_links_full(self._db)
+        guild = interaction.guild
+
+        # Roles that indicate a verified member
+        verified_role_ids = {NIGERIAN_ROLE_ID, DUTCH_ROLE_ID, *DUTCH_NIGERIAN_ROLE_IDS}
+        verified_in_db = {row[0] for row in all_links}
+
+        # Members with a verification role but no DB entry (verified via old flow)
+        orphaned: list[discord.Member] = []
+        for m in guild.members:
+            if m.bot:
+                continue
+            has_role = any(r.id in verified_role_ids for r in m.roles)
+            if has_role and str(m.id) not in verified_in_db:
+                orphaned.append(m)
+
+        lines: list[str] = [f"**Geverifieerd in DB:** {len(all_links)} leden"]
+
+        if all_links:
+            entry_lines: list[str] = []
+            for discord_id, warera_id, warera_username, saved_at in all_links[:30]:
+                m = guild.get_member(int(discord_id))
+                disc_str = m.mention if m else f"`{discord_id}`"
+                name_str = warera_username or warera_id
+                entry_lines.append(f"• {disc_str} → **{name_str}**")
+            lines.append("\n".join(entry_lines))
+            if len(all_links) > 30:
+                lines.append(f"_…en {len(all_links) - 30} meer_")
+
+        if orphaned:
+            lines.append(f"\n**Hebben rol maar geen DB-koppeling ({len(orphaned)}):**")
+            lines.append(", ".join(m.mention for m in orphaned[:20]))
+            if len(orphaned) > 20:
+                lines.append(f"_…en {len(orphaned) - 20} meer_")
+
+        embed = discord.Embed(
+            title="📋 Verificatiestatus",
+            description="\n".join(lines),
+            colour=discord.Colour.blurple(),
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # ── /verifieer ────────────────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="verifieer",
+        description="Koppel handmatig een Discord-lid aan een WarEra-profiel en geef de juiste rollen.",
+    )
+    @app_commands.describe(
+        user="Het Discord-lid om te verifiëren",
+        type="Het type verificatie",
+        warera_url="De WarEra-profiel URL (https://app.warera.io/user/…)",
+    )
+    @app_commands.choices(type=[
+        app_commands.Choice(name="🇳🇬 Nigerian",                  value="nigerian"),
+        app_commands.Choice(name="🇳🇱🇳🇬 Nederlander in Nigeria", value="dutch_nigerian"),
+        app_commands.Choice(name="🇳🇱 Nederlander",               value="dutch"),
+    ])
+    @_staff_check()
+    async def verifieer(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+        type: str,
+        warera_url: str,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        warera_id = _extract_warera_id(warera_url)
+        if not warera_id:
+            await interaction.followup.send(
+                "❌ Ongeldige WarEra URL. Verwacht: `https://app.warera.io/user/<id>`",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.followup.send("⏳ WarEra gebruikersnaam ophalen…", ephemeral=True)
+
+        username = await _fetch_warera_username(warera_id)
+        if not username:
+            logger.warning("verifieer: could not fetch username for %s", warera_id)
+
+        guild = interaction.guild
+        errors: list[str] = []
+
+        # Assign roles
+        if type == "nigerian":
+            role = guild.get_role(NIGERIAN_ROLE_ID)
+            if role:
+                try:
+                    await user.add_roles(role, reason=f"Handmatig geverifieerd door {interaction.user}")
+                except discord.Forbidden:
+                    errors.append(f"Geen toegang om rol **{role.name}** toe te voegen.")
+        elif type == "dutch_nigerian":
+            for role_id in DUTCH_NIGERIAN_ROLE_IDS:
+                role = guild.get_role(role_id)
+                if role:
+                    try:
+                        await user.add_roles(role, reason=f"Handmatig geverifieerd door {interaction.user}")
+                    except discord.Forbidden:
+                        errors.append(f"Geen toegang om rol **{role.name}** toe te voegen.")
+        elif type == "dutch":
+            role = guild.get_role(DUTCH_ROLE_ID)
+            if role:
+                try:
+                    await user.add_roles(role, reason=f"Handmatig geverifieerd door {interaction.user}")
+                except discord.Forbidden:
+                    errors.append(f"Geen toegang om rol **{role.name}** toe te voegen.")
+
+        # Set nickname
+        if username:
+            try:
+                await user.edit(
+                    nick=username[:32],
+                    reason=f"WarEra naam ingesteld door {interaction.user}",
+                )
+            except discord.Forbidden:
+                errors.append("Geen toegang om nickname in te stellen (hogere rol?).")
+        else:
+            errors.append("WarEra gebruikersnaam kon niet worden opgehaald — nickname ongewijzigd.")
+
+        # Save link
+        await save_link(self._db, str(user.id), warera_id, username=username)
+
+        name_str = f"**{username}**" if username else f"`{warera_id}`"
+        result = f"✅ {user.mention} geverifieerd als {name_str}."
+        if errors:
+            result += "\n⚠️ " + " | ".join(errors)
+        await interaction.followup.send(result, ephemeral=True)
+
+    async def cog_app_command_error(
+        self,
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError,
+    ) -> None:
+        if isinstance(error, (app_commands.MissingPermissions, app_commands.CheckFailure)):
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "❌ Je hebt geen rechten om dit commando te gebruiken.", ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    "❌ Je hebt geen rechten om dit commando te gebruiken.", ephemeral=True
+                )
+        else:
+            raise error
 
 
 async def setup(bot: commands.Bot) -> None:

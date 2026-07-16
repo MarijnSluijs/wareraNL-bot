@@ -16,6 +16,7 @@ from discord.ext.commands import Context
 
 from services.api_client import APIClient
 from services.db import Database
+from services.key_loader import load_api_keys
 
 logger = logging.getLogger("discord_bot")
 
@@ -137,12 +138,7 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
     async def _ensure_services_and_start(self) -> None:
         base_url = self.config.get("api_base_url", "https://api.example.local")
         db_path = self.config.get("articles_db_path", "database/articles.db")
-        api_keys = None
-        try:
-            with open("_api_keys.json", "r") as kf:
-                api_keys = json.load(kf).get("keys", [])
-        except Exception:
-            logger.debug("No _api_keys.json found or failed to parse")
+        api_keys = load_api_keys()
 
         self._client = APIClient(base_url=base_url, api_keys=api_keys)
         await self._client.start()

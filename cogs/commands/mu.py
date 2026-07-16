@@ -21,6 +21,7 @@ from discord.ext import commands
 
 from cogs.tasks.war_guild_divisions import DIVISION_MUS
 from services.api_client import APIClient
+from services.key_loader import load_api_keys
 
 if TYPE_CHECKING:
     from bot import DiscordBot
@@ -91,12 +92,7 @@ class MU(commands.Cog, name="mu"):
     async def _get_client(self) -> APIClient:
         if self._client is None:
             base_url = self.config.get("api_base_url", "https://api2.warera.io/trpc")
-            api_keys: list[str] = []
-            try:
-                with open("_api_keys.json") as f:
-                    api_keys = json.load(f).get("keys", [])
-            except FileNotFoundError:
-                pass
+            api_keys = load_api_keys()
             self._client = APIClient(base_url=base_url, api_keys=api_keys)
             await self._client.start()
         return self._client

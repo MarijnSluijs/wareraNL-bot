@@ -6,10 +6,16 @@ services:
     image: warera-nl:latest
     restart: unless-stopped
     env_file: .env
+    environment:
+      # Dedicated slice of the WarEra API key pool — do not share a keys file
+      # with data-fetcher or rijksoverheid-web, or a burst in one container
+      # gets every other container rate-limited on the same keys.
+      - RW_API_KEYS_PATH=/bot/_api_keys_discord.json
     volumes:
       - ./database:/bot/database   # shared SQLite database
       - ./logs:/bot/logs           # persistent log files
       - ./templates:/bot/templates # mus.json + role/embed templates (live edits via /verwijdermu must persist)
+      - ./_api_keys_discord.json:/bot/_api_keys_discord.json:ro
     # --testing makes bot.py read TOKEN_TEST and load testing_config.json,
     # matching the Discord application whose client_id is wired up in .env
     # for the /admin OAuth flow.
