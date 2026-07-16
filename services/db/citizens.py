@@ -1041,22 +1041,23 @@ class CitizensMixin:
         return int(row[0]) if row else None
     async def get_weekly_damages_for_users(
         self, user_ids: list[str]
-    ) -> dict[str, tuple[str, float]]:
-        """Return {user_id: (citizen_name, weekly_damage)} for each id in *user_ids*.
+    ) -> dict[str, tuple[str | None, float]]:
+        """Return {user_id: (citizen_name_or_None, weekly_damage)} for each id in *user_ids*.
 
+        citizen_name is None when the DB row has no name stored.
         Users not found in the DB (or with 0 damage) are omitted from the result.
         """
         if not user_ids:
             return {}
         placeholders = ",".join("?" for _ in user_ids)
         sql = (
-            "SELECT user_id, COALESCE(citizen_name, user_id), weekly_damage "
+            "SELECT user_id, citizen_name, weekly_damage "
             f"FROM citizen_weekly_damages WHERE user_id IN ({placeholders})"
         )
-        result: dict[str, tuple[str, float]] = {}
+        result: dict[str, tuple[str | None, float]] = {}
         async with self._conn.execute(sql, user_ids) as cur:
             async for row in cur:
-                result[str(row[0])] = (str(row[1]), float(row[2]))
+                result[str(row[0])] = (str(row[1]) if row[1] else None, float(row[2]))
         return result
 
     async def get_levels_for_users(self, user_ids: list[str]) -> dict[str, int]:
@@ -1072,6 +1073,21 @@ class CitizensMixin:
         async with self._conn.execute(sql, user_ids) as cur:
             async for row in cur:
                 result[str(row[0])] = int(row[1])
+        return result
+
+    async def get_names_for_users(self, user_ids: list[str]) -> dict[str, str]:
+        """Return {user_id: citizen_name} for each id found in citizen_levels."""
+        if not user_ids:
+            return {}
+        placeholders = ",".join("?" for _ in user_ids)
+        sql = (
+            f"SELECT user_id, citizen_name FROM citizen_levels "
+            f"WHERE user_id IN ({placeholders}) AND citizen_name IS NOT NULL"
+        )
+        result: dict[str, str] = {}
+        async with self._conn.execute(sql, user_ids) as cur:
+            async for row in cur:
+                result[str(row[0])] = str(row[1])
         return result
 
     async def get_top_countries_by_population(self, limit: int) -> list[dict]:

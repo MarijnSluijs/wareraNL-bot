@@ -1512,7 +1512,7 @@ class BattleRankingsMixin:
         async with self._conn.execute(
             f"""
             SELECT bh.user_id,
-                   COALESCE(MAX(cl.citizen_name), bh.user_id) AS citizen_name,
+                   MAX(cl.citizen_name) AS citizen_name,
                    SUM(bh.damage) AS total_damage
             FROM battle_hits bh
             LEFT JOIN citizen_levels cl ON cl.user_id = bh.user_id
@@ -1524,5 +1524,5 @@ class BattleRankingsMixin:
             (*user_ids, start_iso, end_iso),
         ) as cur:
             async for row in cur:
-                result[str(row[0])] = (str(row[1]), float(row[2] or 0))
+                result[str(row[0])] = (str(row[1]) if row[1] else None, float(row[2] or 0))
         return result
