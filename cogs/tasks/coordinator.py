@@ -14,7 +14,6 @@ cog modules can access shared resources without creating their own connections:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 
 from discord.ext import commands
@@ -24,6 +23,7 @@ from services.citizen_cache import CitizenCache
 from services.country_utils import country_id as cid_of
 from services.country_utils import extract_country_list
 from services.db import Database
+from services.key_loader import load_api_keys
 
 logger = logging.getLogger("discord_bot")
 
@@ -57,12 +57,7 @@ class ServiceCoordinator(commands.Cog, name="service_coordinator"):
         base_url = config.get("api_base_url", "https://api.example.local")
         db_path = config.get("external_db_path", "database/external.db")
 
-        api_keys = None
-        try:
-            with open("_api_keys.json", "r") as kf:
-                api_keys = json.load(kf).get("keys", [])
-        except Exception:
-            logger.debug("No _api_keys.json found, continuing without API keys")
+        api_keys = load_api_keys()
 
         client = APIClient(base_url=base_url, api_keys=api_keys)
         await client.start()

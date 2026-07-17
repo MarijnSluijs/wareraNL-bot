@@ -1,5 +1,6 @@
 belgium_bot.py
 _api_keys.json
+_api_keys_*.json
 .env_test
 logs/
 docker-compose.testing.yml

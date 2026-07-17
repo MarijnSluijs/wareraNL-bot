@@ -233,7 +233,7 @@ class MuSubscriptionsCog(TaskCogBase, name="mu_subscriptions"):
                 name, weekly = weekly_map[uid]
                 if weekly > 0:
                     level = level_map.get(uid, 0)
-                    rows.append((name, weekly, level))
+                    rows.append((name or "Onbekend", weekly, level))
         rows.sort(key=lambda r: r[1], reverse=True)
 
         if rows:

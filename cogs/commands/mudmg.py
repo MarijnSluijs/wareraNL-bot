@@ -11,9 +11,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional
 from zoneinfo import ZoneInfo
+
+_UID_RE = re.compile(r'^[0-9a-f]{20,}$', re.ASCII)
+
+
+def _looks_like_uid(s: str | None) -> bool:
+    """Return True if *s* is a raw hex user-ID rather than a human-readable name."""
+    return bool(s and _UID_RE.match(s))
 
 import discord
 from discord import app_commands
@@ -138,6 +146,50 @@ def _overview_table(
     )
 
     return "```\n" + "\n".join(lines) + "\n```"
+
+
+def _extract_name_map(resp: object) -> dict[str, str]:
+    """Parse a ranking response into {user_id: citizen_name}, skipping hex-only IDs."""
+    result: dict[str, str] = {}
+    if not isinstance(resp, dict):
+        return result
+    data: object = resp
+    for key in ("result", "data"):
+        if isinstance(data, dict) and key in data:
+            inner = data[key]  # type: ignore[index]
+            if isinstance(inner, dict):
+                data = inner
+    items: list = []
+    if isinstance(data, dict):
+        for key in ("items", "ranking", "rankings", "data", "results"):
+            v = data.get(key)  # type: ignore[union-attr]
+            if isinstance(v, list):
+                items = v
+                break
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        uid = item.get("user")
+        if isinstance(uid, dict):
+            uid = uid.get("_id") or uid.get("id") or uid.get("userId")
+        if not uid or not isinstance(uid, str):
+            continue
+        name: str | None = None
+        for key in ("username", "name", "citizenName"):
+            v = item.get(key)
+            if isinstance(v, str) and v:
+                name = v
+                break
+        user_obj = item.get("user")
+        if not name and isinstance(user_obj, dict):
+            for key in ("username", "name"):
+                v = user_obj.get(key)
+                if isinstance(v, str) and v:
+                    name = v
+                    break
+        if name and not _looks_like_uid(name):
+            result[uid] = name
+    return result
 
 
 def _extract_total_damage_map(resp: object) -> dict[str, float]:
@@ -425,12 +477,14 @@ class MudmgCog(CommandCogBase, name="mudmg"):
         weekly_total, dmg_total = _mu_rankings(mu_data)
         members = _mu_members(mu_data)
 
-        # Build total damage lookup: uid → total damage (only used for current week)
+        # Build total damage lookup and name lookup from the ranking response
         total_map = _extract_total_damage_map(total_resp) if not last_week else {}
+        ranking_name_map = _extract_name_map(total_resp) if total_resp and not last_week else {}
 
-        # Look up per-member damage and levels from the DB
+        # Look up per-member damage, levels, and names from the DB
         weekly_map: dict = {}
         level_map: dict = {}
+        name_map: dict[str, str] = {}
         if self._db and members:
             if last_week:
                 start_iso, end_iso = _nl_week_range(weeks_ago=1)
@@ -447,6 +501,10 @@ class MudmgCog(CommandCogBase, name="mudmg"):
                 level_map = await self._db.get_levels_for_users(members)
             except Exception as exc:
                 logger.warning("mudmg detail: level DB lookup failed: %s", exc)
+            try:
+                name_map = await self._db.get_names_for_users(members)
+            except Exception as exc:
+                logger.warning("mudmg detail: name DB lookup failed: %s", exc)
 
         # Build rows: (citizen_name, weekly_dmg, total_dmg, level), sorted by weekly desc
         rows: list[tuple[str, float, float, int]] = []
@@ -454,11 +512,19 @@ class MudmgCog(CommandCogBase, name="mudmg"):
             name: Optional[str] = None
             weekly = 0.0
             if uid in weekly_map:
-                name, weekly = weekly_map[uid]
+                candidate, weekly = weekly_map[uid]
+                if not _looks_like_uid(candidate):
+                    name = candidate
+            if not name:
+                name = ranking_name_map.get(uid)
+            if not name:
+                n = name_map.get(uid)
+                if not _looks_like_uid(n):
+                    name = n
             total_dmg = total_map.get(uid, 0.0)
             level = level_map.get(uid, 0)
             if name or total_dmg or weekly:
-                rows.append((name or uid, weekly, total_dmg, level))
+                rows.append((name or "Onbekend", weekly, total_dmg, level))
         rows.sort(key=lambda r: r[1], reverse=True)
 
         # Format as a fixed-width code-block table

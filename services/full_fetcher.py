@@ -78,10 +78,20 @@ def _seconds_until_next_aligned_run(minute_offset: int, min_gap_s: int = 300) ->
 def _load_api_keys(path: str) -> list[str]:
     """Same shape as the website's loader, but inlined to keep this script
     runnable without importing the website package (which depends on
-    fastapi etc.)."""
+    fastapi etc.).
+
+    Falls back to the shared _api_keys.json when a dedicated per-service key
+    file (see docker-compose.data-fetcher.yml) hasn't been set up on this
+    machine yet — e.g. a standalone deployment that only runs this fetcher.
+    """
     if not os.path.isfile(path):
-        logger.warning("API keys file not found at %s — running keyless", path)
-        return []
+        fallback = "_api_keys.json"
+        if path != fallback and os.path.isfile(fallback):
+            logger.warning("API keys file %s not found — falling back to %s", path, fallback)
+            path = fallback
+        else:
+            logger.warning("API keys file not found at %s — running keyless", path)
+            return []
     try:
         with open(path, "r", encoding="utf-8") as fp:
             data = json.load(fp)
