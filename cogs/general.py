@@ -245,7 +245,7 @@ class General(commands.Cog, name="general"):
             except discord.HTTPException as e:
                 self.bot.logger.error(f"Failed to send water gif for message {message.id}: {e}")
 
-        # animal word → react with matching emoji, 10% chance each
+        # animal word → react with matching emoji, 20% chance each
         _ANIMAL_REACTIONS: list[tuple[set[str], str]] = [
             ({"haan", "haantje", "kip", "chicken"}, "🐔"),
             ({"hond", "dog"}, "🐶"),
@@ -261,7 +261,7 @@ class General(commands.Cog, name="general"):
         ]
         word_set = set(words)
         for animal_words, emoji_str in _ANIMAL_REACTIONS:
-            if animal_words & word_set and random.random() < 0.10:
+            if animal_words & word_set and random.random() < 0.20:
                 try:
                     await message.add_reaction(emoji_str)
                 except discord.HTTPException:
