@@ -956,6 +956,21 @@ class CitizensMixin:
                 rows.append((str(row[0]), str(row[1])))
         return rows
 
+    async def get_citizens_in_mus(self, mu_names: list[str]) -> list[tuple[str, str, str]]:
+        """Return [(user_id, citizen_name, country_id)] for citizens in any of the given MU names."""
+        if not mu_names:
+            return []
+        placeholders = ",".join("?" for _ in mu_names)
+        sql = (
+            f"SELECT user_id, COALESCE(citizen_name, user_id), country_id "
+            f"FROM citizen_levels WHERE mu_name IN ({placeholders})"
+        )
+        rows: list[tuple[str, str, str]] = []
+        async with self._conn.execute(sql, tuple(mu_names)) as cur:
+            async for row in cur:
+                rows.append((str(row[0]), str(row[1]), str(row[2])))
+        return rows
+
     async def upsert_weekly_damage(
         self,
         user_id: str,
