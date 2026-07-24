@@ -17,8 +17,11 @@ from typing import Optional
 from discord.ext import tasks
 
 from cogs.tasks._base import TaskCogBase
+from cogs.tasks.war_guild_divisions import DIVISION_MUS
 
 logger = logging.getLogger("discord_bot")
+
+_DUTCH_MU_NAMES: list[str] = [name for names in DIVISION_MUS.values() for name in names]
 
 # Wait this long after services are ready before the first run, so the citizen
 # refresh task has time to populate citizen_levels first.
@@ -181,17 +184,32 @@ class DamageTasks(TaskCogBase, name="damage_tasks"):
             len(ranking_by_name),
         )
 
-        # ── 2. Get all NL citizens from DB ────────────────────────────
-        citizens = await self._db.get_nl_citizen_ids(nl_country_id)
-        if not citizens:
+        # ── 2. Get citizens from DB ───────────────────────────────────
+        nl_citizens = await self._db.get_nl_citizen_ids(nl_country_id)
+        if not nl_citizens:
             logger.warning("weekly_damage_refresh: no NL citizens in DB")
             return 0, 0
+
+        # Also include non-NL members of Dutch MUs (e.g. players who switched country)
+        nl_ids = {uid for uid, _ in nl_citizens}
+        du_mu_citizens = await self._db.get_citizens_in_mus(_DUTCH_MU_NAMES)
+        extra = [(uid, name, cid) for uid, name, cid in du_mu_citizens if uid not in nl_ids]
+        if extra:
+            logger.info(
+                "weekly_damage_refresh: %d non-NL citizens in Dutch MUs added to tracking",
+                len(extra),
+            )
+
+        # Merge: NL citizens stored with nl_country_id; others with their own country_id
+        all_citizens: list[tuple[str, str, str]] = [
+            (uid, name, nl_country_id) for uid, name in nl_citizens
+        ] + extra
 
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         updated = 0
         zeroed = 0
 
-        for user_id, citizen_name in citizens:
+        for user_id, citizen_name, country_id in all_citizens:
             # Try ID match first, then fall back to case-insensitive name match
             if user_id in ranking_map:
                 dmg, api_name = ranking_map[user_id]
@@ -203,7 +221,7 @@ class DamageTasks(TaskCogBase, name="damage_tasks"):
                 await self._db.upsert_weekly_damage(
                     user_id=user_id,
                     citizen_name=citizen_name,
-                    country_id=nl_country_id,
+                    country_id=country_id,
                     weekly_damage=0.0,
                     updated_at=now_str,
                 )
@@ -213,7 +231,7 @@ class DamageTasks(TaskCogBase, name="damage_tasks"):
             await self._db.upsert_weekly_damage(
                 user_id=user_id,
                 citizen_name=resolved_name,
-                country_id=nl_country_id,
+                country_id=country_id,
                 weekly_damage=dmg,
                 updated_at=now_str,
             )

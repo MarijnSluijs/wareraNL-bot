@@ -482,18 +482,12 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
                 if member is None or member.bot:
                     continue
 
-                # If the member has no custom nick yet, skip — let the division
-                # sync (war_guild_divisions) handle the initial nick assignment
-                # so it can apply the correct [Dx] prefix.
-                if member.nick is None:
-                    skipped += 1
-                    continue
-
                 # Preserve any [Dx] division prefix applied by war_guild_divisions
-                if m := re.match(r"^\[D\d\] ", member.nick):
+                if member.nick and (m := re.match(r"^\[D\d\] ", member.nick)):
                     target_nick = (m.group(0) + target_nick)[:32]
 
-                if member.nick == target_nick:
+                current = member.nick or member.name
+                if current == target_nick:
                     skipped += 1
                     continue
 
