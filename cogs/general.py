@@ -277,8 +277,8 @@ class General(commands.Cog, name="general"):
             except discord.HTTPException as e:
                 self.bot.logger.error(f"Failed to handle samenvatting papi for {message.id}: {e}")
 
-        # nigeria → money-rain GIF, 20% chance
-        if "nigeria" in words and random.random() < 0.20:
+        # nigeria → money-rain GIF, 1% chance
+        if "nigeria" in words and random.random() < 0.01:
             try:
                 await message.channel.send("https://klipy.com/gifs/money-rain-105")
             except discord.HTTPException as e:
