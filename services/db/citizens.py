@@ -971,6 +971,29 @@ class CitizensMixin:
                 rows.append((str(row[0]), str(row[1]), str(row[2])))
         return rows
 
+    async def get_citizen_countries_by_names(
+        self, names: list[str]
+    ) -> dict[str, str]:
+        """Return {lowercase_name: country_id} for the given citizen names.
+
+        Case-insensitive lookup against citizen_levels.citizen_name.
+        Names not found in the DB are absent from the result.
+        """
+        if not names:
+            return {}
+        lower_names = [n.lower() for n in names]
+        placeholders = ",".join("?" for _ in lower_names)
+        sql = (
+            f"SELECT citizen_name, country_id FROM citizen_levels "
+            f"WHERE lower(citizen_name) IN ({placeholders})"
+        )
+        result: dict[str, str] = {}
+        async with self._conn.execute(sql, tuple(lower_names)) as cur:
+            async for row in cur:
+                if row[0]:
+                    result[row[0].lower()] = str(row[1])
+        return result
+
     async def upsert_weekly_damage(
         self,
         user_id: str,
