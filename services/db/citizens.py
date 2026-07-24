@@ -973,10 +973,11 @@ class CitizensMixin:
 
     async def get_citizen_countries_by_names(
         self, names: list[str]
-    ) -> dict[str, str]:
-        """Return {lowercase_name: country_id} for the given citizen names.
+    ) -> dict[str, tuple[str, str | None]]:
+        """Return {lowercase_name: (country_id, last_login_at)} for the given citizen names.
 
         Case-insensitive lookup against citizen_levels.citizen_name.
+        last_login_at is an ISO timestamp string or None if unknown.
         Names not found in the DB are absent from the result.
         """
         if not names:
@@ -984,14 +985,14 @@ class CitizensMixin:
         lower_names = [n.lower() for n in names]
         placeholders = ",".join("?" for _ in lower_names)
         sql = (
-            f"SELECT citizen_name, country_id FROM citizen_levels "
+            f"SELECT citizen_name, country_id, last_login_at FROM citizen_levels "
             f"WHERE lower(citizen_name) IN ({placeholders})"
         )
-        result: dict[str, str] = {}
+        result: dict[str, tuple[str, str | None]] = {}
         async with self._conn.execute(sql, tuple(lower_names)) as cur:
             async for row in cur:
                 if row[0]:
-                    result[row[0].lower()] = str(row[1])
+                    result[row[0].lower()] = (str(row[1]), row[2])
         return result
 
     async def upsert_weekly_damage(
@@ -1316,4 +1317,3 @@ class CitizensMixin:
         ) as cur:
             row = await cur.fetchone()
             return (str(row[0]), str(row[1])) if row else None
-        return rows
