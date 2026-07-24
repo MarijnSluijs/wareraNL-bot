@@ -655,22 +655,20 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
                         logger.warning("war_sync: auto-link failed for %s: %s", member.name, exc)
 
             # ── Nickname sync ─────────────────────────────────────────────
-            # Only correct the nick when the member already has a custom nick.
-            # If member.nick is None they have never had one set — leave nick
-            # assignment entirely to war_guild_divisions (which applies the
-            # [DN] prefix).  This prevents the hourly sync from setting a bare
-            # in-game name and stripping a [DN] prefix that was just applied.
-            if should_have_ned and member.nick is not None:
+            if should_have_ned:
                 target_nick = discord_to_nick.get(member.id)
                 if target_nick:
-                    # Preserve [DN] prefix — keep it, update only the name part
-                    if m := re.match(r"^\[D\d\] ", member.nick):
+                    # Preserve any existing [DN] division prefix
+                    if member.nick and (m := re.match(r"^\[D\d\] ", member.nick)):
                         target_nick = (m.group(0) + target_nick)[:32]
+                    else:
+                        target_nick = target_nick[:32]
+                    current = member.nick or member.name
                     logger.debug(
                         "war_sync: nick check %s (%d): current=%r target=%r",
-                        member.name, member.id, member.nick, target_nick,
+                        member.name, member.id, current, target_nick,
                     )
-                    if member.nick != target_nick:
+                    if current != target_nick:
                         try:
                             await member.edit(nick=target_nick, reason="war_sync: nickname sync")
                             counts["nicknames_set"] += 1
@@ -1262,7 +1260,7 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
             except Exception:
                 logger.exception("war_sync: startup MU scan failed")
 
-    @tasks.loop(hours=24)
+    @tasks.loop(hours=8)
     async def daily_mu_scan_task(self) -> None:
         try:
             await self.scan_dutch_mus()

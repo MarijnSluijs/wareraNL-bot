@@ -274,7 +274,7 @@ class WarGuildDivisionsCog(TaskCogBase):
             logger.warning("war_guild_divisions: division role IDs not loaded, skipping")
             return counts
 
-        # ── Source 1: citizen_mu_membership (from Dutch MU scan) ──────────────
+        # ── Load citizen_mu_membership (needed for role sync + fallback) ─────────
         all_memberships: list = []
         if self._db:
             try:
@@ -295,28 +295,6 @@ class WarGuildDivisionsCog(TaskCogBase):
         mu_id_to_div, unmatched_mus = self._build_mu_id_div_map(all_memberships)
         counts["unmatched_mus"] = unmatched_mus
 
-        # Build per-citizen lookup: in_game_id → desired division
-        ingame_to_div: dict[str, int] = {}
-        for uid, mu_id, _mu_name, _role in all_memberships:
-            div = mu_id_to_div.get(mu_id)
-            if div is None:
-                continue
-            current = ingame_to_div.get(uid)
-            if current is None or div < current:  # lower division number = higher priority
-                ingame_to_div[uid] = div
-
-        # Safety: if *no* member mapped to any division (e.g. every MU name is
-        # unmatched), skip the member loop entirely rather than removing all roles.
-        if not ingame_to_div:
-            logger.warning(
-                "war_guild_divisions: ingame_to_div is empty after processing %d rows "
-                "— skipping member sync (check DIVISION_MUS names against API names; "
-                "unmatched: %s)",
-                len(all_memberships),
-                ", ".join(sorted(unmatched_mus)) if unmatched_mus else "none",
-            )
-            return counts
-
         # ── Build discord_id → in_game_id from identity_links ─────────────────
         discord_to_ingame: dict[int, str] = {}
         if self._db:
@@ -330,37 +308,55 @@ class WarGuildDivisionsCog(TaskCogBase):
                     "war_guild_divisions: failed to load identity links: %s", exc
                 )
 
-        # ── Source 2: citizen_levels.mu_name (per-citizen fallback) ───────────
-        # Covers people whose MU didn't appear in the Dutch scan (e.g. API returned
-        # a truncated member list) but whose profile still records their current MU.
-        if self._db:
-            missing_ids = [
-                in_game_id
-                for in_game_id in discord_to_ingame.values()
-                if in_game_id not in ingame_to_div
-            ]
-            if missing_ids:
-                try:
-                    fallback_mu_names = await self._db.get_citizen_mu_names_for_users(
-                        missing_ids
+        # ── Source 1 (primary): citizen_levels.mu_name ────────────────────────
+        # Per-citizen profiles are refreshed hourly and update immediately when a
+        # player switches MU.  MU member-list API responses can lag hours after a
+        # switch, so citizen_levels is the more accurate source for division mapping.
+        ingame_to_div: dict[str, int] = {}
+        all_ingame_ids = list(discord_to_ingame.values())
+        if all_ingame_ids and self._db:
+            try:
+                cl_mu_names = await self._db.get_citizen_mu_names_for_users(all_ingame_ids)
+                for uid, mu_name in cl_mu_names.items():
+                    div = _MU_TO_DIV.get(_norm(mu_name))
+                    if div is not None:
+                        ingame_to_div[uid] = div
+                if cl_mu_names:
+                    logger.info(
+                        "war_guild_divisions: citizen_levels resolved %d/%d users to a division",
+                        len(ingame_to_div), len(all_ingame_ids),
                     )
-                    fallback_hits = 0
-                    for uid, mu_name in fallback_mu_names.items():
-                        div = _MU_TO_DIV.get(_norm(mu_name))
-                        if div is not None and uid not in ingame_to_div:
-                            ingame_to_div[uid] = div
-                            fallback_hits += 1
-                        elif div is None and mu_name:
-                            counts["unmatched_mus"].add(mu_name)
-                    if fallback_hits:
-                        logger.info(
-                            "war_guild_divisions: citizen_levels fallback added %d members",
-                            fallback_hits,
-                        )
-                except Exception as exc:
-                    logger.warning(
-                        "war_guild_divisions: citizen_levels fallback failed: %s", exc
-                    )
+            except Exception as exc:
+                logger.warning(
+                    "war_guild_divisions: citizen_levels primary lookup failed: %s", exc
+                )
+
+        # ── Source 2 (fallback): citizen_mu_membership ────────────────────────
+        # Fills gaps where citizen_levels has no MU recorded for a user.
+        fallback_hits = 0
+        for uid, mu_id, _mu_name, _role in all_memberships:
+            if uid in ingame_to_div:
+                continue  # already resolved by citizen_levels
+            div = mu_id_to_div.get(mu_id)
+            if div is not None:
+                ingame_to_div[uid] = div
+                fallback_hits += 1
+        if fallback_hits:
+            logger.info(
+                "war_guild_divisions: citizen_mu_membership fallback added %d members",
+                fallback_hits,
+            )
+
+        # Safety: if *no* member mapped to any division skip to avoid stripping all roles.
+        if not ingame_to_div:
+            logger.warning(
+                "war_guild_divisions: ingame_to_div is empty after processing %d rows "
+                "— skipping member sync (check DIVISION_MUS names against API names; "
+                "unmatched: %s)",
+                len(all_memberships),
+                ", ".join(sorted(unmatched_mus)) if unmatched_mus else "none",
+            )
+            return counts
 
         logger.info(
             "war_guild_divisions: syncing %d guild members, %d have identity links, "
@@ -944,7 +940,7 @@ class WarGuildDivisionsCog(TaskCogBase):
             return
 
         # Trigger a fresh MU scan so citizen_mu_membership is up-to-date
-        war_sync_cog = self.bot.cogs.get("WarSyncCog")
+        war_sync_cog = self.bot.cogs.get("war_sync")
         if war_sync_cog and hasattr(war_sync_cog, "scan_dutch_mus"):
             try:
                 n_mus = await war_sync_cog.scan_dutch_mus()
