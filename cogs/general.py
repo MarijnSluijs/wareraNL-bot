@@ -231,6 +231,13 @@ class General(commands.Cog, name="general"):
             except discord.HTTPException as e:
                 self.bot.logger.error(f"Failed to send belgië gif for message {message.id}: {e}")
 
+        # voet / feet → send feet GIF, 10% chance
+        if any(w in words for w in ("voet", "feet")) and random.random() < 0.10:
+            try:
+                await message.channel.send("https://i.imgur.com/KgHokLq.gif")
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to send voet gif for message {message.id}: {e}")
+
         # fiets / mountainbike → send trauma GIF, 20% chance
         if any(w in words for w in ("fiets", "mountainbike")) and random.random() < 0.20:
             try:
