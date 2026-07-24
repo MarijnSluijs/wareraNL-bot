@@ -238,6 +238,34 @@ class General(commands.Cog, name="general"):
             except discord.HTTPException as e:
                 self.bot.logger.error(f"Failed to send voet gif for message {message.id}: {e}")
 
+        # pindakaas → rapper sjors GIF, 20% chance
+        if "pindakaas" in words and random.random() < 0.20:
+            try:
+                await message.channel.send("https://klipy.com/gifs/rapper-sjors-rapper")
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to send pindakaas gif for message {message.id}: {e}")
+
+        # kaas → ik wil kaas GIF, 20% chance
+        if "kaas" in words and random.random() < 0.20:
+            try:
+                await message.channel.send("https://tenor.com/view/ik-wil-kaas-kaas-ik-ben-ook-een-klant-ook-een-klant-klant-gif-16346845693440188996")
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to send kaas gif for message {message.id}: {e}")
+
+        # mand → mand GIF, 20% chance
+        if "mand" in words and random.random() < 0.20:
+            try:
+                await message.channel.send("https://tenor.com/view/mand-mand-man-internetgekkie-internetgekkies-nederlands-gif-23384628")
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to send mand gif for message {message.id}: {e}")
+
+        # hamster → hamster wheel GIF, 20% chance
+        if "hamster" in words and random.random() < 0.20:
+            try:
+                await message.channel.send("https://klipy.com/gifs/hamster-hamster-wheel-1")
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to send hamster gif for message {message.id}: {e}")
+
         # fiets / mountainbike → send trauma GIF, 20% chance
         if any(w in words for w in ("fiets", "mountainbike")) and random.random() < 0.20:
             try:
@@ -265,6 +293,11 @@ class General(commands.Cog, name="general"):
             ({"paard", "horse"}, "🐴"),
             ({"eend", "duck"}, "🦆"),
             ({"geit", "goat"}, "🐐"),
+            ({"karper"}, "🐟"),
+            ({"kreeft"}, "🦞"),
+            ({"lynx"}, "🐱"),
+            ({"vogel", "bird"}, "🐦"),
+            ({"aap", "monkey"}, "🐒"),
         ]
         word_set = set(words)
         for animal_words, emoji_str in _ANIMAL_REACTIONS:

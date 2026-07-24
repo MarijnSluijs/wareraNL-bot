@@ -4,17 +4,15 @@ Every 6 hours, iterates all members of the production guild who have the
 Netherlands role, checks their current in-game country via citizen_levels,
 and adds or removes the Nigerian role accordingly.
 
-- country_id == NIGERIA_COUNTRY_ID  → add Nigerian role
-- country_id != NIGERIA_COUNTRY_ID  → remove Nigerian role (if they have it)
-- name not found in citizen_levels   → skip (cannot determine country)
-
-Discord members are matched to citizen_levels rows by their current nickname
-(or display name as fallback), which the hourly citizen sync keeps up to date.
+- country_id == NIGERIA_COUNTRY_ID AND logged in within 3 days → add Nigerian role
+- country_id != NIGERIA_COUNTRY_ID OR inactive (no login in 3+ days) → remove role
+- name not found in citizen_levels → skip (cannot determine country)
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands, tasks
@@ -25,6 +23,8 @@ logger = logging.getLogger("discord_bot")
 
 _NIGERIAN_ROLE_ID   = 1530164551163842611
 _NIGERIA_COUNTRY_ID = "683ddd2c24b5a2e114af15fa"
+# Players inactive for longer than this are not considered to be actively fighting
+_INACTIVE_THRESHOLD = timedelta(days=3)
 
 
 class NigeriaRoleSyncCog(TaskCogBase, name="nigeria_role_sync"):
@@ -82,43 +82,57 @@ class NigeriaRoleSyncCog(TaskCogBase, name="nigeria_role_sync"):
             )
             return 0, 0, 0, 0
 
-        # Collect NL members and their display names for batch DB lookup
         nl_members = [m for m in nl_role.members if not m.bot]
         if not nl_members:
+            return 0, 0, 0, 0
+
+        if not self._db:
+            logger.warning("nigeria_role_sync: DB not available")
             return 0, 0, 0, 0
 
         # Build nick → member map (use nick if set, else Discord username)
         nick_to_member: dict[str, discord.Member] = {}
         for member in nl_members:
-            name = (member.nick or member.name).lower()
-            nick_to_member[name] = member
+            nick_to_member[(member.nick or member.name).lower()] = member
 
-        # Batch-lookup current country for each display name
-        if not self._db:
-            logger.warning("nigeria_role_sync: DB not available")
-            return 0, 0, 0, 0
-
+        # Batch-lookup current country + last login for each display name
+        # Returns {lowercase_name: (country_id, last_login_at)}
         country_map = await self._db.get_citizen_countries_by_names(
             list(nick_to_member.keys())
         )
 
+        now = datetime.now(timezone.utc)
         added = removed = skipped = already_correct = 0
 
         for nick_lower, member in nick_to_member.items():
-            country_id = country_map.get(nick_lower)
-            in_nigeria_ingame = country_id == _NIGERIA_COUNTRY_ID
+            entry = country_map.get(nick_lower)
             has_nigerian_role = nigerian_role in member.roles
 
-            if country_id is None:
+            if entry is None:
                 # Can't determine in-game country — leave role as-is
                 skipped += 1
                 continue
 
-            if in_nigeria_ingame and not has_nigerian_role:
+            country_id, last_login_at = entry
+
+            # Determine if the player is actively playing (logged in recently)
+            active = False
+            if last_login_at:
+                try:
+                    login_dt = datetime.fromisoformat(
+                        last_login_at.replace("Z", "+00:00")
+                    )
+                    active = (now - login_dt) < _INACTIVE_THRESHOLD
+                except Exception:
+                    pass
+
+            should_have_role = (country_id == _NIGERIA_COUNTRY_ID) and active
+
+            if should_have_role and not has_nigerian_role:
                 try:
                     await member.add_roles(
                         nigerian_role,
-                        reason="nigeria_role_sync: NL speler vecht in Nigeria",
+                        reason="nigeria_role_sync: NL speler vecht actief in Nigeria",
                     )
                     added += 1
                     logger.info(
@@ -129,11 +143,11 @@ class NigeriaRoleSyncCog(TaskCogBase, name="nigeria_role_sync"):
                     logger.warning(
                         "nigeria_role_sync: no permission to add role to %s", member
                     )
-            elif not in_nigeria_ingame and has_nigerian_role:
+            elif not should_have_role and has_nigerian_role:
                 try:
                     await member.remove_roles(
                         nigerian_role,
-                        reason="nigeria_role_sync: NL speler niet meer in Nigeria",
+                        reason="nigeria_role_sync: NL speler niet meer actief in Nigeria",
                     )
                     removed += 1
                     logger.info(
