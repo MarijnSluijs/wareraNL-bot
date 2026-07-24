@@ -971,6 +971,23 @@ class CitizensMixin:
                 rows.append((str(row[0]), str(row[1]), str(row[2])))
         return rows
 
+    async def get_citizen_countries_by_ids(
+        self, user_ids: list[str]
+    ) -> dict[str, tuple[str, str | None]]:
+        """Return {in_game_user_id: (country_id, last_login_at)} for the given user IDs."""
+        if not user_ids:
+            return {}
+        placeholders = ",".join("?" for _ in user_ids)
+        sql = (
+            f"SELECT user_id, country_id, last_login_at FROM citizen_levels "
+            f"WHERE user_id IN ({placeholders})"
+        )
+        result: dict[str, tuple[str, str | None]] = {}
+        async with self._conn.execute(sql, tuple(user_ids)) as cur:
+            async for row in cur:
+                result[str(row[0])] = (str(row[1]), row[2])
+        return result
+
     async def get_citizen_countries_by_names(
         self, names: list[str]
     ) -> dict[str, tuple[str, str | None]]:

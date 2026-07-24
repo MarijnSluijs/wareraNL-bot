@@ -335,6 +335,15 @@ class IdentityLinksMixin:
                 )
         return results
 
+    async def get_discord_to_ingame_map(self) -> dict[str, str]:
+        """Return {discord_user_id: in_game_user_id} for all identity links (all guilds)."""
+        sql = "SELECT discord_user_id, in_game_user_id FROM identity_links"
+        result: dict[str, str] = {}
+        async with self._conn.execute(sql) as cur:
+            async for row in cur:
+                result[str(row[0])] = str(row[1])
+        return result
+
     async def delete_identity_link(self, discord_user_id: str) -> None:
         """Delete an identity mapping by Discord user ID."""
         await self._conn.execute(
