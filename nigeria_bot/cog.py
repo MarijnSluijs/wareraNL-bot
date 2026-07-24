@@ -40,6 +40,7 @@ EMBASSY_CATEGORY_ID    = 1495693042194317332
 NIGERIAN_ROLE_ID        = 1495692212594409482   # real Nigerian players
 DUTCH_NIGERIAN_ROLE_IDS = [1495692212594409482, 1503755103037817052]  # Dutch players with Nigerian nationality
 DUTCH_ROLE_ID           = 1495692245519699978
+VERIFIED_ROLE_ID        = 1521895797757575168   # given to everyone on approval
 
 STAFF_ROLE_IDS = [1495692303367540767, 1495692272728150016, 1495692461375357009, 1495847731963494400]
 
@@ -514,6 +515,16 @@ async def _execute_approve(
             errors.append(f"Ambassade fout: {exc}")
     else:
         return f"❌ Onbekend ticket type: `{ticket_type}`.", ""
+
+    # Give the Verified role to every approved user, regardless of type
+    verified_role = guild.get_role(VERIFIED_ROLE_ID)
+    if verified_role:
+        try:
+            await user.add_roles(verified_role, reason=f"Geverifieerd door {approver}")
+        except discord.Forbidden:
+            errors.append(f"Geen toegang om rol **{verified_role.name}** toe te voegen.")
+    else:
+        logger.warning("_execute_approve: Verified role %d not found in guild", VERIFIED_ROLE_ID)
 
     if username:
         try:
@@ -1092,6 +1103,14 @@ class VerificationCog(commands.Cog, name="verification"):
                     await user.add_roles(role, reason=f"Handmatig geverifieerd door {interaction.user}")
                 except discord.Forbidden:
                     errors.append(f"Geen toegang om rol **{role.name}** toe te voegen.")
+
+        # Verified role for everyone
+        verified_role = guild.get_role(VERIFIED_ROLE_ID)
+        if verified_role:
+            try:
+                await user.add_roles(verified_role, reason=f"Handmatig geverifieerd door {interaction.user}")
+            except discord.Forbidden:
+                errors.append(f"Geen toegang om rol **{verified_role.name}** toe te voegen.")
 
         # Set nickname
         if username:
