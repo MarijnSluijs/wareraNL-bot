@@ -359,8 +359,11 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
             return stats
 
         in_game_ids = list(desired_mu_role.keys())
+        production_guild_id = str(self.config.get("guild_id", ""))
 
         for guild in self.bot.guilds:
+            if str(guild.id) == production_guild_id:
+                continue
             guild_id = str(guild.id)
             stats["guilds"] += 1
 

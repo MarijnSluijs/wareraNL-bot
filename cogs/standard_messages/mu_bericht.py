@@ -7,7 +7,6 @@ import re
 from typing import Any
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
 
@@ -151,7 +150,7 @@ class MUs(GenerateEmbeds, name="mus"):
     async def mulijst(self, context: Context) -> None:
         if not self.json_data or not self.json_data.get("embeds"):
             embed = discord.Embed(
-                description="MU data niet gevonden. Gebruik `/reloadmus` om opnieuw te laden.",
+                description="MU data niet gevonden.",
                 color=self.get_color("error"),
             )
             await context.send(embed=embed, ephemeral=True)
@@ -163,25 +162,6 @@ class MUs(GenerateEmbeds, name="mus"):
         self.bot.logger.info(
             "MU lijst posted by %s in %s", context.author, channel.name
         )
-
-    @commands.hybrid_command(name="reloadmus", description="Herlaad de MU JSON file.")
-    @commands.is_owner()
-    async def reloadmus(self, context: Context) -> None:
-        try:
-            self.load_json(mus_path(getattr(self.bot, "testing", False)))
-            embed = discord.Embed(
-                description=(
-                    f"✅ MU succesvol herladen! ({len(self.json_data.get('embeds', []))} entries)"
-                ),
-                color=self.get_color("success"),
-            )
-            await context.send(embed=embed)
-            self.bot.logger.info("MU reloaded by %s", context.author)
-        except Exception as e:
-            embed = discord.Embed(
-                description=f"❌ Fout bij herladen: {e}", color=self.get_color("error")
-            )
-            await context.send(embed=embed)
 
     async def _repost_mu_list(self, channel: discord.TextChannel) -> None:
         """Delete previous MU posts, refresh MU info, and post embeds."""
@@ -276,99 +256,6 @@ class MUs(GenerateEmbeds, name="mus"):
             await ctx.send(f"✅ MU-lijst herplaatst in {channel.mention}.")
         except Exception as e:
             await ctx.send(f"❌ Fout bij herplaatsen: {e}")
-
-    async def _mu_id_autocomplete(
-        self, interaction: discord.Interaction, current: str
-    ) -> list[app_commands.Choice[str]]:
-        entries = self._normalize_mu_entries((self.json_data or {}).get("embeds", []))
-        current_lower = current.lower()
-        return [
-            app_commands.Choice(
-                name=f"{entry.get('name') or entry['id']}  [{entry['type']}]",
-                value=entry["id"],
-            )
-            for entry in entries
-            if current_lower in entry["id"].lower()
-            or current_lower in (entry.get("name") or "").lower()
-        ][:25]
-
-    @app_commands.command(
-        name="wijzigmu",
-        description="Wijzig MU type en/of gekoppelde Discord-rol en herplaats de MU-lijst.",
-    )
-    @app_commands.describe(
-        mu_id="De MU ID om te wijzigen",
-        mu_type="Het nieuwe type van de MU",
-        rol="Nieuwe gekoppelde Discord-rol",
-    )
-    @app_commands.autocomplete(mu_id=_mu_id_autocomplete)
-    @app_commands.choices(
-        mu_type=[
-            app_commands.Choice(name="Elite", value="Elite"),
-            app_commands.Choice(name="Eco", value="Eco"),
-            app_commands.Choice(name="Standaard", value="Standaard"),
-        ]
-    )
-    @has_mu_privilige()
-    async def wijzigmu(
-        self,
-        interaction: discord.Interaction,
-        mu_id: str,
-        mu_type: str | None = None,
-        rol: discord.Role | None = None,
-    ) -> None:
-        await interaction.response.defer(ephemeral=True)
-
-        if not self.json_data:
-            self.load_json(mus_path(getattr(self.bot, "testing", False)))
-
-        if not any([mu_type, rol]):
-            await interaction.followup.send(
-                "❌ Geef minimaal één veld op om te wijzigen (mu_type of rol).",
-                ephemeral=True,
-            )
-            return
-
-        entries = self._normalize_mu_entries((self.json_data or {}).get("embeds", []))
-        target = next((e for e in entries if e["id"] == mu_id), None)
-        if target is None:
-            await interaction.followup.send(
-                f"❌ Geen MU gevonden met ID **{mu_id}**.", ephemeral=True
-            )
-            return
-
-        changes: list[str] = []
-        if mu_type:
-            normalized = _normalize_mu_type(mu_type)
-            target["type"] = normalized
-            changes.append(f"type → **{normalized}**")
-        if rol:
-            target["role_id"] = rol.id
-            changes.append(f"rol → {rol.mention}")
-
-        self.json_data = self.json_data or {}
-        self.json_data["embeds"] = entries
-
-        try:
-            self._save_json(mus_path(getattr(self.bot, "testing", False)))
-        except Exception as e:
-            await interaction.followup.send(f"❌ Opslaan mislukt: {e}", ephemeral=True)
-            return
-
-        channel = await self._mu_channel(interaction.channel)
-        try:
-            await self._repost_mu_list(channel)
-        except Exception as e:
-            await interaction.followup.send(
-                f"✅ MU **{mu_id}** bijgewerkt ({', '.join(changes)}), maar herposten mislukt: {e}",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.followup.send(
-            f"✅ MU **{mu_id}** bijgewerkt: {', '.join(changes)}. MU-lijst herplaatst in {channel.mention}.",
-            ephemeral=True,
-        )
 
 
 async def setup(bot) -> None:
