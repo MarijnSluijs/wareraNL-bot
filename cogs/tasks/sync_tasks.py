@@ -225,7 +225,10 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
             )
             return stats
 
+        production_guild_id = str(self.config.get("guild_id", ""))
         for guild in self.bot.guilds:
+            if str(guild.id) == production_guild_id:
+                continue
             guild_id = str(guild.id)
             commandant_role = guild.get_role(commandant_role_id)
             if commandant_role is None:
