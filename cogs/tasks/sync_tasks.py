@@ -518,71 +518,36 @@ class SyncTasks(TaskCogBase, name="sync_tasks"):
             except Exception:
                 logger.exception("citizenship_audit: failed saving snapshot")
 
-        # ── Build report ─────────────────────────────────────────────────────
+        # ── Build delta report (changes only) ───────────────────────────────
+        all_new: list[str] = []
+        all_resolved: list[str] = []
+        _section_labels = {
+            "no_link": "Geen identity koppeling",
+            "wrong_country": "Land veranderd",
+            "too_inactive": "Inactief",
+            "missing_role": "Mist Nederlander-rol",
+        }
+        for key, label in _section_labels.items():
+            new_e, resolved_e = _delta(key)
+            for e in new_e:
+                all_new.append(f"• **[{label}]** {e.lstrip('• ')}")
+            # Don't report "resolved" for inactivity — becoming active again is normal.
+            if key != "too_inactive":
+                for e in resolved_e:
+                    all_resolved.append(f"• **[{label}]** {e.lstrip('• ')}")
+
+        if not all_new and not all_resolved:
+            logger.info("citizenship_audit: no changes since last run — skipping post")
+            return
+
         date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-        lines: list[str] = [
-            f"## 🇳🇱 Burgerschap Audit — {date_str}",
-            "",
-        ]
-
-        # ── Delta section ────────────────────────────────────────────────────
-        if prev_snapshot:
-            all_new: list[str] = []
-            all_resolved: list[str] = []
-            _section_labels = {
-                "no_link": "Geen identity koppeling",
-                "wrong_country": "Land veranderd",
-                "too_inactive": "Inactief",
-                "missing_role": "Mist Nederlander-rol",
-            }
-            for key, label in _section_labels.items():
-                new_e, resolved_e = _delta(key)
-                for e in new_e:
-                    all_new.append(f"• **[{label}]** {e.lstrip('• ')}")
-                # Don't report "resolved" for inactivity — becoming active again
-                # is normal; the absence from the current list is sufficient.
-                if key != "too_inactive":
-                    for e in resolved_e:
-                        all_resolved.append(f"• **[{label}]** {e.lstrip('• ')}")
-
-            lines.append("### 🔄 Wijzigingen t.o.v. vorige audit")
-            if not all_new and not all_resolved:
-                lines.append("*Geen wijzigingen.*")
-            else:
-                if all_new:
-                    lines.append("**Nieuw:**")
-                    lines.extend(all_new)
-                if all_resolved:
-                    lines.append("**Opgelost:**")
-                    lines.extend(all_resolved)
-            lines.append("")
-
-        lines.append("### ❌ Geen identity koppeling")
-        lines.append(
-            "*Nederlander-rol maar geen in-game koppeling — gebruik `/approve` of `/identitylink`.*"
-        )
-        lines.extend(no_link if no_link else ["*Geen problemen gevonden.*"])
-
-        lines.append("")
-        lines.append("### 🌍 Geen Nederlander in-game (land veranderd)")
-        lines.append(
-            "*Heeft de Discord-rol maar is in-game verhuisd.*"
-        )
-        lines.extend(wrong_country if wrong_country else ["*Geen problemen gevonden.*"])
-
-        lines.append("")
-        lines.append(f"### 💤 Inactief ({_INACTIVITY_DAYS}+ dagen)")
-        lines.append(
-            f"*Al {_INACTIVITY_DAYS}+ dagen niet ingelogd — overweeg een bericht of rolverwijdering.*"
-        )
-        lines.extend(too_inactive if too_inactive else ["*Geen problemen gevonden.*"])
-
-        lines.append("")
-        lines.append("### 🎭 In-game Nederlanders zonder Discord rol")
-        lines.append(
-            "*In-game Nederlander maar mist de Discord-rol — controleer hun ticket en gebruik `/approve`.*"
-        )
-        lines.extend(missing_role if missing_role else ["*Geen problemen gevonden.*"])
+        lines: list[str] = [f"## 🇳🇱 Burgerschap Audit — {date_str}", ""]
+        if all_new:
+            lines.append("**Nieuw:**")
+            lines.extend(all_new)
+        if all_resolved:
+            lines.append("**Opgelost:**")
+            lines.extend(all_resolved)
 
         report = "\n".join(lines)
 
