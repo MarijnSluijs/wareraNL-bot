@@ -430,7 +430,7 @@ async def main() -> None:
     db = Database(db_path)
     await db.setup()
     api_keys = _load_api_keys(keys_path)
-    client = APIClient(api_base, api_keys=api_keys)
+    client = APIClient(api_base, api_keys=api_keys, source="data-fetcher")
     await client.start()
 
     stop_event = asyncio.Event()

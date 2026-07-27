@@ -1,12 +1,94 @@
 import asyncio
 import json as _json
 import logging
-from datetime import datetime, timezone
+import os
+import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Sequence
 
 import aiohttp
+import aiosqlite
 
 logger = logging.getLogger("discord_bot")
+
+
+# ── shared API usage tracker ──────────────────────────────────────────────
+# Every real HTTP attempt made by any APIClient instance in this process is
+# recorded here (endpoint, which key was used, status, success/failure) so a
+# hidden dashboard can show call volume, endpoint breakdown and per-key
+# fairness across discord-bot / data-fetcher / rijksoverheid-web. Buffered in
+# memory and flushed periodically so logging never adds latency to real calls.
+_USAGE_DB_PATH = os.getenv("RW_API_USAGE_DB_PATH", "database/api_usage.db")
+_USAGE_FLUSH_INTERVAL = 5.0
+_USAGE_RETENTION_DAYS = 30
+_usage_buffer: list[tuple] = []
+_usage_flush_task: Optional[asyncio.Task] = None
+_usage_last_prune_at: float = 0.0
+
+_USAGE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS api_calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    source TEXT NOT NULL,
+    key_index INTEGER NOT NULL,
+    endpoint TEXT NOT NULL,
+    status INTEGER,
+    ok INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_api_calls_ts ON api_calls(ts);
+CREATE INDEX IF NOT EXISTS idx_api_calls_endpoint ON api_calls(endpoint);
+CREATE INDEX IF NOT EXISTS idx_api_calls_source ON api_calls(source);
+"""
+
+
+def _record_api_call(
+    source: str, key_index: int, endpoint: str, status: Optional[int], ok: bool
+) -> None:
+    _usage_buffer.append((
+        datetime.now(timezone.utc).isoformat(),
+        source,
+        key_index,
+        endpoint,
+        status,
+        1 if ok else 0,
+    ))
+    global _usage_flush_task
+    if _usage_flush_task is None or _usage_flush_task.done():
+        try:
+            loop = asyncio.get_running_loop()
+            _usage_flush_task = loop.create_task(_usage_flush_loop())
+        except RuntimeError:
+            pass  # no running loop (e.g. called outside async context) — will flush on next call
+
+
+async def _usage_flush_loop() -> None:
+    while True:
+        await asyncio.sleep(_USAGE_FLUSH_INTERVAL)
+        await _flush_usage_buffer()
+
+
+async def _flush_usage_buffer() -> None:
+    global _usage_buffer, _usage_last_prune_at
+    if not _usage_buffer:
+        return
+    batch, _usage_buffer = _usage_buffer, []
+    try:
+        os.makedirs(os.path.dirname(_USAGE_DB_PATH) or ".", exist_ok=True)
+        async with aiosqlite.connect(_USAGE_DB_PATH) as conn:
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.executescript(_USAGE_SCHEMA)
+            await conn.executemany(
+                "INSERT INTO api_calls (ts, source, key_index, endpoint, status, ok) VALUES (?, ?, ?, ?, ?, ?)",
+                batch,
+            )
+            now = time.monotonic()
+            if now - _usage_last_prune_at > 3600:
+                cutoff = (datetime.now(timezone.utc) - timedelta(days=_USAGE_RETENTION_DAYS)).isoformat()
+                await conn.execute("DELETE FROM api_calls WHERE ts < ?", (cutoff,))
+                _usage_last_prune_at = now
+            await conn.commit()
+    except Exception:
+        logger.warning("api_client: failed to flush usage stats", exc_info=True)
 
 
 class APIClient:
@@ -25,7 +107,12 @@ class APIClient:
         timeout: int = 30,
         headers: Optional[Dict[str, str]] = None,
         api_keys: Optional[Sequence[str]] = None,
+        source: str = "unknown",
     ) -> None:
+        # Labels every call this client makes in the shared usage tracker
+        # (see _record_api_call below) — e.g. "discord-bot", "data-fetcher",
+        # "rijksoverheid-web". Purely for the /api-usage dashboard.
+        self._source = source
         self.base_url = base_url.rstrip("/")
         self._session: Optional[aiohttp.ClientSession] = None
         self._semaphore = asyncio.Semaphore(concurrency)
@@ -181,6 +268,10 @@ class APIClient:
                         method, url, **call_kwargs
                     ) as resp:
                         status = resp.status
+                        _record_api_call(
+                            self._source, attempt_key_index, path, status,
+                            200 <= status < 300,
+                        )
                         # success
                         if 200 <= status < 300:
                             self._record_success(status)
@@ -291,6 +382,11 @@ class APIClient:
                         self._record_failure(f"HTTP {status}", status=status)
                         resp.raise_for_status()
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                # ClientResponseError (from resp.raise_for_status() above) was
+                # already recorded at the `status = resp.status` point; only
+                # genuine network-level failures (no response at all) are new here.
+                if not isinstance(e, aiohttp.ClientResponseError):
+                    _record_api_call(self._source, attempt_key_index, path, None, False)
                 # 4xx errors are definitive (not transient) — don't retry them
                 if isinstance(e, aiohttp.ClientResponseError) and 400 <= e.status < 500:
                     raise

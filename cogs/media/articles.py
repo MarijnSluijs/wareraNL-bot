@@ -140,7 +140,7 @@ class ArticleScanner(commands.Cog, name="article_scanner"):
         db_path = self.config.get("articles_db_path", "database/articles.db")
         api_keys = load_api_keys()
 
-        self._client = APIClient(base_url=base_url, api_keys=api_keys)
+        self._client = APIClient(base_url=base_url, api_keys=api_keys, source="discord-bot")
         await self._client.start()
         # Reuse the same external.db as the production poller
         self._db = Database(db_path)
