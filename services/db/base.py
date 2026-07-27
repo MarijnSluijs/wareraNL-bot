@@ -29,22 +29,26 @@ class DatabaseBase:
         # blocking each other, which eliminates most "database is locked" errors
         # when the data-fetcher and discord-bot write simultaneously.
         await self._conn.execute("PRAGMA journal_mode=WAL")
-        # Wait up to 30 s when the DB is locked before raising an error
-        # (covers write-write contention between this connection, the other
-        # Database() instances opened by mu/geluk/users/welcome/articles cogs,
-        # and the standalone data-fetcher process — all of which share one
-        # SQLite file and can briefly hold the single writer lock during a
-        # citizen_refresh sweep or schema/migration run).
-        await self._conn.execute("PRAGMA busy_timeout=30000")      # 30 s
+        # Wait up to 60 s when the DB is locked before raising an error.
+        # The full_fetcher stamps citizen_refresh_last_run so the discord bot
+        # skips its own all-countries sweep, eliminating most write-write
+        # contention.  60 s covers the brief NL-refresh overlap that still
+        # happens every hour.
+        await self._conn.execute("PRAGMA busy_timeout=60000")      # 60 s
         # Performance tuning: map the whole DB into the OS page cache (avoids
         # the internal 8 MB page cache round-trip for reads).  2 GB limit is
         # enough for the current 2.3 GB db; the OS maps only what it needs.
         await self._conn.execute("PRAGMA mmap_size=2147483648")   # 2 GB
         # Keep a 64 MB in-process page cache as well (fallback / write buffer).
         await self._conn.execute("PRAGMA cache_size=-65536")       # 64 MB
-        # Checkpoint the WAL every 200 pages instead of 1000 — keeps the WAL
-        # small (currently 760 MB) so reads don't need to scan a huge WAL file.
-        await self._conn.execute("PRAGMA wal_autocheckpoint=200")
+        # Auto-checkpoint every 100 pages (PASSIVE — non-blocking).
+        await self._conn.execute("PRAGMA wal_autocheckpoint=100")
+
+        # RESTART checkpoint on startup: waits for all current readers then
+        # resets the WAL write pointer so pages are reused from the start.
+        # This compacts a bloated WAL (e.g. after a crash or long-running run)
+        # without requiring the WAL file to be absent entirely (TRUNCATE would).
+        await self._conn.execute("PRAGMA wal_checkpoint(RESTART)")
 
         # Run main schema (all CREATE TABLE IF NOT EXISTS)
         schema_path = Path("database/schema.sql")
@@ -111,6 +115,11 @@ class DatabaseBase:
                 await self._conn.commit()
             except Exception:
                 pass  # column already exists — ignore
+
+    async def checkpoint(self, mode: str = "PASSIVE") -> None:
+        """Run a WAL checkpoint. Safe to call even if nothing is pending."""
+        if self._conn:
+            await self._conn.execute(f"PRAGMA wal_checkpoint({mode})")
 
     async def close(self) -> None:
         """Close the database connection."""

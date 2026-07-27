@@ -165,6 +165,12 @@ async def fetch_all_citizen_levels(
     """
     dataset = "all_countries.citizens"
     await db.mark_started(dataset, source="full_fetcher")
+    # Stamp the same key the discord bot checks so it skips its own sweep while
+    # this one is (or was recently) running.
+    await db.set_poll_state(
+        "citizen_refresh_last_run",
+        datetime.now(timezone.utc).isoformat(),
+    )
     started = time.monotonic()
     total = 0
     if limit > 0:
@@ -387,6 +393,23 @@ async def fetch_mu_memberships(cache: CitizenCache, db: Database) -> tuple[int, 
         return 0, 0
 
 
+# ── checkpoint helper ─────────────────────────────────────────────────────────
+
+
+async def _try_checkpoint(db: Database) -> None:
+    """Attempt a TRUNCATE WAL checkpoint after a sweep.
+
+    The no-write window immediately after run_once() is the best opportunity
+    to reset the WAL write pointer and truncate the file.  If readers are
+    still active the checkpoint silently does what it can; non-fatal either way.
+    """
+    try:
+        await db.checkpoint("TRUNCATE")
+        logger.info("WAL TRUNCATE checkpoint completed after sweep")
+    except Exception:
+        logger.warning("WAL TRUNCATE checkpoint failed (non-fatal)", exc_info=True)
+
+
 # ── main loop ─────────────────────────────────────────────────────────────────
 
 
@@ -452,6 +475,7 @@ async def main() -> None:
                 await run_once(client, db, country_limit=country_limit)
             except Exception:  # noqa: BLE001
                 logger.exception("startup sweep failed")
+            await _try_checkpoint(db)
 
         while not stop_event.is_set():
             sleep_s = _seconds_until_next_aligned_run(minute_offset)
@@ -467,6 +491,7 @@ async def main() -> None:
                 await run_once(client, db, country_limit=country_limit)
             except Exception:  # noqa: BLE001
                 logger.exception("scheduled sweep failed")
+            await _try_checkpoint(db)
     finally:
         logger.info("full-fetcher shutting down")
         await client.close()

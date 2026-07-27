@@ -101,13 +101,18 @@ class Users(CommandCogBase, name="users"):
         return best_uid, best_name, best_score, second_score, best_variant
 
     async def _get_db(self):
-        """Return shared external DB, or lazily create one as fallback."""
-        shared = self._db
+        """Return shared external DB, closing any standalone fallback when services become ready."""
+        shared = self._db  # property → bot._ext_db
         if shared is not None:
+            if self._fallback_db is not None:
+                try:
+                    await self._fallback_db.close()
+                except Exception:
+                    pass
+                self._fallback_db = None
             return shared
         if self._fallback_db is None:
             from services.db import Database
-
             db_path = self.config.get("external_db_path", "database/external.db")
             self._fallback_db = Database(db_path)
             await self._fallback_db.setup()
