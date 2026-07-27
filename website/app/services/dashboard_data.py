@@ -22,6 +22,12 @@ class PanelDataService:
     async def _connect(self) -> aiosqlite.Connection:
         conn = await aiosqlite.connect(self.db_path.as_posix())
         conn.row_factory = aiosqlite.Row
+        # Without a busy_timeout these connections fail instantly with
+        # "database is locked" whenever the bot or data-fetcher holds the
+        # writer lock.  This service only reads, so waiting is always
+        # preferable to erroring out.
+        await conn.execute("PRAGMA busy_timeout=15000")
+        await conn.execute("PRAGMA query_only=1")
         return conn
 
     @staticmethod

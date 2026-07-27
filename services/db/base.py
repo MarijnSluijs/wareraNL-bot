@@ -41,14 +41,22 @@ class DatabaseBase:
         await self._conn.execute("PRAGMA mmap_size=2147483648")   # 2 GB
         # Keep a 64 MB in-process page cache as well (fallback / write buffer).
         await self._conn.execute("PRAGMA cache_size=-65536")       # 64 MB
-        # Auto-checkpoint every 100 pages (PASSIVE — non-blocking).
-        await self._conn.execute("PRAGMA wal_autocheckpoint=100")
-
-        # RESTART checkpoint on startup: waits for all current readers then
-        # resets the WAL write pointer so pages are reused from the start.
-        # This compacts a bloated WAL (e.g. after a crash or long-running run)
-        # without requiring the WAL file to be absent entirely (TRUNCATE would).
-        await self._conn.execute("PRAGMA wal_checkpoint(RESTART)")
+        # synchronous=NORMAL is the recommended setting for WAL: commits no
+        # longer fsync the WAL on every transaction (only at checkpoints).
+        # Durability is unchanged for process crashes; only an OS/power loss can
+        # lose the last few transactions — acceptable for a rebuildable cache.
+        # FULL (the default) made every commit wait on an fsync, which held the
+        # single writer lock long enough for other processes to hit their
+        # busy_timeout.
+        await self._conn.execute("PRAGMA synchronous=NORMAL")
+        # Leave wal_autocheckpoint at the 1000-page default.  Lowering it makes
+        # things worse, not better: with ~10 processes on this file there is
+        # never a moment without an active reader, so each PASSIVE checkpoint
+        # copies what it can and then stops at the oldest reader's snapshot
+        # without ever resetting the WAL — more attempts just means more
+        # contention.  Actually resetting the WAL requires the TRUNCATE
+        # checkpoint the data-fetcher runs between sweeps.
+        await self._conn.execute("PRAGMA wal_autocheckpoint=1000")
 
         # Run main schema (all CREATE TABLE IF NOT EXISTS)
         schema_path = Path("database/schema.sql")
