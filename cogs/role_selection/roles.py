@@ -161,6 +161,17 @@ class RoleToggleButton(discord.ui.Button):
         guild = interaction.guild
         member = interaction.user
 
+        # Entry log BEFORE the defer — if this line is missing from the logs
+        # for a click the user reports, the interaction never reached this
+        # callback at all (e.g. no persistent view was registered for this
+        # custom_id after a restart), which is a completely different bug
+        # class than anything raised below.
+        logger.info(
+            "role_toggle: click user=%s(%s) role_id=%s guild=%s",
+            getattr(member, "display_name", member), getattr(member, "id", "?"),
+            self.role_id, getattr(guild, "id", "?"),
+        )
+
         # Ack within Discord's 3 s interaction deadline BEFORE doing any role
         # edits.  add_roles/remove_roles are HTTP calls that can block on a rate
         # limit bucket, and a busy event loop can delay them well past 3 s —
@@ -168,6 +179,7 @@ class RoleToggleButton(discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
 
         if not guild:
+            logger.warning("role_toggle: no guild on interaction for role_id=%s", self.role_id)
             await interaction.followup.send("❌ Guild not found.", ephemeral=True)
             return
 
@@ -177,6 +189,10 @@ class RoleToggleButton(discord.ui.Button):
         )
 
         if not role:
+            logger.warning(
+                "role_toggle: role_id=%s not found in guild=%s (deleted role? stale template?)",
+                self.role_id, guild.id,
+            )
             await interaction.followup.send("❌ Role not found.", ephemeral=True)
             return
 
@@ -195,6 +211,10 @@ class RoleToggleButton(discord.ui.Button):
             # If user clicked a primary they already have -> remove that primary only
             if role in member.roles:
                 await member.remove_roles(role, reason="Self-assign role toggle")
+                logger.info(
+                    "role_toggle: removed role=%s(%s) from user=%s",
+                    role.name, role.id, member.id,
+                )
                 await interaction.followup.send(
                     f"✅ Removed role: {role.name}", ephemeral=True
                 )
@@ -217,6 +237,9 @@ class RoleToggleButton(discord.ui.Button):
             if roles_to_add:
                 await member.add_roles(*roles_to_add, reason="Self-assign role toggle")
                 names = ", ".join(r.name for r in roles_to_add)
+                logger.info(
+                    "role_toggle: added role(s)=%s to user=%s", names, member.id,
+                )
                 await interaction.followup.send(
                     f"✅ Added role(s): {names}", ephemeral=True
                 )
