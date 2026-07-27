@@ -401,19 +401,26 @@ class MU(commands.Cog, name="mu"):
         await interaction.followup.send(embed=embed)
 
     async def _get_db(self):
-        """Return the shared Database instance (from poller), or create one lazily."""
-        if self._db is None:
-            # Prefer the already-open connection held by ProductionChecker to avoid
-            # two separate SQLite connections that would conflict on writes.
-            shared = getattr(self.bot, "_ext_db", None)
-            if shared is not None:
-                self._db = shared
-            else:
-                from services.db import Database
+        """Return the shared Database instance, closing any standalone fallback when services become ready.
 
-                db_path = self.config.get("external_db_path", "database/external.db")
-                self._db = Database(db_path)
-                await self._db.setup()
+        Same-process SQLite connections competing for the WAL write lock return
+        SQLITE_LOCKED (not SQLITE_BUSY), bypassing busy_timeout entirely.  This
+        method ensures only ONE connection to external.db exists in this process.
+        """
+        shared = getattr(self.bot, "_ext_db", None)
+        if shared is not None:
+            if self._db is not None and self._db is not shared:
+                try:
+                    await self._db.close()
+                except Exception:
+                    pass
+                self._db = None
+            return shared
+        if self._db is None:
+            from services.db import Database
+            db_path = self.config.get("external_db_path", "database/external.db")
+            self._db = Database(db_path)
+            await self._db.setup()
         return self._db
 
     async def _eco_mu_autocomplete(

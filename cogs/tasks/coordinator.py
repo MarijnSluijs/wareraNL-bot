@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from services.api_client import APIClient
 from services.citizen_cache import CitizenCache
@@ -39,8 +39,10 @@ class ServiceCoordinator(commands.Cog, name="service_coordinator"):
 
     def cog_load(self) -> None:
         asyncio.create_task(self._ensure_services())
+        self._wal_checkpoint_task.start()
 
     def cog_unload(self) -> None:
+        self._wal_checkpoint_task.cancel()
         event = getattr(self.bot, "_ext_services_ready", None)
         if event:
             event.clear()
@@ -50,6 +52,32 @@ class ServiceCoordinator(commands.Cog, name="service_coordinator"):
         db = getattr(self.bot, "_ext_db", None)
         if db:
             asyncio.create_task(db.close())
+
+    @tasks.loop(hours=4)
+    async def _wal_checkpoint_task(self) -> None:
+        """Periodically run a RESTART checkpoint to keep the WAL file small.
+
+        PASSIVE auto-checkpoint (run after every N pages) can't clear pages
+        that long-running read transactions are holding. Without periodic
+        RESTART checkpoints the WAL grows unboundedly, making every read and
+        write scan more data and increasing lock contention.
+        """
+        db = getattr(self.bot, "_ext_db", None)
+        if db is None or db._conn is None:
+            return
+        try:
+            await db._conn.execute("PRAGMA wal_checkpoint(RESTART)")
+            logger.info("WAL checkpoint (RESTART) completed")
+        except Exception:
+            logger.exception("WAL checkpoint failed")
+
+    @_wal_checkpoint_task.before_loop
+    async def _before_wal_checkpoint(self) -> None:
+        await self.bot.wait_until_ready()
+        # Wait for services so db._conn exists before the first run
+        ready = getattr(self.bot, "_ext_services_ready", None)
+        if ready:
+            await ready.wait()
 
     async def _ensure_services(self) -> None:
         """Initialize DB, API client, and citizen cache; then signal readiness."""

@@ -171,8 +171,16 @@ class DiscordBot(commands.Bot):
     async def init_db(self) -> None:
         ext_db_path = self.config.get("external_db_path", "database/external.db")
         async with aiosqlite.connect(ext_db_path) as db:
-            with open(Path("database") / "schema.sql", encoding="utf-8") as file:
-                await db.executescript(file.read())
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA busy_timeout=60000")
+            schema_sql = (Path("database") / "schema.sql").read_text(encoding="utf-8")
+            for statement in schema_sql.split(";"):
+                stmt = statement.strip()
+                if stmt:
+                    try:
+                        await db.execute(stmt)
+                    except Exception:
+                        pass
             # Idempotent column migrations for DBs created before schema update
             for _sql in [
                 "ALTER TABLE resistance_state ADD COLUMN resistance_max REAL DEFAULT 100.0",

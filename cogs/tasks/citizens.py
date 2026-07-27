@@ -59,21 +59,37 @@ class CitizenTasks(TaskCogBase, name="citizen_tasks"):
         # ── All-countries sweep (guarded by 6-hour cooldown) ──────────
         now_utc = datetime.now(timezone.utc)
         run_full_sweep = True
-        try:
-            last_run_str = await self._db.get_poll_state("citizen_refresh_last_run")
-            if last_run_str:
-                elapsed_h = (
-                    now_utc - datetime.fromisoformat(last_run_str)
-                ).total_seconds() / 3600
-                if elapsed_h < _ALL_COUNTRIES_INTERVAL_H:
-                    logger.info(
-                        "citizen_refresh: skipping full sweep — last run %.1fh ago (< %dh)",
-                        elapsed_h,
-                        _ALL_COUNTRIES_INTERVAL_H,
-                    )
-                    run_full_sweep = False
-        except Exception:
-            logger.exception("citizen_refresh: failed to read last-run state")
+
+        # The standalone data-fetcher container owns the all-countries sweep.
+        # Running it here too means two processes doing hundreds of thousands of
+        # writes to citizen_levels at once, which is the main source of
+        # "database is locked" and of unbounded WAL growth.  Timing-based
+        # coordination is unreliable (whichever process starts first wins the
+        # race), so this is an explicit switch.  Set to true only when no
+        # data-fetcher is deployed.
+        if not self.config.get("enable_all_countries_sweep", False):
+            logger.info(
+                "citizen_refresh: skipping full sweep — data-fetcher owns it "
+                "(set enable_all_countries_sweep=true to run it here)"
+            )
+            run_full_sweep = False
+
+        if run_full_sweep:
+            try:
+                last_run_str = await self._db.get_poll_state("citizen_refresh_last_run")
+                if last_run_str:
+                    elapsed_h = (
+                        now_utc - datetime.fromisoformat(last_run_str)
+                    ).total_seconds() / 3600
+                    if elapsed_h < _ALL_COUNTRIES_INTERVAL_H:
+                        logger.info(
+                            "citizen_refresh: skipping full sweep — last run %.1fh ago (< %dh)",
+                            elapsed_h,
+                            _ALL_COUNTRIES_INTERVAL_H,
+                        )
+                        run_full_sweep = False
+            except Exception:
+                logger.exception("citizen_refresh: failed to read last-run state")
 
         if run_full_sweep:
             await self._do_all_countries_refresh(now_utc)

@@ -3,6 +3,7 @@ This module defines the Roles cog, which provides commands to manage self-assign
 """
 
 import json
+import logging
 import os
 
 import discord
@@ -10,6 +11,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils.checks import has_privileged_role
+
+logger = logging.getLogger("discord_bot")
 
 TEMPLATES_PATH = "templates"
 
@@ -158,10 +161,14 @@ class RoleToggleButton(discord.ui.Button):
         guild = interaction.guild
         member = interaction.user
 
+        # Ack within Discord's 3 s interaction deadline BEFORE doing any role
+        # edits.  add_roles/remove_roles are HTTP calls that can block on a rate
+        # limit bucket, and a busy event loop can delay them well past 3 s —
+        # which surfaces to the user as "… didn't respond in time".
+        await interaction.response.defer(ephemeral=True)
+
         if not guild:
-            await interaction.response.send_message(
-                "❌ Guild not found.", ephemeral=True
-            )
+            await interaction.followup.send("❌ Guild not found.", ephemeral=True)
             return
 
         role = guild.get_role(self.role_id)
@@ -170,9 +177,7 @@ class RoleToggleButton(discord.ui.Button):
         )
 
         if not role:
-            await interaction.response.send_message(
-                "❌ Role not found.", ephemeral=True
-            )
+            await interaction.followup.send("❌ Role not found.", ephemeral=True)
             return
 
         try:
@@ -190,7 +195,7 @@ class RoleToggleButton(discord.ui.Button):
             # If user clicked a primary they already have -> remove that primary only
             if role in member.roles:
                 await member.remove_roles(role, reason="Self-assign role toggle")
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"✅ Removed role: {role.name}", ephemeral=True
                 )
                 return
@@ -212,20 +217,19 @@ class RoleToggleButton(discord.ui.Button):
             if roles_to_add:
                 await member.add_roles(*roles_to_add, reason="Self-assign role toggle")
                 names = ", ".join(r.name for r in roles_to_add)
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"✅ Added role(s): {names}", ephemeral=True
                 )
             else:
-                await interaction.response.send_message(
-                    "✅ No roles to add.", ephemeral=True
-                )
+                await interaction.followup.send("✅ No roles to add.", ephemeral=True)
 
         except discord.Forbidden:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ I don't have permission to manage that role.", ephemeral=True
             )
         except Exception:
-            await interaction.response.send_message(
+            logger.exception("role toggle failed for role_id=%s", self.role_id)
+            await interaction.followup.send(
                 "❌ An error occurred while toggling the role.", ephemeral=True
             )
 

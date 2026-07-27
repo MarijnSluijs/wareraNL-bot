@@ -238,20 +238,33 @@ class VerificationQuestionnaireModal(discord.ui.Modal):
             await interaction.followup.send(msg, ephemeral=True)
 
 
+_welcome_db_fallback = None  # Database | None
+
+
 async def _get_shared_db(client):
-    """Return the bot's shared external DB, lazily creating one as fallback."""
+    """Return the bot's shared external DB, lazily creating one as fallback.
+
+    Never sets client._ext_db — that is the coordinator's job.  If a standalone
+    fallback was opened before services were ready, it is closed and discarded
+    the first time the shared connection becomes available.
+    """
+    global _welcome_db_fallback
     shared = getattr(client, "_ext_db", None)
     if shared is not None:
+        if _welcome_db_fallback is not None:
+            try:
+                await _welcome_db_fallback.close()
+            except Exception:
+                pass
+            _welcome_db_fallback = None
         return shared
-
-    from services.db import Database
-
-    config = getattr(client, "config", {}) or {}
-    db_path = config.get("external_db_path", "database/external.db")
-    db = Database(db_path)
-    await db.setup()
-    client._ext_db = db
-    return db
+    if _welcome_db_fallback is None:
+        from services.db import Database
+        config = getattr(client, "config", {}) or {}
+        db_path = config.get("external_db_path", "database/external.db")
+        _welcome_db_fallback = Database(db_path)
+        await _welcome_db_fallback.setup()
+    return _welcome_db_fallback
 
 
 async def create_verification_channel(
@@ -664,13 +677,18 @@ class Welcome(commands.Cog, name="welcome"):
         return getattr(self.bot, "_ext_client", None)
 
     async def _get_approval_db(self):
-        """Return shared external DB, or lazily create one as fallback."""
+        """Return shared external DB, closing any standalone fallback when services become ready."""
         shared = getattr(self.bot, "_ext_db", None)
         if shared is not None:
+            if self._approval_db is not None:
+                try:
+                    await self._approval_db.close()
+                except Exception:
+                    pass
+                self._approval_db = None
             return shared
         if self._approval_db is None:
             from services.db import Database
-
             db_path = self.config.get("external_db_path", "database/external.db")
             self._approval_db = Database(db_path)
             await self._approval_db.setup()
