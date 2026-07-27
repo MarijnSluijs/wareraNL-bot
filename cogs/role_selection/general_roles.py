@@ -1,6 +1,8 @@
 """General role posting command for the role selection channel."""
 
 import json
+import logging
+import os
 
 import discord
 from discord import app_commands
@@ -18,44 +20,77 @@ from utils.checks import has_privileged_role
 
 from .roles import RoleToggleView, games_roles_path, general_roles_path, load_roles_template
 
+logger = logging.getLogger("discord_bot")
+
 
 class GeneralRoles(commands.Cog, name="general_role_selection"):
     def __init__(self, bot) -> None:
         self.bot = bot
-
-        try:
-            template = load_roles_template(
-                general_roles_path(getattr(bot, "testing", False))
-            )
-            if template.get("embeds"):
-                for embed_data in template["embeds"]:
-                    if embed_data.get("buttons"):
-                        self.bot.add_view(
-                            RoleToggleView(
-                                embed_data["buttons"],
-                                exclusive=bool(embed_data.get("exclusive", False)),
-                            )
-                        )
-            elif template.get("buttons"):
-                self.bot.add_view(RoleToggleView(template["buttons"], exclusive=False))
-        except Exception:
-            pass
-
-        try:
-            games_tpl = load_roles_template(
-                games_roles_path(getattr(bot, "testing", False))
-            )
-            for embed_data in games_tpl.get("embeds", []):
-                if embed_data.get("buttons"):
-                    self.bot.add_view(
-                        RoleToggleView(embed_data["buttons"], exclusive=False)
-                    )
-        except Exception:
-            pass
+        self._register_persistent_views(bot)
 
         # Re-register persistent views for special buttons
         self.bot.add_view(BedrijvenBonusCheckView())
         self.bot.add_view(PillReminderView())
+
+    def _register_persistent_views(self, bot) -> None:
+        """Re-register button views for messages that already exist in Discord.
+
+        This MUST reconstruct a view whose button custom_ids exactly match the
+        live message, or Discord routes the click to nothing at all: no
+        exception, no log line, just a silent timeout for the user.  That
+        failure mode previously went undetected because this method swallowed
+        every exception — logging here is what makes that class of bug visible
+        instead of surfacing only as a user complaint with empty logs.
+        """
+        testing = getattr(bot, "testing", False)
+
+        for kind, path_fn in (
+            ("general", general_roles_path),
+            ("games", games_roles_path),
+        ):
+            path = path_fn(testing)
+            if not os.path.exists(path):
+                logger.warning(
+                    "general_roles: %s template missing at %s (testing=%s) — "
+                    "0 buttons registered, existing message buttons will time out "
+                    "until this file exists",
+                    kind, path, testing,
+                )
+                continue
+            try:
+                template = load_roles_template(path)
+                registered = 0
+                if template.get("embeds"):
+                    for embed_data in template["embeds"]:
+                        buttons = embed_data.get("buttons")
+                        if buttons:
+                            self.bot.add_view(
+                                RoleToggleView(
+                                    buttons,
+                                    exclusive=bool(embed_data.get("exclusive", False)),
+                                )
+                            )
+                            registered += len(buttons)
+                elif template.get("buttons"):
+                    self.bot.add_view(RoleToggleView(template["buttons"], exclusive=False))
+                    registered += len(template["buttons"])
+
+                if registered:
+                    logger.info(
+                        "general_roles: registered %d %s buttons from %s",
+                        registered, kind, path,
+                    )
+                else:
+                    logger.warning(
+                        "general_roles: %s template at %s has 0 buttons — "
+                        "nothing registered for this category",
+                        kind, path,
+                    )
+            except Exception:
+                logger.exception(
+                    "general_roles: failed to register %s persistent views from %s",
+                    kind, path,
+                )
 
     @app_commands.command(
         name="generalroles", description="Post de rol-knoppen in het rollen-kanaal."

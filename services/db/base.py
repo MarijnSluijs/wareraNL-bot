@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -23,7 +24,25 @@ class DatabaseBase:
 
     async def setup(self) -> None:
         """Open the SQLite connection, create all tables, and apply migrations."""
-        self._conn = await aiosqlite.connect(self.path)
+        # isolation_level=None puts the connection in autocommit mode, which is
+        # what makes busy_timeout actually work.
+        #
+        # With the default (isolation_level=""), Python opens an implicit
+        # DEFERRED transaction before DML and holds it until commit().  Because
+        # this connection is shared by every cog, reads and writes from many
+        # concurrent tasks land inside that one long-lived transaction.  If any
+        # other process commits while it is open, the next write has to upgrade
+        # a now-stale read snapshot, and SQLite fails it *immediately* with
+        # SQLITE_BUSY_SNAPSHOT ("database is locked") without ever consulting
+        # busy_timeout — waiting cannot un-stale a snapshot, so no timeout value
+        # can help.  That is the cause of the instant "database is locked"
+        # errors, and no amount of PRAGMA tuning fixes it.
+        #
+        # In autocommit mode each statement is its own transaction that takes
+        # the write lock up front, so contention becomes an ordinary lock wait
+        # that busy_timeout resolves.  Multi-statement writes must use the
+        # transaction() helper below (BEGIN IMMEDIATE), never a bare BEGIN.
+        self._conn = await aiosqlite.connect(self.path, isolation_level=None)
 
         # Enable WAL mode — allows concurrent readers + one writer without
         # blocking each other, which eliminates most "database is locked" errors
@@ -123,6 +142,32 @@ class DatabaseBase:
                 await self._conn.commit()
             except Exception:
                 pass  # column already exists — ignore
+
+    @asynccontextmanager
+    async def transaction(self):
+        """Group multiple writes into one BEGIN IMMEDIATE transaction.
+
+        Required in autocommit mode for batch writes: it takes the write lock up
+        front (so busy_timeout applies and the batch can never hit the stale
+        snapshot upgrade path) and commits once instead of per statement.
+
+        Keep batches small — the writer lock is held for the whole block and
+        every other process is blocked meanwhile.  Callers that write thousands
+        of rows should chunk, not wrap the entire loop.
+        """
+        if self._conn is None:
+            raise RuntimeError("Database.transaction() used before setup()")
+        await self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield self._conn
+        except BaseException:
+            try:
+                await self._conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+        else:
+            await self._conn.execute("COMMIT")
 
     async def checkpoint(self, mode: str = "PASSIVE") -> None:
         """Run a WAL checkpoint. Safe to call even if nothing is pending."""
