@@ -52,61 +52,65 @@ class CitizenCache:
 
         recorded = 0
         pill_tracking_rows: list[tuple] = []
-        pairs = list(zip(user_ids, results))
-        chunk = batch_size * 2
 
-        # Write in chunked BEGIN IMMEDIATE transactions.  The connection is in
-        # autocommit mode, so without this each row would be its own
-        # transaction.  The writer lock is held only for the local upserts of
-        # one chunk (sub-millisecond) and is always released before the progress
-        # edit below — never hold it across a network call, or every other
-        # process blocks for the duration of that HTTP request.
-        for start in range(0, len(pairs), chunk):
-            async with self._db.transaction():
-                for uid, obj in pairs[start : start + chunk]:
-                    lvl = self._extract_level(obj)
-                    mode = self._extract_skill_mode(obj)
-                    reset_at = self._extract_last_skills_reset_at(obj)
-                    last_login = self._extract_last_login_at(obj)
-                    name = self._extract_name(obj)
-                    mu_id, mu_name = self._extract_mu_info(obj)
-                    avatar_url = self._extract_avatar_url(obj)
-                    if lvl is not None:
-                        await self._db.upsert_citizen_level(
-                            uid,
-                            country_id,
-                            lvl,
-                            updated_at,
-                            skill_mode=mode,
-                            last_skills_reset_at=reset_at,
-                            citizen_name=name,
-                            last_login_at=last_login,
-                            mu_id=mu_id,
-                            mu_name=mu_name,
-                            avatar_url=avatar_url,
-                        )
-                        recorded += 1
+        # self._db._conn is ONE connection shared by every concurrent coroutine
+        # in the bot process (every cog/task).  Do NOT wrap this loop in an
+        # explicit BEGIN/COMMIT transaction: each `await` below yields control
+        # back to the event loop, letting unrelated tasks (the WAL checkpoint
+        # loop, event_poll, ethics_watcher, ...) submit their own statements on
+        # this same connection in between — those interleave *inside* the open
+        # transaction, and anything that touches transaction state (a
+        # checkpoint, another COMMIT) can leave it invalid before we reach our
+        # own COMMIT ("cannot commit - no transaction is active").  Under
+        # autocommit (isolation_level=None, set in DatabaseBase.setup), every
+        # individual execute() below is already its own atomic unit dispatched
+        # whole to aiosqlite's single worker thread, so it can't be split by
+        # another task — that per-statement safety is what actually matters
+        # here, not batching multiple statements into one transaction.
+        for i, (uid, obj) in enumerate(zip(user_ids, results)):
+            lvl = self._extract_level(obj)
+            mode = self._extract_skill_mode(obj)
+            reset_at = self._extract_last_skills_reset_at(obj)
+            last_login = self._extract_last_login_at(obj)
+            name = self._extract_name(obj)
+            mu_id, mu_name = self._extract_mu_info(obj)
+            avatar_url = self._extract_avatar_url(obj)
+            if lvl is not None:
+                await self._db.upsert_citizen_level(
+                    uid,
+                    country_id,
+                    lvl,
+                    updated_at,
+                    skill_mode=mode,
+                    last_skills_reset_at=reset_at,
+                    citizen_name=name,
+                    last_login_at=last_login,
+                    mu_id=mu_id,
+                    mu_name=mu_name,
+                    avatar_url=avatar_url,
+                )
+                recorded += 1
 
-                    # Collect pill tracking data (only store non-null buffEndAt to preserve debuff detection)
-                    if isinstance(obj, dict):
-                        _buffs = obj.get("buffs") or {}
-                        _buff_end_at = _buffs.get("buffEndAt")
-                        _exp_ts: int | None = None
-                        if _buff_end_at:
-                            try:
-                                _exp_ts = int(datetime.fromisoformat(_buff_end_at.replace("Z", "+00:00")).timestamp())
-                            except Exception:
-                                pass
-                        pill_tracking_rows.append((uid, country_id, _exp_ts, updated_at))
+            # Collect pill tracking data (only store non-null buffEndAt to preserve debuff detection)
+            if isinstance(obj, dict):
+                _buffs = obj.get("buffs") or {}
+                _buff_end_at = _buffs.get("buffEndAt")
+                _exp_ts: int | None = None
+                if _buff_end_at:
+                    try:
+                        _exp_ts = int(datetime.fromisoformat(_buff_end_at.replace("Z", "+00:00")).timestamp())
+                    except Exception:
+                        pass
+                pill_tracking_rows.append((uid, country_id, _exp_ts, updated_at))
 
-            done = min(start + chunk, len(pairs))
-            if progress_msg:
+            if (i + 1) % (batch_size * 2) == 0 and progress_msg:
+                batch_done = (i + 1) // batch_size
                 try:
                     await progress_msg.edit(
                         content=(
                             f"Refreshing **{country_name}**: "
-                            f"batch {(done + batch_size - 1) // batch_size}/{total_batches} "
-                            f"({done}/{len(user_ids)} citizens)…"
+                            f"batch {batch_done}/{total_batches} "
+                            f"({i + 1}/{len(user_ids)} citizens)…"
                         )
                     )
                 except Exception:
