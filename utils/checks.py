@@ -3,6 +3,8 @@
 import discord
 from discord import app_commands
 
+ADMIN_ROLE_ID: int = 1456410780256702600
+
 # Role IDs allowed to run privileged commands (in addition to the bot owner)
 PRIVILEGED_ROLE_IDS: set[int] = {
     1451180288515506258,  # minister_foreign_affairs / ambassadeur
@@ -13,9 +15,8 @@ PRIVILEGED_ROLE_IDS: set[int] = {
     1458427087189835776,  # commandant
     1475468331896148079,  # bot_ontwikkelaar
     1468230751274401843,  # douane
+    ADMIN_ROLE_ID,        # administrator
 }
-
-ADMIN_ROLE_ID: int = 1456410780256702600
 
 
 def is_owner_or_admin() -> app_commands.check:
@@ -53,8 +54,6 @@ def has_privileged_role() -> app_commands.check:
         if interaction.user.id == bot._owner_id_cached:
             return True
         if interaction.guild and isinstance(interaction.user, discord.Member):
-            if interaction.user.guild_permissions.administrator:
-                return True
             user_role_ids = {r.id for r in interaction.user.roles}
             if user_role_ids & PRIVILEGED_ROLE_IDS:
                 return True

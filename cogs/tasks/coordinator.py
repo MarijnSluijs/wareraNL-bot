@@ -59,7 +59,7 @@ class ServiceCoordinator(commands.Cog, name="service_coordinator"):
 
         api_keys = load_api_keys()
 
-        client = APIClient(base_url=base_url, api_keys=api_keys)
+        client = APIClient(base_url=base_url, api_keys=api_keys, source="discord-bot")
         await client.start()
         db = Database(db_path)
         await db.setup()

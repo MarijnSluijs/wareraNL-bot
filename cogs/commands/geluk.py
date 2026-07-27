@@ -357,7 +357,7 @@ class Geluk(commands.Cog, name="geluk"):
         if self._client is None:
             base_url = self.config.get("api_base_url", "https://api2.warera.io/trpc")
             api_keys = load_api_keys()
-            self._client = APIClient(base_url=base_url, api_keys=api_keys)
+            self._client = APIClient(base_url=base_url, api_keys=api_keys, source="discord-bot")
             await self._client.start()
         return self._client
 
