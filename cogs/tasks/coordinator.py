@@ -68,8 +68,12 @@ class ServiceCoordinator(commands.Cog, name="service_coordinator"):
         try:
             await db._conn.execute("PRAGMA wal_checkpoint(RESTART)")
             logger.info("WAL checkpoint (RESTART) completed")
-        except Exception:
-            logger.exception("WAL checkpoint failed")
+        except Exception as exc:
+            # A RESTART checkpoint needs no writer active anywhere on this
+            # connection; colliding with an in-progress write (another cog's
+            # task, mid-sweep) is expected and self-resolves next cycle — not
+            # a real error, so don't log a full traceback for it.
+            logger.warning("WAL checkpoint skipped this cycle: %s", exc)
 
     @_wal_checkpoint_task.before_loop
     async def _before_wal_checkpoint(self) -> None:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -40,8 +39,15 @@ class DatabaseBase:
         #
         # In autocommit mode each statement is its own transaction that takes
         # the write lock up front, so contention becomes an ordinary lock wait
-        # that busy_timeout resolves.  Multi-statement writes must use the
-        # transaction() helper below (BEGIN IMMEDIATE), never a bare BEGIN.
+        # that busy_timeout resolves.
+        #
+        # Do NOT wrap a loop of awaited writes in an explicit BEGIN/COMMIT to
+        # "batch" them — self._conn is shared by every concurrent coroutine in
+        # the process, and each `await` between BEGIN and COMMIT lets other
+        # tasks interleave their own statements inside that open transaction
+        # (see git history: this caused "cannot commit - no transaction is
+        # active" once a periodic WAL checkpoint collided with an open batch).
+        # Per-statement autocommit is what's actually safe here.
         self._conn = await aiosqlite.connect(self.path, isolation_level=None)
 
         # Enable WAL mode — allows concurrent readers + one writer without
@@ -142,32 +148,6 @@ class DatabaseBase:
                 await self._conn.commit()
             except Exception:
                 pass  # column already exists — ignore
-
-    @asynccontextmanager
-    async def transaction(self):
-        """Group multiple writes into one BEGIN IMMEDIATE transaction.
-
-        Required in autocommit mode for batch writes: it takes the write lock up
-        front (so busy_timeout applies and the batch can never hit the stale
-        snapshot upgrade path) and commits once instead of per statement.
-
-        Keep batches small — the writer lock is held for the whole block and
-        every other process is blocked meanwhile.  Callers that write thousands
-        of rows should chunk, not wrap the entire loop.
-        """
-        if self._conn is None:
-            raise RuntimeError("Database.transaction() used before setup()")
-        await self._conn.execute("BEGIN IMMEDIATE")
-        try:
-            yield self._conn
-        except BaseException:
-            try:
-                await self._conn.execute("ROLLBACK")
-            except Exception:
-                pass
-            raise
-        else:
-            await self._conn.execute("COMMIT")
 
     async def checkpoint(self, mode: str = "PASSIVE") -> None:
         """Run a WAL checkpoint. Safe to call even if nothing is pending."""
