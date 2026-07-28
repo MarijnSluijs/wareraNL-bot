@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import aiohttp
@@ -27,7 +28,15 @@ import aiosqlite
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from nigeria_bot.db import save_link, get_link, get_all_links, get_all_links_full
+from nigeria_bot.db import (
+    add_pending_ticket_deletion,
+    get_all_links,
+    get_all_links_full,
+    get_link,
+    get_pending_ticket_deletions,
+    remove_pending_ticket_deletion,
+    save_link,
+)
 
 logger = logging.getLogger("nigeria_bot.cog")
 
@@ -248,18 +257,84 @@ async def _ensure_embassy_channel(
     return channel
 
 
-async def _close_ticket_later(channel: discord.TextChannel, hours: int = 8) -> None:
-    """Rename the channel to signal it is closed, then delete it after *hours* hours."""
-    try:
-        new_name = f"gesloten-{channel.name}"[:100]
-        await channel.edit(name=new_name, reason="Ticket gesloten, wordt over 8 uur verwijderd")
-    except Exception as exc:
-        logger.warning("_close_ticket_later: could not rename channel %s: %s", channel.id, exc)
-    await asyncio.sleep(hours * 3600)
+async def _close_ticket_later(
+    channel: discord.TextChannel,
+    hours: int = 8,
+    db: aiosqlite.Connection | None = None,
+    *,
+    delete_at: datetime | None = None,
+) -> None:
+    """Rename the channel to signal it is closed, then delete it after *hours* hours.
+
+    The wait is a plain asyncio.sleep() living only in this process's memory —
+    a restart at any point during the 8h window used to lose the deletion
+    forever (channel stays renamed to gesloten-* but nothing ever cleans it
+    up). *delete_at* is persisted to *db* so _reconcile_pending_deletions()
+    (called from on_ready) can resume it after a restart. Pass *delete_at*
+    explicitly when resuming — it skips the rename/persist step, since both
+    already happened before the restart.
+    """
+    if delete_at is None:
+        delete_at = datetime.now(timezone.utc) + timedelta(hours=hours)
+        try:
+            new_name = f"gesloten-{channel.name}"[:100]
+            await channel.edit(name=new_name, reason="Ticket gesloten, wordt over 8 uur verwijderd")
+        except Exception as exc:
+            logger.warning("_close_ticket_later: could not rename channel %s: %s", channel.id, exc)
+        if db is not None:
+            try:
+                await add_pending_ticket_deletion(db, str(channel.id), delete_at.isoformat())
+            except Exception:
+                logger.warning(
+                    "_close_ticket_later: could not persist pending deletion for %s", channel.id
+                )
+
+    remaining = (delete_at - datetime.now(timezone.utc)).total_seconds()
+    if remaining > 0:
+        await asyncio.sleep(remaining)
     try:
         await channel.delete(reason=f"Ticket automatisch verwijderd na {hours} uur")
     except Exception as exc:
         logger.warning("_close_ticket_later: could not delete channel %s: %s", channel.id, exc)
+        return  # leave the pending record — the next startup reconciliation retries it
+    if db is not None:
+        try:
+            await remove_pending_ticket_deletion(db, str(channel.id))
+        except Exception:
+            logger.warning(
+                "_close_ticket_later: could not clear pending deletion for %s", channel.id
+            )
+
+
+async def _reconcile_pending_deletions(bot: commands.Bot, db: aiosqlite.Connection) -> None:
+    """Resume ticket-deletion timers that were still pending when the bot last stopped.
+
+    Called once from on_ready. Channels already past their delete_at are
+    deleted immediately; others are rescheduled for their remaining wait.
+    """
+    try:
+        records = await get_pending_ticket_deletions(db)
+    except Exception:
+        logger.exception("_reconcile_pending_deletions: failed to read pending deletions")
+        return
+    if not records:
+        return
+    logger.info("_reconcile_pending_deletions: resuming %d pending ticket deletion(s)", len(records))
+    for channel_id, delete_at_str in records:
+        try:
+            delete_at = datetime.fromisoformat(delete_at_str)
+        except Exception:
+            delete_at = datetime.now(timezone.utc)  # malformed record — delete immediately
+        channel = bot.get_channel(int(channel_id))
+        if channel is None:
+            # Channel is already gone (deleted manually, or bot no longer sees
+            # its guild) — nothing left to clean up but the stale record.
+            try:
+                await remove_pending_ticket_deletion(db, channel_id)
+            except Exception:
+                pass
+            continue
+        asyncio.create_task(_close_ticket_later(channel, db=db, delete_at=delete_at))
 
 
 async def _create_ticket(
@@ -573,7 +648,8 @@ class DenyReasonModal(discord.ui.Modal, title="Verificatie afwijzen"):
             + "\nDit kanaal wordt over 8 uur verwijderd."
         )
         await interaction.followup.send("✅ Ticket afgewezen.", ephemeral=True)
-        asyncio.create_task(_close_ticket_later(interaction.channel, hours=8))
+        db = getattr(interaction.client, "nigeria_db", None)
+        asyncio.create_task(_close_ticket_later(interaction.channel, hours=8, db=db))
 
 
 class TicketActionView(discord.ui.View):
@@ -627,7 +703,7 @@ class TicketActionView(discord.ui.View):
             f"✅ **Goedgekeurd** door {interaction.user.mention}\nDit kanaal wordt over 8 uur verwijderd."
         )
         await interaction.followup.send(result, ephemeral=True)
-        asyncio.create_task(_close_ticket_later(interaction.channel, hours=8))
+        asyncio.create_task(_close_ticket_later(interaction.channel, hours=8, db=db))
 
     @discord.ui.button(
         label="❌ Afwijzen",
@@ -814,7 +890,7 @@ class VerificationCog(commands.Cog, name="verification"):
             f"✅ **Goedgekeurd** door {interaction.user.mention}\nDit kanaal wordt over 8 uur verwijderd."
         )
         await interaction.followup.send(result, ephemeral=True)
-        asyncio.create_task(_close_ticket_later(ticket, hours=8))
+        asyncio.create_task(_close_ticket_later(ticket, hours=8, db=self._db))
 
     # ── /deny ─────────────────────────────────────────────────────────────────
 
@@ -837,7 +913,7 @@ class VerificationCog(commands.Cog, name="verification"):
         await interaction.followup.send(
             f"✅ Verificatie van {user.mention} afgewezen.", ephemeral=True
         )
-        asyncio.create_task(_close_ticket_later(ticket, hours=8))
+        asyncio.create_task(_close_ticket_later(ticket, hours=8, db=self._db))
 
     # ── /setup_ambassades ─────────────────────────────────────────────────────
 

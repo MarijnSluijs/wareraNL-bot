@@ -1234,6 +1234,100 @@ class Owner(commands.Cog, name="owner"):
         for chunk in chunks:
             await interaction.channel.send(chunk)  # type: ignore[union-attr]
 
+    @app_commands.command(
+        name="nl-niet-in-party",
+        description="Toont actieve Nederlandse spelers (level ≥20, actief ≤72u) zonder partij.",
+    )
+    @app_commands.describe(min_level="Minimaal level (standaard 20)")
+    @has_privileged_role()
+    async def nl_niet_in_party(
+        self, interaction: discord.Interaction, min_level: int = 20
+    ) -> None:
+        """List active NL citizens with level >= min_level, active in last 72h, without a party (via API)."""
+        await interaction.response.defer()
+
+        db = getattr(self.bot, "_ext_db", None)
+        client = getattr(self.bot, "_ext_client", None)
+        if not db:
+            await interaction.followup.send("❌ Database niet beschikbaar.")
+            return
+        if not client:
+            await interaction.followup.send("❌ API client niet beschikbaar.")
+            return
+
+        nl_country_id: str = self.bot.config.get("nl_country_id", "6813b6d446e731854c7ac7a0")
+
+        rows = await db.get_active_nl_citizens(
+            nl_country_id, min_level=min_level, max_hours_inactive=72
+        )
+
+        if not rows:
+            await interaction.followup.send(
+                f"✅ Geen actieve Nederlandse spelers (level ≥{min_level}, actief ≤72u) gevonden.",
+            )
+            return
+
+        await interaction.followup.send(
+            f"⏳ {len(rows)} spelers ophalen via API, even geduld..."
+        )
+
+        sem = asyncio.Semaphore(10)
+
+        async def _check_party(uid: str, name: str, lvl: int) -> tuple[str, str, int] | None:
+            async with sem:
+                try:
+                    resp = await client.get(
+                        "/user.getUserById",
+                        params={"input": json.dumps({"userId": uid})},
+                    )
+                except Exception:
+                    return None
+            # Unwrap tRPC envelope
+            data = resp
+            if isinstance(resp, dict):
+                for key in ("result", "data"):
+                    v = resp.get(key)
+                    if isinstance(v, dict):
+                        data = v.get("data", v)
+                        break
+            if not isinstance(data, dict):
+                return None
+            # No "party" field (or null/empty) means not in a party
+            party_val = data.get("party")
+            if not party_val:
+                return (uid, name, lvl)
+            return None
+
+        results = await asyncio.gather(*[_check_party(uid, name, lvl) for uid, name, lvl in rows])
+        no_party = [r for r in results if r is not None]
+
+        if not no_party:
+            await interaction.channel.send(  # type: ignore[union-attr]
+                f"✅ Alle actieve Nederlandse spelers (level ≥{min_level}, actief ≤72u) zitten in een partij."
+            )
+            return
+
+        lines = [
+            f"• [{name}](https://app.warera.io/user/{uid}) — level {lvl}"
+            for uid, name, lvl in no_party
+        ]
+        header = (
+            f"**Nederlandse spelers level ≥{min_level} zonder partij "
+            f"(actief in laatste 72u, {len(no_party)} van {len(rows)} totaal):**\n"
+        )
+        chunks: list[str] = []
+        current = header
+        for line in lines:
+            if len(current) + len(line) + 1 > 1900:
+                chunks.append(current)
+                current = ""
+            current += line + "\n"
+        if current:
+            chunks.append(current)
+
+        for chunk in chunks:
+            await interaction.channel.send(chunk)  # type: ignore[union-attr]
+
     @commands.command(
         name="logs",
         description="Stuur de laatste N regels van het logbestand (standaard 30).",
