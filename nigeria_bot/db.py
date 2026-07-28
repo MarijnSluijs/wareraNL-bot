@@ -27,8 +27,50 @@ async def open_db(path: str = DB_PATH) -> aiosqlite.Connection:
         )
     except Exception:
         pass  # column already exists
+
+    # Ticket deletions are scheduled with asyncio.sleep() in-process; this
+    # table lets a restart mid-wait resume (or immediately run) any deletion
+    # that was still pending, instead of silently losing it forever.
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS pending_ticket_deletions (
+            channel_id TEXT PRIMARY KEY,
+            delete_at  TEXT NOT NULL
+        )
+    """)
     await conn.commit()
     return conn
+
+
+async def add_pending_ticket_deletion(
+    conn: aiosqlite.Connection, channel_id: str, delete_at: str
+) -> None:
+    """Record a ticket channel that should be deleted at *delete_at* (ISO timestamp)."""
+    await conn.execute(
+        "INSERT OR REPLACE INTO pending_ticket_deletions (channel_id, delete_at) VALUES (?, ?)",
+        (channel_id, delete_at),
+    )
+    await conn.commit()
+
+
+async def remove_pending_ticket_deletion(conn: aiosqlite.Connection, channel_id: str) -> None:
+    """Remove a pending deletion record (called once the channel is actually gone)."""
+    await conn.execute(
+        "DELETE FROM pending_ticket_deletions WHERE channel_id = ?", (channel_id,)
+    )
+    await conn.commit()
+
+
+async def get_pending_ticket_deletions(
+    conn: aiosqlite.Connection,
+) -> list[tuple[str, str]]:
+    """Return all (channel_id, delete_at) pairs still pending."""
+    rows: list[tuple[str, str]] = []
+    async with conn.execute(
+        "SELECT channel_id, delete_at FROM pending_ticket_deletions"
+    ) as cur:
+        async for row in cur:
+            rows.append((row[0], row[1]))
+    return rows
 
 
 async def save_link(

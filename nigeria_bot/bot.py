@@ -32,6 +32,7 @@ class NigeriaBot(commands.Bot):
         intents = discord.Intents.default()
         intents.members = True
         super().__init__(command_prefix="!", intents=intents)
+        self._reconciled_deletions = False
 
     async def setup_hook(self) -> None:
         # Open persistent DB
@@ -56,6 +57,12 @@ class NigeriaBot(commands.Bot):
 
     async def on_ready(self) -> None:
         logger.info("Nigeria bot ready — logged in as %s", self.user)
+        # on_ready can fire again on gateway reconnects — only resume pending
+        # ticket deletions once per process, not on every reconnect.
+        if not self._reconciled_deletions:
+            self._reconciled_deletions = True
+            from nigeria_bot.cog import _reconcile_pending_deletions
+            await _reconcile_pending_deletions(self, self.nigeria_db)
 
 
 def main() -> None:
