@@ -280,6 +280,49 @@ class General(commands.Cog, name="general"):
             except discord.HTTPException as e:
                 self.bot.logger.error(f"Failed to send water gif for message {message.id}: {e}")
 
+        # Frysk (Frisian) word detected → "praat Nederlands met me" GIF, always
+        # Every word below is spelled differently from its standard-Dutch
+        # equivalent (and isn't a common English word either), so this only
+        # fires on genuine Frisian, not on normal Dutch/English chat — e.g.
+        # "tsiis" (not "kaas"), "hûs" (not "huis"), "wêr" (not "waar").
+        # Deliberately excludes short lookalikes that DO collide with real
+        # words: "wol" (Dutch "wool"), "net" (Dutch "just/network"), "leaf"
+        # (English "leaf"), "giet" (Dutch "gieten" conjugation), "fries"
+        # (Dutch for "Frisian" and for French fries), "der" (dêr, stripped —
+        # collides with the formal/archaic Dutch genitive article, as in
+        # "Koningin der Nederlanden"), "freed" (Dutch/English "freed" —
+        # excluded even though "freed" itself is Frisian for Friday), "hân"
+        # stripped to "han" (collides with the name "Han").
+        _FRYSK_WORDS = {
+            "moarn", "jun", "goeiemoarn", "goeiejun", "wolkom", "hjoed",
+            "juster", "tankewol", "asjebleaft", "hus", "frou", "wurk",
+            "libben", "tige", "mem", "heit", "skoalle", "wetter", "brea",
+            "moai", "wer", "hjir", "buter", "griene", "grien",
+            "tsiis", "sizze", "gjin", "oprjochte",
+            # +31: numbers, days, seasons, body, animals, colors, verbs
+            "twa", "trije", "fjouwer", "fiif", "seis", "san",
+            "snein", "moandei", "tiisdei", "woansdei", "sneon",
+            "simmer", "hjerst", "maitiid", "dei", "wike",
+            "holle", "foet", "hynder", "ljip",
+            "blau", "giel", "swart", "wyt", "grut", "lyts",
+            "gean", "sjen", "prate", "hald", "hja",
+        }
+        # Normalise diacritics (û→u, ê→e, etc.) so "wêr"/"wer", "hûs"/"hus"
+        # both match regardless of how the diacritic-less keyboard user typed it.
+        _frysk_normalized = (
+            content.lower()
+            .replace("û", "u").replace("ê", "e").replace("ô", "o")
+            .replace("â", "a").replace("î", "i")
+            .split()
+        )
+        if _FRYSK_WORDS & set(_frysk_normalized):
+            try:
+                await message.channel.send(
+                    "https://tenor.com/view/praat-nederlands-met-me-gif-15078166435843314989"
+                )
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to send Frysk gif for message {message.id}: {e}")
+
         # animal word → react with matching emoji, 20% chance each
         _ANIMAL_REACTIONS: list[tuple[set[str], str]] = [
             ({"haan", "haantje", "kip", "chicken"}, "🐔"),
