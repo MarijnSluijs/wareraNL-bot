@@ -334,13 +334,22 @@ class Roles(commands.Cog, name="roles"):
             return
 
         try:
-            await user.add_roles(
-                ambassadeur_role,
-                reason="Toegewezen door Minister van Buitenlandse Zaken",
-            )
-            await interaction.response.send_message(
-                f"✅ {user.mention} is nu een Ambassadeur!"
-            )
+            if ambassadeur_role in user.roles:
+                await user.remove_roles(
+                    ambassadeur_role,
+                    reason="Verwijderd door Minister van Buitenlandse Zaken",
+                )
+                await interaction.response.send_message(
+                    f"✅ De ambassadeurrol is verwijderd van {user.mention}."
+                )
+            else:
+                await user.add_roles(
+                    ambassadeur_role,
+                    reason="Toegewezen door Minister van Buitenlandse Zaken",
+                )
+                await interaction.response.send_message(
+                    f"✅ {user.mention} is nu een Ambassadeur!"
+                )
         except discord.Forbidden:
             await interaction.response.send_message(
                 "❌ I don't have permission to manage that role.", ephemeral=True
