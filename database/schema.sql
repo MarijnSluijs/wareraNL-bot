@@ -670,6 +670,7 @@ CREATE TABLE IF NOT EXISTS mu_auction_win_subs (
     initialized INTEGER NOT NULL DEFAULT 0,
     cutoff_at  TEXT,
     added_at   TEXT NOT NULL,
+    ping_enabled INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (channel_id, mu_name)
 );
 

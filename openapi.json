@@ -3,7 +3,7 @@
   "info": {
     "title": "WarEra API",
     "version": "0.17.4-beta",
-    "description": "WarEra tRPC API endpoints. ⚠️ Please notice that every call is in GET and not POST."
+    "description": "WarEra tRPC API endpoints. \u26a0\ufe0f Please notice that every call is in GET and not POST."
   },
   "paths": {
     "/alliance.getById": {
@@ -16,7 +16,17 @@
         "operationId": "alliance.getById",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "_id": "6a32e1c81a99ca188512f94f",
+                  "name": "Custodes Aeterni",
+                  "scheme": "yellow",
+                  "mapAccent": "light"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -51,7 +61,28 @@
         "operationId": "alliance.getManyPaginated",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "_id": "6a32e1c81a99ca188512f94f",
+                      "name": "Custodes Aeterni",
+                      "scheme": "yellow",
+                      "mapAccent": "light"
+                    },
+                    {
+                      "_id": "6a2c6d23c8ffa2f04a6a19ac",
+                      "name": "The Military Tourists",
+                      "scheme": "pink",
+                      "mapAccent": "normal"
+                    }
+                  ],
+                  "nextCursor": "Wed Jun 10 2026 23:05:42 GMT+0000 (Coordinated Universal Time)|6a29edc6ee031e842c839766"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -88,7 +119,25 @@
         "operationId": "article.getArticleById",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "stats": {
+                    "likes": 7,
+                    "dislikes": 2,
+                    "score": 5,
+                    "views": 43,
+                    "comments": 0,
+                    "subs": 0,
+                    "tips": 0
+                  },
+                  "_id": "699cc9392c98b7a41b568cf1",
+                  "title": "EL MUNDO SE ESTA MOVIENDO ",
+                  "content": "<p class=\"tiptap-block\" style=\"text-align: left;\">El mundo est\u00e1 haciendo sus movimientos y qui\u00e9n sobre sale aqu\u00ed es los EEUU quien en apoyo a sus aliados en las \u00faltimas 24hr derrotaron y tomaron territorio Aleman y Espa\u00f1ol, pero no sin esfuerzo ya que Venezuela y aliados resistieron hasta el final.</p><p class=\"tiptap-block\" style=\"text-align: left;\"></p><p class=\"tiptap-block\" style=\"text-align: left;\">Venezuela en respuesta a esto decide iniciar un ataque para recuperar parte de su territorio y como era de esperarse los aliados de Colombia y EEUU toman parte en la batalla y se niegan a ceder un palmo de tierra.</p><p class=\"tiptap-block\" style=\"text-align: left;\"></p><p class=\"tiptap-block\" style=\"text-align: left;\">Mientras otras naciones aprovechan que la principal batalla se centra en territorio Venezolano para iniciar ataques simult\u00e1neos para recuperar tambi\u00e9n sus territorios que fueron tomados por EEUU, como lo son, Belice, Trinidad y Tobago y Dakar, pero contrario a lo que muchos se esperaban los EEUU se muestra fuerte y dominante, marcando una gran ventaja ante sus enemigos, parece estar dispuesto no solo a defenderse sino a aplastar y romper voluntades.</p><p class=\"tiptap-block\" style=\"text-align: left;\"></p><p class=\"tiptap-block\" style=\"text-align: left;\">El resto del mundo estalla en batallas, por todo \u00c1frica, este de Asia, Europa y centro Am\u00e9rica.</p><p class=\"tiptap-block\" style=\"text-align: left;\"></p><p class=\"tiptap-block\" style=\"text-align: left;\"></p><p class=\"tiptap-block\" style=\"text-align: left;\"></p><p class=\"tiptap-block\" style=\"text-align: left;\"></p>"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -122,7 +171,24 @@
         "operationId": "article.getArticleLiteById",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "_id": "699cc9392c98b7a41b568cf1",
+                  "title": "EL MUNDO SE ESTA MOVIENDO ",
+                  "stats": {
+                    "likes": 7,
+                    "dislikes": 2,
+                    "score": 5,
+                    "views": 43,
+                    "comments": 0,
+                    "subs": 0,
+                    "tips": 0
+                  }
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -156,7 +222,44 @@
         "operationId": "article.getArticlesPaginated",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "stats": {
+                        "likes": 7,
+                        "dislikes": 2,
+                        "score": 5,
+                        "views": 42,
+                        "comments": 0,
+                        "subs": 0,
+                        "tips": 0
+                      },
+                      "_id": "699cc9392c98b7a41b568cf1",
+                      "title": "EL MUNDO SE ESTA MOVIENDO ",
+                      "content": "<p class=\"tiptap-block\" style=\"text-align: left;\">El mundo est\u00e1 haciendo sus movimientos y qui\u00e9n sobre sale aqu\u00ed es los EEUU quien en apoyo a sus aliados en las \u00faltimas 24hr derrotaron y tomaron territorio Aleman y Espa\u00f1ol, pero no sin esfuerzo ya que Venezuela y aliados resistieron hasta el final.</p><p class=\"tiptap-block\" style=\"text-align: left;\"></p><p class=\"tiptap-block\" style=\"text-align: left;\">Venezuela en respuesta a esto decide iniciar un ataque para recuperar parte de su territorio y como era de esperarse los aliados de Colombia y EEUU toman parte en la batalla y se niegan a ceder un palmo de tierra.</p><p class=\"tiptap-block\" style=\"text-align: left;\"></p><p class=\"tiptap-block\" style=\"text-align: left;\">Mientras otras naciones aprovechan que la principal batalla se centra en territorio Venezolano para iniciar ataques simult\u00e1neos para recuperar tambi\u00e9n sus territorios que fueron tomados por EEUU, como lo son, Belice, Trinidad y Tobago y Dakar, pero contrario a lo que muchos se esperaban los EEUU se muestra fuerte y dominante, marcando una gran ventaja ante sus enemigos, parece estar dispuesto no solo a defenderse sino a aplastar y romper voluntades.</p><p class=\"tiptap-block\" style=\"text-align: left;\"></p><p class=\"tiptap-block\" style=\"text-align: left;\">El resto del mundo estalla en batallas, por todo \u00c1frica, este de Asia, Europa y centro Am\u00e9rica.</p><p class=\"tiptap-block\" style=\"text-align: left;\"></p><p class=\"tiptap-block\" style=\"text-align: left;\"></p><p class=\"tiptap-block\" style=\"text-align: left;\"></p><p class=\"tiptap-block\" style=\"text-align: left;\"></p>"
+                    },
+                    {
+                      "stats": {
+                        "likes": 15,
+                        "dislikes": 0,
+                        "score": 15,
+                        "views": 57,
+                        "comments": 2,
+                        "subs": 0,
+                        "tips": 2
+                      },
+                      "_id": "699cd02342678b3c0cb09265",
+                      "title": "\ud83d\udccc\u200bVenezuelan Revolution \\ \u062b\u0648\u0631\u0629 \u0641\u0646\u0632\u0648\u064a\u0644\u0627\ud83d\udccc\u200b",
+                      "content": "<img class=\"tiptap-image\" src=\"https://i.ibb.co/d0TXmNWD/image.gif\" alt=\"\u0627\u062e\u0628\u0627\u0631\"><p class=\"tiptap-block\" style=\"text-align: left;\">\ud83d\udd25 \u062b\u0648\u0631\u0629 \u0641\u0646\u0632\u0648\u064a\u0644\u0627 \u0636\u062f \u0643\u0648\u0644\u0648\u0645\u0628\u064a\u0627 \ud83d\udd25<br>\ud83d\udd25 Venezuelan Revolution against Colombia\ud83d\udd25<br></p><img class=\"tiptap-image\" src=\"https://i.ibb.co/Rk8xHW08/8-D382-F8-E-9271-4162-963-C-9-BD6-A9-E66-B3-D.png\" alt=\"8-D382-F8-E-9271-4162-963-C-9-BD6-A9-E66-B3-D\"><hr><p class=\"tiptap-block\" style=\"text-align: left;\">\u0627\u0644\u0645\u0639\u0627\u0631\u0643 \u062a\u0634\u062a\u0639\u0644 \u0639\u0644\u0649 \u0627\u0644\u062d\u062f\u0648\u062f\u060c \u0623\u0635\u0648\u0627\u062a \u0627\u0644\u0645\u062f\u0627\u0641\u0639 \u0644\u0627 \u062a\u0647\u062f\u0623\u060c \u0648\u0627\u0644\u0633\u0645\u0627\u0621 \u062a\u0645\u062a\u0644\u0626 \u0628\u062f\u062e\u0627\u0646 \u0627\u0644\u062d\u0631\u0628. \u0641\u0646\u0632\u0648\u064a\u0644\u0627 \u0623\u0639\u0644\u0646\u062a \u062b\u0648\u0631\u062a\u0647\u0627 \u0636\u062f \u0643\u0648\u0644\u0648\u0645\u0628\u064a\u0627\u060c \u0645\u0639\u062a\u0645\u062f\u0629\u064b \u0639\u0644\u0649 \u0642\u0648\u062a\u0647\u0627 \u0627\u0644\u0639\u062f\u062f\u064a\u0629 \u0627\u0644\u0647\u0627\u0626\u0644\u0629 \u0641\u064a \u0627\u0644\u062c\u064a\u0634\u060c \u062d\u064a\u062b \u0627\u0644\u062d\u0634\u0648\u062f \u062a\u062a\u062f\u0641\u0642 \u0628\u0644\u0627 \u062a\u0648\u0642\u0641 \u0646\u062d\u0648 \u0633\u0627\u062d\u0627\u062a \u0627\u0644\u0642\u062a\u0627\u0644<br><br><span><strong>The battles ignite on the border, the roar of cannons never ceases, and the sky is filled with the smoke of war.</strong><br><strong>Venezuela has declared its revolution against Colombia, relying on its immense numerical strength in the army, as crowds pour endlessly into the arenas of combat</strong></span><br></p><img class=\"tiptap-image\" src=\"https://i.ibb.co/kVCsG8Vj/97-C8-C179-340-F-449-C-8-E71-96-B5854-A8509.png\" alt=\"97-C8-C179-340-F-449-C-8-E71-96-B5854-A8509\"><hr><p class=\"tiptap-block\" style=\"text-align: left;\">\u0644\u0643\u0646 \u0643\u0648\u0644\u0648\u0645\u0628\u064a\u0627 \u0644\u064a\u0633\u062a \u0648\u062d\u062f\u0647\u0627\u2026 \u0641\u0642\u062f \u062c\u0645\u0639\u062a \u062d\u0648\u0644\u0647\u0627 \u062d\u0644\u0641\u0627\u0621 \u0623\u0642\u0648\u064a\u0627\u0621\u060c \u064a\u0642\u0627\u062a\u0644\u0648\u0646 \u0625\u0644\u0649 \u062c\u0627\u0646\u0628\u0647\u0627 \u0628\u062f\u0627\u0641\u0639 \u0627\u0644\u0648\u0644\u0627\u0621 \u0648\u0627\u0644\u0645\u0635\u0627\u0644\u062d. \u0627\u0644\u0645\u0634\u0647\u062f \u064a\u0632\u062f\u0627\u062f \u062a\u0639\u0642\u064a\u062f\u064b\u0627 \u0645\u0639 \u062f\u062e\u0648\u0644 \u0627\u0644\u0645\u0627\u0644 \u0643\u0639\u0627\u0645\u0644 \u062d\u0627\u0633\u0645\u061b \u0641\u0643\u0644 \u0637\u0631\u0641 \u064a\u062f\u0641\u0639 \u0645\u0628\u0627\u0644\u063a \u0636\u062e\u0645\u0629 \u0644\u0627\u0633\u062a\u0642\u0637\u0627\u0628 \u0627\u0644\u0645\u0642\u0627\u062a\u0644\u064a\u0646 \u0648\u0627\u0644\u0645\u0631\u062a\u0632\u0642\u0629\u060c \u0645\u0645\u0627 \u064a\u062c\u0639\u0644 \u0627\u0644\u062d\u0631\u0628 \u0644\u064a\u0633\u062a \u0641\u0642\u0637 \u0635\u0631\u0627\u0639\u064b\u0627 \u0639\u0633\u0643\u0631\u064a\u064b\u0627 \u0628\u0644 \u0623\u064a\u0636\u064b\u0627 \u0627\u0642\u062a\u0635\u0627\u062f\u064a\u064b\u0627<br><br><span><strong>But Colombia is not alone\u2026 it has gathered powerful allies around it, fighting by its side out of loyalty and interests.</strong><br><strong>The scene grows more complex with money entering as a decisive factor; each side spends vast sums to attract fighters and mercenaries, turning the war into not only a military struggle but also an economic one.</strong></span><br><br>\u0627\u0644\u062c\u0646\u0648\u062f \u064a\u062a\u0633\u0627\u0642\u0637\u0648\u0646\u060c \u0627\u0644\u062a\u062d\u0627\u0644\u0641\u0627\u062a \u062a\u062a\u0628\u062f\u0644\u060c \u0648\u0627\u0644\u0645\u064a\u0632\u0627\u0646 \u064a\u0645\u064a\u0644 \u0628\u064a\u0646 \u0644\u062d\u0638\u0629 \u0648\u0623\u062e\u0631\u0649. \u0641\u0646\u0632\u0648\u064a\u0644\u0627 \u062a\u0631\u0627\u0647\u0646 \u0639\u0644\u0649 \u0643\u062b\u0627\u0641\u0629 \u062c\u064a\u0634\u0647\u0627\u060c \u0628\u064a\u0646\u0645\u0627 \u0643\u0648\u0644\u0648\u0645\u0628\u064a\u0627 \u062a\u0631\u0627\u0647\u0646 \u0639\u0644\u0649 \u0634\u0628\u0643\u0629 \u062d\u0644\u0641\u0627\u0626\u0647\u0627 \u0648\u062f\u0639\u0645\u0647\u0645 \u0627\u0644\u0645\u0633\u062a\u0645\u0631<br><br><span><strong>Soldiers fall, alliances shift, and the balance tilts from one moment to the next.</strong><br><strong>Venezuela wagers on the sheer density of its army, while Colombia relies on its network of allies and their unwavering support.</strong></span><br><br>\u2753 \u0627\u0644\u0633\u0624\u0627\u0644 \u0644\u0644\u062c\u0645\u064a\u0639</p><p class=\"tiptap-block\" style=\"text-align: left;\"><span>\u0628\u0631\u0623\u064a\u0643\u0645\u060c \u0645\u0646 \u0633\u064a\u0643\u0648\u0646 \u0635\u0627\u062d\u0628 \u0627\u0644\u0646\u0635\u0631 \u0641\u064a \u0647\u0630\u0647 \u0627\u0644\u062d\u0631\u0628 \u0627\u0644\u0637\u0627\u062d\u0646\u0629\u061f<br>\u0647\u0644 \u0627\u0644\u0639\u062f\u062f \u0627\u0644\u0636\u062e\u0645 \u0644\u0641\u0646\u0632\u0648\u064a\u0644\u0627 \u0633\u064a\u062d\u0633\u0645 \u0627\u0644\u0645\u0639\u0631\u0643\u0629\u060c \u0623\u0645 \u0623\u0646 \u0642\u0648\u0629 \u0627\u0644\u062a\u062d\u0627\u0644\u0641\u0627\u062a \u0627\u0644\u0643\u0648\u0644\u0648\u0645\u0628\u064a\u0629 \u0633\u062a\u0642\u0644\u0628 \u0627\u0644\u0645\u0648\u0627\u0632\u064a\u0646\u061f</span><br><br><strong>\u2753 A question for everyone</strong> <strong>In your opinion, who will claim victory in this fierce war?</strong> <strong>Will Venezuela\u2019s massive numbers decide the battle, or will Colombia\u2019s powerful alliances tip the scales?</strong><br><br></p>"
+                    }
+                  ],
+                  "nextCursor": "Mon Feb 23 2026 20:51:11 GMT+0000 (Coordinated Universal Time)|699cbdbd814fa2fa9992023f"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -226,7 +329,73 @@
         "operationId": "battle.getBattles",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "defender": {
+                        "region": "6813b7089403bc4170a5d945",
+                        "country": "6813b6d546e731854c7ac83c",
+                        "wonRoundsCount": 0,
+                        "countryOrders": [
+                          "6813b6d546e731854c7ac83c"
+                        ],
+                        "muOrders": [
+                          "68a934a359ebef35178be8c0",
+                          "6873e98a934fa3efd9f2443c"
+                        ],
+                        "damages": 0,
+                        "hitCount": 25
+                      },
+                      "attacker": {
+                        "country": "6813b6d546e731854c7ac83f",
+                        "wonRoundsCount": 0,
+                        "countryOrders": [],
+                        "muOrders": [],
+                        "damages": 0,
+                        "hitCount": 1
+                      },
+                      "stats": {
+                        "hitCount": 0
+                      },
+                      "_id": "699cd304d5dfa4fd5fbea1f0"
+                    },
+                    {
+                      "defender": {
+                        "region": "696a81f5882256e1db118208",
+                        "country": "6813b6d446e731854c7ac7e8",
+                        "wonRoundsCount": 0,
+                        "countryOrders": [],
+                        "muOrders": [],
+                        "damages": 0,
+                        "hitCount": 79
+                      },
+                      "attacker": {
+                        "region": "6813b7059403bc4170a5d783",
+                        "country": "6813b6d446e731854c7ac7eb",
+                        "wonRoundsCount": 0,
+                        "countryOrders": [
+                          "6813b6d446e731854c7ac7eb",
+                          "683ddd2c24b5a2e114af15c3"
+                        ],
+                        "muOrders": [
+                          "689f69064e095b8b9f1b885a",
+                          "6962d34e32606f8ae3ad37d3"
+                        ],
+                        "damages": 0,
+                        "hitCount": 362
+                      },
+                      "stats": {
+                        "hitCount": 0
+                      },
+                      "_id": "699cbd18f8bf3bb110b016ec"
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -297,7 +466,39 @@
         "operationId": "battle.getById",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "defender": {
+                    "region": "6813b7089403bc4170a5d945",
+                    "country": "6813b6d546e731854c7ac83c",
+                    "wonRoundsCount": 0,
+                    "countryOrders": [
+                      "6813b6d546e731854c7ac83c"
+                    ],
+                    "muOrders": [
+                      "68a934a359ebef35178be8c0",
+                      "6873e98a934fa3efd9f2443c"
+                    ],
+                    "damages": 0,
+                    "hitCount": 32
+                  },
+                  "attacker": {
+                    "country": "6813b6d546e731854c7ac83f",
+                    "wonRoundsCount": 0,
+                    "countryOrders": [],
+                    "muOrders": [],
+                    "damages": 0,
+                    "hitCount": 9
+                  },
+                  "stats": {
+                    "hitCount": 0
+                  },
+                  "_id": "699cd304d5dfa4fd5fbea1f0"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -331,7 +532,34 @@
         "operationId": "battle.getLiveBattleData",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "battle": {
+                    "isActive": true,
+                    "attackerCountryOrders": [],
+                    "defenderCountryOrders": [
+                      "6813b6d546e731854c7ac83c"
+                    ],
+                    "roundIds": [
+                      "699cd304d5dfa4fd5fbea1f2"
+                    ],
+                    "roundHistory": []
+                  },
+                  "round": {
+                    "roundId": "699cd304d5dfa4fd5fbea1f2",
+                    "attackerDamages": 3850,
+                    "defenderDamages": 19555,
+                    "isActive": true,
+                    "actualTickPoints": 1,
+                    "attackerPoints": 0,
+                    "nextTickAt": "2026-02-23T22:28:00.113Z",
+                    "defenderPoints": 2
+                  }
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -414,7 +642,12 @@
         "operationId": "battleOrder.getByBattle",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": []
+              }
+            }
           }
         },
         "requestBody": {
@@ -429,7 +662,10 @@
                   },
                   "side": {
                     "type": "string",
-                    "enum": ["attacker", "defender"],
+                    "enum": [
+                      "attacker",
+                      "defender"
+                    ],
                     "description": "Which side's orders to retrieve"
                   }
                 },
@@ -454,7 +690,14 @@
         "operationId": "battleRanking.getRanking",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "rankings": []
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -527,7 +770,17 @@
         "operationId": "company.getById",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "_id": "6a378e2aeebcd331bc8b80a9",
+                  "user": "696274fafe8b202a7251cab5",
+                  "region": "6813b70b9403bc4170a5dad7",
+                  "itemCode": "coca"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -562,7 +815,18 @@
         "operationId": "company.getCompanies",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    "6a378e2aeebcd331bc8b80a9",
+                    "6a3ec43447a8f1000cc04d9f"
+                  ],
+                  "nextCursor": "Wed Jul 29 2026 19:18:29 GMT+0000 (Coordinated Universal Time)|69d0d9e90314b2dfe81cbed3"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -608,7 +872,18 @@
         "operationId": "company.getProductionBonus",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "strategicBonus": 0,
+                  "depositBonus": 30,
+                  "ethicSpecializationBonus": 0,
+                  "ethicDepositBonus": 30,
+                  "total": 60
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -643,7 +918,25 @@
         "operationId": "company.getRecommendedRegionIdsByItemCode",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "regionId": "696a81f5882256e1db11822a",
+                    "bonus": 60,
+                    "depositEndAt": "2026-07-30T02:02:42.390Z",
+                    "itemCode": "grain"
+                  },
+                  {
+                    "regionId": "6813b70b9403bc4170a5da7a",
+                    "bonus": 60,
+                    "depositEndAt": "2026-07-31T08:02:43.731Z",
+                    "itemCode": "grain"
+                  }
+                ]
+              }
+            }
           }
         },
         "requestBody": {
@@ -744,7 +1037,41 @@
         "operationId": "country.getAllCountries",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "taxes": {
+                      "income": 1,
+                      "market": 1,
+                      "selfWork": 1
+                    },
+                    "unrest": {
+                      "bar": 0,
+                      "barMax": 1570,
+                      "lastContributionAt": "2026-02-16T17:41:57.862Z"
+                    },
+                    "_id": "6813b6d546e731854c7ac85c",
+                    "name": "Bolivia"
+                  },
+                  {
+                    "taxes": {
+                      "income": 10,
+                      "market": 5,
+                      "selfWork": 10
+                    },
+                    "unrest": {
+                      "barMax": 776,
+                      "bar": 0,
+                      "lastContributionAt": "2026-02-18T05:59:55.760Z"
+                    },
+                    "_id": "6813b6d546e731854c7ac871",
+                    "name": "Singapore"
+                  }
+                ]
+              }
+            }
           }
         },
         "requestBody": {
@@ -770,7 +1097,25 @@
         "operationId": "country.getCountryById",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "taxes": {
+                    "income": 8,
+                    "market": 1,
+                    "selfWork": 10
+                  },
+                  "unrest": {
+                    "barMax": 23127,
+                    "bar": 8,
+                    "lastContributionAt": "2026-02-23T20:41:44.787Z"
+                  },
+                  "_id": "6813b6d446e731854c7ac7a0",
+                  "name": "Netherlands"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -805,7 +1150,54 @@
         "operationId": "event.getEventsPaginated",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "_id": "699cab64427d5546bd65f14d",
+                      "countries": [
+                        "6813b6d446e731854c7ac7e5",
+                        "6813b6d446e731854c7ac7a0"
+                      ],
+                      "priority": "2",
+                      "data": {
+                        "type": "countryMoneyTransfer",
+                        "money": 500,
+                        "countries": [
+                          "6813b6d446e731854c7ac7e5",
+                          "6813b6d446e731854c7ac7a0"
+                        ]
+                      },
+                      "createdAt": "2026-02-23T19:32:52.709Z",
+                      "updatedAt": "2026-02-23T19:32:52.709Z",
+                      "__v": 0
+                    },
+                    {
+                      "_id": "699c2d672799c50013fa70ba",
+                      "countries": [
+                        "6813b6d446e731854c7ac7eb",
+                        "6813b6d446e731854c7ac7a0"
+                      ],
+                      "priority": "2",
+                      "data": {
+                        "type": "countryMoneyTransfer",
+                        "money": 895,
+                        "countries": [
+                          "6813b6d446e731854c7ac7eb",
+                          "6813b6d446e731854c7ac7a0"
+                        ]
+                      },
+                      "createdAt": "2026-02-23T10:35:19.472Z",
+                      "updatedAt": "2026-02-23T10:35:19.472Z",
+                      "__v": 0
+                    }
+                  ],
+                  "nextCursor": "Thu Feb 19 2026 08:28:07 GMT+0000 (Coordinated Universal Time)|6996c99730cdb210d55664ba"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -882,7 +1274,21 @@
         "operationId": "gameConfig.getDates",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "nextDayAt": "2026-02-24T00:00:00.000Z",
+                  "nextRegenAt": "2026-02-23T23:00:00.000Z",
+                  "previousDayAt": "2026-02-23T00:00:00.000Z",
+                  "nextCongressElectionsAt": "2026-03-05T00:00:00.000Z",
+                  "nextPresidentialElectionsAt": "2026-03-01T00:00:00.000Z",
+                  "nextMonthAt": "2026-03-01T00:00:00.000Z",
+                  "dailyMissionRegenAt": "2026-02-24T00:00:00.000Z",
+                  "weeklyMissionRegenAt": "2026-03-02T00:00:00.000Z"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -908,7 +1314,141 @@
         "operationId": "gameConfig.getGameConfig",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "user": {
+                    "maxHunger": 10,
+                    "maxEnergy": 100,
+                    "maxConstructionPoints": 30,
+                    "dailyXp": 100
+                  },
+                  "skills": {
+                    "energy": {
+                      "0": {
+                        "value": 30,
+                        "totalCost": 0,
+                        "isABar": true,
+                        "unlockAtLevel": 1
+                      },
+                      "1": {
+                        "value": 40,
+                        "totalCost": 1,
+                        "cost": 1,
+                        "unlockAtLevel": 1
+                      },
+                      "2": {
+                        "value": 50,
+                        "totalCost": 3,
+                        "cost": 2,
+                        "unlockAtLevel": 1
+                      },
+                      "3": {
+                        "value": 60,
+                        "totalCost": 6,
+                        "cost": 3,
+                        "unlockAtLevel": 1
+                      }
+                    },
+                    "health": {
+                      "0": {
+                        "value": 50,
+                        "totalCost": 0,
+                        "isABar": true,
+                        "unlockAtLevel": 5
+                      },
+                      "1": {
+                        "value": 60,
+                        "totalCost": 1,
+                        "cost": 1,
+                        "unlockAtLevel": 5
+                      },
+                      "2": {
+                        "value": 70,
+                        "totalCost": 3,
+                        "cost": 2,
+                        "unlockAtLevel": 5
+                      },
+                      "3": {
+                        "value": 80,
+                        "totalCost": 6,
+                        "cost": 3,
+                        "unlockAtLevel": 5
+                      }
+                    },
+                    "hunger": {
+                      "0": {
+                        "value": 4,
+                        "totalCost": 0,
+                        "isABar": true,
+                        "unlockAtLevel": 10
+                      },
+                      "1": {
+                        "value": 5,
+                        "totalCost": 1,
+                        "cost": 1,
+                        "unlockAtLevel": 10
+                      },
+                      "2": {
+                        "value": 6,
+                        "totalCost": 3,
+                        "cost": 2,
+                        "unlockAtLevel": 10
+                      },
+                      "3": {
+                        "value": 7,
+                        "totalCost": 6,
+                        "cost": 3,
+                        "unlockAtLevel": 10
+                      }
+                    },
+                    "attack": {
+                      "0": {
+                        "value": 100,
+                        "totalCost": 0,
+                        "unlockAtLevel": 1
+                      },
+                      "1": {
+                        "value": 120,
+                        "totalCost": 1,
+                        "cost": 1,
+                        "unlockAtLevel": 1
+                      },
+                      "2": {
+                        "value": 140,
+                        "totalCost": 3,
+                        "cost": 2,
+                        "unlockAtLevel": 1
+                      },
+                      "3": {
+                        "value": 160,
+                        "totalCost": 6,
+                        "cost": 3,
+                        "unlockAtLevel": 1
+                      }
+                    }
+                  },
+                  "battle": {
+                    "roundsToWin": 2,
+                    "maxRounds": 15,
+                    "pointsToWinRound": 300,
+                    "tickPoints": {
+                      "1": 1,
+                      "100": 2,
+                      "200": 3,
+                      "300": 4,
+                      "400": 5,
+                      "500": 6
+                    }
+                  },
+                  "org": {
+                    "constructionCost": 1000,
+                    "moveCost": 5
+                  }
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -934,7 +1474,20 @@
         "operationId": "government.getByCountryId",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "_id": "6813b6e73e57e0601e792acc",
+                  "country": "6813b6d446e731854c7ac7a0",
+                  "congressMembers": [
+                    "692ee8d8d930f58a92c19dd3",
+                    "69627982db00cb9441507b3b"
+                  ],
+                  "__v": 0
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -968,7 +1521,73 @@
         "operationId": "inventory.fetchCurrentEquipment",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "weapon": {
+                    "_id": "6a612ac94e3bf25edf8a0d09",
+                    "code": "knife",
+                    "skills": {
+                      "attack": 21,
+                      "criticalChance": 2
+                    },
+                    "state": 73,
+                    "maxState": 100,
+                    "quantity": 1,
+                    "lastAcquisitionAt": "2026-07-22T20:40:41.726Z"
+                  },
+                  "chest": {
+                    "_id": "6a59d1c4d896971a0bb08397",
+                    "type": "equipment",
+                    "code": "chest2",
+                    "skills": {
+                      "armor": 9
+                    },
+                    "state": 46,
+                    "maxState": 100,
+                    "quantity": 1,
+                    "lastAcquisitionAt": "2026-07-17T06:55:00.347Z"
+                  },
+                  "boots": {
+                    "_id": "6a677764b1bfd28e4389ec17",
+                    "type": "equipment",
+                    "code": "boots2",
+                    "skills": {
+                      "dodge": 9
+                    },
+                    "state": 78,
+                    "maxState": 100,
+                    "quantity": 1,
+                    "lastAcquisitionAt": "2026-07-27T15:21:07.592Z"
+                  },
+                  "gloves": {
+                    "_id": "6a66ff90f972e7c8ebb875ee",
+                    "type": "equipment",
+                    "code": "gloves2",
+                    "skills": {
+                      "precision": 6
+                    },
+                    "state": 78,
+                    "maxState": 100,
+                    "quantity": 1,
+                    "lastAcquisitionAt": "2026-07-27T06:49:52.804Z"
+                  },
+                  "pants": {
+                    "_id": "6a6792cef8d3c6d34a9f09f4",
+                    "type": "equipment",
+                    "code": "pants2",
+                    "skills": {
+                      "armor": 9
+                    },
+                    "state": 97,
+                    "maxState": 100,
+                    "quantity": 1,
+                    "lastAcquisitionAt": "2026-07-27T17:18:05.978Z"
+                  }
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1037,7 +1656,17 @@
         "operationId": "itemTrading.getPrices",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "cookedFish": 7.410452296296315,
+                  "heavyAmmo": 2.629494621728217,
+                  "steel": 1.6960584268861223,
+                  "bread": 1.865991668402432
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1063,7 +1692,21 @@
         "operationId": "mercenaryContractAuction.getPaginatedAuctions",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "_id": "6a6a532f0cf595b41d9e8ce9",
+                      "country": "6813b6d446e731854c7ac79a",
+                      "createdBy": "69aa8b889bacb7249fa5b5ed",
+                      "battle": "6a69b3c99c428aa0fed29f19"
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1161,7 +1804,24 @@
         "operationId": "mu.getById",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "roles": {
+                    "managers": [
+                      "698bae2589a366c35caac38d"
+                    ],
+                    "commanders": [
+                      "698bae2589a366c35caac38d"
+                    ]
+                  },
+                  "_id": "699cb048ba4808b56a36e0da",
+                  "user": "698bae2589a366c35caac38d",
+                  "region": "6813b7059403bc4170a5d789"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1194,7 +1854,40 @@
         "operationId": "mu.getManyPaginated",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "roles": {
+                        "managers": [
+                          "698bae2589a366c35caac38d"
+                        ],
+                        "commanders": [
+                          "698bae2589a366c35caac38d"
+                        ]
+                      },
+                      "_id": "699cb048ba4808b56a36e0da",
+                      "user": "698bae2589a366c35caac38d",
+                      "region": "6813b7059403bc4170a5d789"
+                    },
+                    {
+                      "roles": {
+                        "managers": [
+                          "6827e0df7e34648ab19215d8"
+                        ],
+                        "commanders": []
+                      },
+                      "_id": "699ca7153908bda37ddbee48",
+                      "user": "6827e0df7e34648ab19215d8",
+                      "region": "6813b7099403bc4170a5d9c6"
+                    }
+                  ],
+                  "nextCursor": "Fri Feb 20 2026 14:06:32 GMT+0000 (Coordinated Universal Time)|69986a683b9bc6370557b724"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1242,7 +1935,23 @@
         "operationId": "party.getById",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "ethics": {
+                    "militarism": 0,
+                    "isolationism": 0,
+                    "imperialism": 0,
+                    "industrialism": 0,
+                    "unethical": false
+                  },
+                  "_id": "6a6a519cd4ceb2a62967f116",
+                  "name": "Die Penner",
+                  "description": ""
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1277,7 +1986,40 @@
         "operationId": "party.getManyPaginated",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "ethics": {
+                        "militarism": 0,
+                        "isolationism": 0,
+                        "imperialism": 0,
+                        "industrialism": 0,
+                        "unethical": false
+                      },
+                      "_id": "6a6a519cd4ceb2a62967f116",
+                      "name": "Die Penner",
+                      "description": ""
+                    },
+                    {
+                      "ethics": {
+                        "militarism": 0,
+                        "isolationism": 0,
+                        "imperialism": 0,
+                        "industrialism": 0,
+                        "unethical": false
+                      },
+                      "_id": "6a69ecaa26ec4b7630c0598c",
+                      "name": "Voet Lekkende Kikker Partij",
+                      "description": "Gewoon lekker lol"
+                    }
+                  ],
+                  "nextCursor": "Tue Jul 28 2026 00:17:03 GMT+0000 (Coordinated Universal Time)|6a67f4ff6d44c24b4832afca"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1318,7 +2060,41 @@
         "operationId": "ranking.getRanking",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "_id": "6813b7a6d99e5787db09723c",
+                  "type": "weeklyCountryDamages",
+                  "__v": 0,
+                  "isGlobal": false,
+                  "items": [
+                    {
+                      "country": "6813b6d546e731854c7ac868",
+                      "value": 5673827,
+                      "rank": 1,
+                      "tier": "master",
+                      "_id": "699ccde4b6348a2ad06a4ddc"
+                    },
+                    {
+                      "country": "6813b6d546e731854c7ac81d",
+                      "value": 4769499,
+                      "rank": 2,
+                      "tier": "diamond",
+                      "_id": "699ccde4b6348a2ad06a4ddd"
+                    }
+                  ],
+                  "tierValues": {
+                    "bronze": 0,
+                    "silver": 37097,
+                    "gold": 95171,
+                    "platinum": 580858,
+                    "diamond": 3065332,
+                    "master": 5673827
+                  }
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1388,7 +2164,33 @@
         "operationId": "region.getAll",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "stats": {
+                      "investedMoney": 0
+                    },
+                    "dates": {
+                      "lastOwnershipChangeAt": "2026-06-01T23:05:58.862Z"
+                    },
+                    "_id": "6813b7039403bc4170a5d68a",
+                    "code": "ch-zurich"
+                  },
+                  {
+                    "stats": {
+                      "investedMoney": 0
+                    },
+                    "dates": {
+                      "lastOwnershipChangeAt": "2026-05-31T09:05:12.147Z"
+                    },
+                    "_id": "6813b7039403bc4170a5d6b7",
+                    "code": "fr-center"
+                  }
+                ]
+              }
+            }
           }
         },
         "requestBody": {
@@ -1414,7 +2216,21 @@
         "operationId": "region.getById",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "stats": {
+                    "investedMoney": 0
+                  },
+                  "dates": {
+                    "lastOwnershipChangeAt": "2026-02-23T05:43:02.533Z"
+                  },
+                  "_id": "6813b7039403bc4170a5d68a",
+                  "code": "ch-zurich"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1449,7 +2265,53 @@
         "operationId": "region.getRegionsObject",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "6813b7039403bc4170a5d68a": {
+                    "stats": {
+                      "investedMoney": 0
+                    },
+                    "dates": {
+                      "lastOwnershipChangeAt": "2026-02-23T05:43:02.533Z"
+                    },
+                    "_id": "6813b7039403bc4170a5d68a",
+                    "code": "ch-zurich"
+                  },
+                  "6813b7039403bc4170a5d6b7": {
+                    "stats": {
+                      "investedMoney": 0
+                    },
+                    "dates": {
+                      "lastOwnershipChangeAt": "2025-11-17T13:55:03.081Z"
+                    },
+                    "_id": "6813b7039403bc4170a5d6b7",
+                    "code": "fr-center"
+                  },
+                  "6813b7049403bc4170a5d6c9": {
+                    "stats": {
+                      "investedMoney": 0
+                    },
+                    "dates": {
+                      "lastOwnershipChangeAt": "2025-11-17T17:20:13.814Z"
+                    },
+                    "_id": "6813b7049403bc4170a5d6c9",
+                    "code": "fr-cayenne"
+                  },
+                  "6813b7049403bc4170a5d6cf": {
+                    "stats": {
+                      "investedMoney": 0
+                    },
+                    "dates": {
+                      "lastOwnershipChangeAt": "2026-02-10T06:29:06.633Z"
+                    },
+                    "_id": "6813b7049403bc4170a5d6cf",
+                    "code": "de-mecklenburg-holstein"
+                  }
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1475,7 +2337,17 @@
         "operationId": "round.getById",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "_id": "699cd304d5dfa4fd5fbea1f2",
+                  "battle": "699cd304d5dfa4fd5fbea1f0",
+                  "number": 1,
+                  "isActive": false
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1510,7 +2382,41 @@
         "operationId": "round.getLastHits",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "attacker": [
+                    {
+                      "_id": "699d26399103e18d6b3e51b5",
+                      "user": "6828fc6ee95d4883d0c3e530",
+                      "damages": 241,
+                      "mu": "699aa2f3b36612f42dd5394c"
+                    },
+                    {
+                      "_id": "699d2634df4f2abeec7568da",
+                      "user": "6828fc6ee95d4883d0c3e530",
+                      "damages": 1004,
+                      "mu": "699aa2f3b36612f42dd5394c"
+                    }
+                  ],
+                  "defender": [
+                    {
+                      "_id": "699d27f721da13e6960aa2b3",
+                      "user": "692e0f4860a93084675eb8b8",
+                      "damages": 365,
+                      "mu": "6895fa41d2bf43cdb3e6d2dc"
+                    },
+                    {
+                      "_id": "699d27ddb3f79492cdae4dcb",
+                      "user": "699d000a35e7b7cc90910683",
+                      "damages": 146,
+                      "mu": null
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1545,7 +2451,23 @@
         "operationId": "search.searchAnything",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "userIds": [
+                    "682766e1996e0d892a9f4a5b"
+                  ],
+                  "muIds": [],
+                  "countryIds": [
+                    "6813b6d446e731854c7ac7a0"
+                  ],
+                  "regionIds": [],
+                  "partyIds": [],
+                  "hasData": true
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1580,7 +2502,12 @@
         "operationId": "search.searchMus",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": []
+              }
+            }
           }
         },
         "requestBody": {
@@ -1615,7 +2542,15 @@
         "operationId": "search.searchUsers",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": [
+                  "68373ebe842134b2efcfd795",
+                  "69a81d5f0955676cea72e2d6"
+                ]
+              }
+            }
           }
         },
         "requestBody": {
@@ -1650,7 +2585,21 @@
         "operationId": "tournament.getById",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "registered": {
+                    "countries": [],
+                    "mus": [],
+                    "users": []
+                  },
+                  "_id": "6a5a44016b948d78de7013b3",
+                  "name": "Country Tournament",
+                  "description": "Nations compete for glory"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1685,7 +2634,17 @@
         "operationId": "tournament.getLastTournament",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "_id": "6a5a44016b948d78de7013b3",
+                  "name": "Country Tournament",
+                  "description": "Nations compete for glory",
+                  "isActive": false
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1711,7 +2670,20 @@
         "operationId": "tournamentTeam.getById",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "_id": "6a5b961c8ee95104432592bd",
+                  "tournament": "6a5a44016b948d78de7013b3",
+                  "number": 1,
+                  "countries": [
+                    "683ddd2c24b5a2e114af15b9",
+                    "6813b6d546e731854c7ac814"
+                  ]
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1746,7 +2718,31 @@
         "operationId": "tournamentTeam.getByTournamentId",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "_id": "6a5b961c8ee95104432592bd",
+                    "tournament": "6a5a44016b948d78de7013b3",
+                    "number": 1,
+                    "countries": [
+                      "683ddd2c24b5a2e114af15b9",
+                      "6813b6d546e731854c7ac814"
+                    ]
+                  },
+                  {
+                    "_id": "6a5b961c8ee95104432592c0",
+                    "tournament": "6a5a44016b948d78de7013b3",
+                    "number": 2,
+                    "countries": [
+                      "683ddd2c24b5a2e114af1609",
+                      "6813b6d546e731854c7ac817"
+                    ]
+                  }
+                ]
+              }
+            }
           }
         },
         "requestBody": {
@@ -1781,7 +2777,53 @@
         "operationId": "tradingOrder.getTopOrders",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "buyOrders": [
+                    {
+                      "_id": "699cc82c2c98b7a41b4e003c",
+                      "user": "695709f595a7333b36597d44",
+                      "country": "6813b6d446e731854c7ac7a0",
+                      "itemCode": "cookedFish"
+                    },
+                    {
+                      "_id": "699cc4bc3e3ee307af4bbc6e",
+                      "user": "699731121190015c68869911",
+                      "itemCode": "cookedFish",
+                      "quantity": 6,
+                      "price": 7.4,
+                      "offerAt": "2026-02-23T21:21:00.131Z",
+                      "type": "buy",
+                      "__v": 0
+                    }
+                  ],
+                  "sellOrders": [
+                    {
+                      "_id": "699cd3bd59c2da7996b4e247",
+                      "user": "699327b6b2f1839ec1c6ebf7",
+                      "itemCode": "cookedFish",
+                      "quantity": 42,
+                      "price": 7.485,
+                      "offerAt": "2026-02-23T22:25:01.339Z",
+                      "type": "sell",
+                      "__v": 0
+                    },
+                    {
+                      "_id": "699cd1dc59c2da7996ae874b",
+                      "user": "691705d1cfa79abee3bfa16e",
+                      "itemCode": "cookedFish",
+                      "quantity": 22,
+                      "price": 7.49,
+                      "offerAt": "2026-02-23T22:17:00.554Z",
+                      "type": "sell",
+                      "__v": 0
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1884,7 +2926,28 @@
         "operationId": "transaction.getPaginatedTransactions",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "_id": "6a6a544db9852bf3cbdbacd1",
+                      "money": 3.6659999999999995,
+                      "quantity": 26,
+                      "sellerId": "6a07507376d6c4928eb720f2"
+                    },
+                    {
+                      "_id": "6a6a544d35f253fd70989d1f",
+                      "money": 3.866,
+                      "itemCode": "steak",
+                      "quantity": 1
+                    }
+                  ],
+                  "nextCursor": "Wed Jul 29 2026 19:28:13 GMT+0000 (Coordinated Universal Time)|6a6a544d35f253fd70989c90"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -2020,7 +3083,17 @@
         "operationId": "upgrade.getUpgradeByTypeAndEntity",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "_id": "699cb048ba4808b56a36e0e3",
+                  "mu": "699cb048ba4808b56a36e0da",
+                  "upgradeType": "headquarters",
+                  "level": 1
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -2076,7 +3149,45 @@
         "operationId": "user.getUserById",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "dates": {
+                    "lastConnectionAt": "2026-07-29T18:50:53.528Z",
+                    "lastNotificationsCheckAt": "2026-02-25T11:13:21.908Z",
+                    "lastCountryMessageCheckAt": "2026-02-25T11:13:21.908Z",
+                    "lastGlobalMessageCheckAt": "2026-02-25T11:13:21.908Z"
+                  },
+                  "infos": {
+                    "isPremium": true,
+                    "premiumMonthsCount": 3,
+                    "font": "Tiny5",
+                    "colorScheme": "orange",
+                    "description": "Duitse chappie bij VLKP \ud83d\udc38 Gomme likt mee.",
+                    "tournamentWonAt": "2026-07-20T23:25:38.982Z"
+                  },
+                  "missions": {
+                    "claimedAt": {
+                      "starting": "2026-02-26T08:35:38.970Z",
+                      "weekly": "2026-07-28T06:12:26.650Z",
+                      "daily": "2026-07-29T02:14:34.394Z"
+                    },
+                    "rerolledDailyMissions": 1,
+                    "rerolledWeeklyMissions": 1
+                  },
+                  "leveling": {
+                    "level": 34,
+                    "totalXp": 41680,
+                    "dailyXpLeft": 100,
+                    "availableSkillPoints": 4,
+                    "spentSkillPoints": 132,
+                    "totalSkillPoints": 136,
+                    "freeReset": 0
+                  }
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -2110,7 +3221,33 @@
         "operationId": "user.getUserLite",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "dates": {
+                    "lastConnectionAt": "2026-02-23T22:11:00.953Z",
+                    "lastNotificationsCheckAt": "2026-02-23T22:11:00.697Z",
+                    "lastCountryMessageCheckAt": "2026-02-23T22:11:00.697Z",
+                    "lastGlobalMessageCheckAt": "2026-02-23T22:11:00.697Z",
+                    "lastEventsCheckAt": "2026-02-23T22:11:00.697Z",
+                    "lastWorkOfferApplications": [],
+                    "lastHiresAt": []
+                  },
+                  "leveling": {
+                    "level": 1,
+                    "totalXp": 0,
+                    "dailyXpLeft": 100,
+                    "availableSkillPoints": 4,
+                    "spentSkillPoints": 0,
+                    "totalSkillPoints": 4,
+                    "freeReset": 2
+                  },
+                  "_id": "699cd074d5dfa4fd5fb9b323",
+                  "username": "user_WMFWJ8"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -2144,7 +3281,24 @@
         "operationId": "user.getUsersByCountry",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "_id": "699cd074d5dfa4fd5fb9b323",
+                      "createdAt": "2026-02-23T22:11:00.698Z"
+                    },
+                    {
+                      "_id": "699cceeff8bf3bb110e858f3",
+                      "createdAt": "2026-02-23T22:04:31.774Z"
+                    }
+                  ],
+                  "nextCursor": "Mon Feb 23 2026 19:12:33 GMT+0000 (Coordinated Universal Time)|699ca6a1427d5546bd56e9a7"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -2187,7 +3341,27 @@
         "operationId": "war.getById",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "attacker": {
+                    "country": "6813b6d546e731854c7ac83c",
+                    "wonBattlesCount": 11,
+                    "wonRoundsCount": 22,
+                    "damages": 20450596
+                  },
+                  "defender": {
+                    "country": "6813b6d546e731854c7ac83f",
+                    "wonBattlesCount": 1,
+                    "wonRoundsCount": 2,
+                    "damages": 25057918
+                  },
+                  "_id": "695ebc7e031a78adf4b41856",
+                  "isActive": false
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -2222,7 +3396,17 @@
         "operationId": "workOffer.getById",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "_id": "699ca186427d5546bd4e171e",
+                  "company": "698603aa3a764aa9c0e1d956",
+                  "user": "6977a239ab7663db3ac03c5e",
+                  "region": "6813b7059403bc4170a5d7bf"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -2256,7 +3440,17 @@
         "operationId": "workOffer.getWorkOfferByCompanyId",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "_id": "6a6943f2fc06d17d1822454c",
+                  "company": "69b0923be5230b35c29bf7ef",
+                  "user": "6907aad56852040ec0fd477d",
+                  "region": "6813b70b9403bc4170a5dad7"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -2290,7 +3484,28 @@
         "operationId": "workOffer.getWorkOffersPaginated",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "_id": "699ca186427d5546bd4e171e",
+                      "company": "698603aa3a764aa9c0e1d956",
+                      "user": "6977a239ab7663db3ac03c5e",
+                      "region": "6813b7059403bc4170a5d7bf"
+                    },
+                    {
+                      "_id": "6997cf0b4b8b991aee2ce230",
+                      "company": "69862b4dbbec952452b94271",
+                      "user": "696b1cca423ebb29858b8b7d",
+                      "region": "6813b7089403bc4170a5d8f4"
+                    }
+                  ],
+                  "nextCursor": "0.14|699c41325fd2c21f5c550bfb"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -2343,7 +3558,12 @@
         "operationId": "worker.getTotalWorkersCount",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": 0
+              }
+            }
           }
         },
         "requestBody": {
@@ -2376,7 +3596,15 @@
         "operationId": "worker.getWorkers",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "type": "company",
+                  "workers": []
+                }
+              }
+            }
           }
         },
         "requestBody": {

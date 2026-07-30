@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from discord.ext import tasks
 
 from cogs.tasks._base import TaskCogBase
+from services.case_luck import fetch_case_transactions, merge_counts
 
 logger = logging.getLogger("discord_bot")
 
@@ -152,61 +153,6 @@ class GlobalLuckTasks(TaskCogBase, name="global_luck_tasks"):
     # Internals                                                            #
     # ------------------------------------------------------------------ #
 
-    async def _fetch_luck_data(
-        self, user_id: str, item_rarities: dict
-    ) -> tuple[dict[str, int], dict[str, int]]:
-        """Page all openCase transactions for a user.
-
-        Returns (normal_counts, elite_counts) separated by case type.
-        """
-        rarity_keys = list(_LUCK_EXPECTED.keys())
-        normal_counts: dict[str, int] = {r: 0 for r in rarity_keys}
-        elite_counts: dict[str, int] = {r: 0 for r in rarity_keys}
-        cursor = None
-        while True:
-            payload: dict = {
-                "userId": user_id,
-                "transactionType": "openCase",
-                "limit": 100,
-            }
-            if cursor:
-                payload["cursor"] = cursor
-            try:
-                raw = await self._client.get(
-                    "/transaction.getPaginatedTransactions",
-                    params={"input": json.dumps(payload)},
-                )
-            except Exception:
-                break
-            data = (
-                raw.get("result", {}).get("data", raw) if isinstance(raw, dict) else {}
-            )
-            if isinstance(data, dict):
-                items = data.get("items") or data.get("transactions") or []
-                cursor = data.get("nextCursor") or data.get("cursor")
-            elif isinstance(data, list):
-                items = data
-                cursor = None
-            else:
-                break
-            for tx in items:
-                if not isinstance(tx, dict):
-                    continue
-                opened_case = tx.get("itemCode", "")
-                is_elite = item_rarities.get(opened_case) == "mythic"
-                received = tx.get("item") or {}
-                item_code = (
-                    received.get("code") if isinstance(received, dict) else received
-                ) or ""
-                rarity = item_rarities.get(item_code, "common")
-                if is_elite:
-                    elite_counts[rarity] = elite_counts.get(rarity, 0) + 1
-                else:
-                    normal_counts[rarity] = normal_counts.get(rarity, 0) + 1
-            if not cursor or not items:
-                break
-        return normal_counts, elite_counts
-
     async def _run_global_sweep(self, now_utc: datetime, _t0: float) -> None:
         """Heavy sweep: iterate all cached citizens, compute luck, store in DB."""
         try:
@@ -244,15 +190,44 @@ class GlobalLuckTasks(TaskCogBase, name="global_luck_tasks"):
             )
             return
 
-        # Full wipe and recompute
-        await self._db.clear_global_luck()
+        # Preload every citizen's prior counts + cutoff in one query instead
+        # of wiping the whole table and re-fetching each player's ENTIRE
+        # lifetime case history from scratch every sweep.
+        # transaction.getPaginatedTransactions pages newest-first, so
+        # fetch_case_transactions can stop as soon as it reaches
+        # last_seen_transaction_id — only new opens since the last sweep get
+        # fetched, and their counts are added onto the old ones.
+        prior_entries = await self._db.get_all_global_luck_entries()
 
         recorded = 0
         for i, (user_id, country_id, citizen_name) in enumerate(citizens):
             try:
-                normal_counts, elite_counts = await self._fetch_luck_data(
-                    user_id, item_rarities
+                prior = prior_entries.get(user_id)
+                prior_normal = json.loads(prior["rarity_json"]) if prior and prior.get("rarity_json") else {}
+                prior_elite = json.loads(prior["elite_rarity_json"]) if prior and prior.get("elite_rarity_json") else {}
+                cutoff_id = prior.get("last_seen_transaction_id") if prior else None
+
+                delta_normal, delta_elite, newest_id, _fetched = await fetch_case_transactions(
+                    self._client, user_id, item_rarities, cutoff_id=cutoff_id
                 )
+                if cutoff_id:
+                    # True incremental fetch — delta is only what's new since
+                    # cutoff_id, so add it onto the existing counts.
+                    normal_counts = merge_counts(prior_normal, delta_normal)
+                    elite_counts = merge_counts(prior_elite, delta_elite)
+                else:
+                    # No cutoff (first-ever scan, OR an existing row whose
+                    # last_seen_transaction_id is still NULL — e.g. every row
+                    # that predates this column). fetch_case_transactions had
+                    # nothing to stop early at, so it already paged the
+                    # player's ENTIRE history — delta_normal/delta_elite ARE
+                    # the full, authoritative totals. Merging them onto
+                    # prior_normal/prior_elite here would double-count
+                    # everything the prior row already had.
+                    normal_counts = delta_normal
+                    elite_counts = delta_elite
+                new_cutoff = newest_id or cutoff_id
+
                 total_opens = sum(normal_counts.values())
                 if total_opens < MIN_OPENS:
                     continue
@@ -271,6 +246,7 @@ class GlobalLuckTasks(TaskCogBase, name="global_luck_tasks"):
                     elite_luck_score=elite_luck_pct,
                     elite_opens_count=elite_total if elite_total >= 5 else None,
                     elite_rarity_json=json.dumps(elite_counts) if elite_total >= 5 else None,
+                    last_seen_transaction_id=new_cutoff,
                 )
                 recorded += 1
             except Exception:
@@ -292,6 +268,15 @@ class GlobalLuckTasks(TaskCogBase, name="global_luck_tasks"):
                 )
 
         await self._db.flush_global_luck_scores()
+        # Drop rows for citizens no longer in citizen_levels (replaces the
+        # old unconditional pre-loop wipe, which would have destroyed the
+        # cutoff/counts this sweep now depends on).
+        try:
+            await self._db.delete_global_luck_scores_not_in(
+                [uid for uid, _cid, _name in citizens]
+            )
+        except Exception:
+            logger.exception("global_luck_refresh: stale-row cleanup failed")
         try:
             await self._db.set_poll_state("global_luck_ranking_total", str(recorded))
         except Exception:

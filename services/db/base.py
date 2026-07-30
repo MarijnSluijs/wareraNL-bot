@@ -125,6 +125,12 @@ class DatabaseBase:
             ("global_citizen_luck", "elite_luck_score REAL"),
             ("global_citizen_luck", "elite_opens_count INTEGER"),
             ("global_citizen_luck", "elite_rarity_json TEXT"),
+            # citizen_luck / global_citizen_luck — newest openCase transaction
+            # _id counted so far, so the sweeps and /geluk /globalluck's live
+            # option can fetch only NEW transactions instead of a player's
+            # entire lifetime history on every run.
+            ("citizen_luck", "last_seen_transaction_id TEXT"),
+            ("global_citizen_luck", "last_seen_transaction_id TEXT"),
             # company_bonus_watchers — game_user_id cached at runtime
             ("company_bonus_watchers", "game_user_id TEXT"),
             # discord_allies — display label added post-launch
@@ -135,6 +141,8 @@ class DatabaseBase:
             ("mu_auction_win_subs", "initialized INTEGER NOT NULL DEFAULT 0"),
             # mu_auction_win_subs — cutoff_at: createdAt of newest contract at subscribe time
             ("mu_auction_win_subs", "cutoff_at TEXT"),
+            # mu_auction_win_subs — opt-in ping of the MU's war-guild member role
+            ("mu_auction_win_subs", "ping_enabled INTEGER NOT NULL DEFAULT 0"),
             # avatar URLs — added to citizen_levels and known_mus
             ("citizen_levels", "avatar_url TEXT"),
             ("known_mus", "avatar_url TEXT"),

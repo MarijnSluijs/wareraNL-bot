@@ -10,6 +10,7 @@ import difflib
 import json
 import logging
 import math as _luck_math
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Literal, Optional
 
 import discord
@@ -18,6 +19,7 @@ from discord.ext import commands
 
 from cogs.commands._base import citizen_autocomplete, strip_division_prefix
 from services.api_client import APIClient
+from services.case_luck import fetch_case_transactions, merge_counts
 from services.key_loader import load_api_keys
 
 if TYPE_CHECKING:
@@ -230,11 +232,17 @@ class Geluk(commands.Cog, name="geluk"):
         self._db: Optional[object] = None  # lazy Database connection for /gelukranking
 
     def _build_cached_luck_embed(
-        self, entry: dict, type: Optional[Literal["normaal", "elite", "gecombineerd"]]
+        self,
+        entry: dict,
+        type: Optional[Literal["normaal", "elite", "gecombineerd"]],
+        note: Optional[str] = None,
     ) -> discord.Embed:
-        """Build an embed from a citizen_luck DB row when the API is offline."""
-        from datetime import datetime
+        """Build an embed from a citizen_luck DB row.
 
+        *note* is a context-specific description line prepended above the
+        "updated at" line — e.g. an offline warning, or a live-refresh note.
+        Defaults to nothing (plain cached result: just the freshness line).
+        """
         cached_name = entry.get("citizen_name") or "Onbekend"
         updated_at_raw = entry.get("updated_at") or ""
         try:
@@ -252,12 +260,13 @@ class Geluk(commands.Cog, name="geluk"):
         elite_raw = entry.get("elite_rarity_json")
         elite_counts: dict[str, int] = json.loads(elite_raw) if elite_raw else {}
 
+        description = f"-# Gegevens bijgewerkt: {updated_at} UTC"
+        if note:
+            description = f"{note}\n{description}"
+
         embed = discord.Embed(
             title=f"🎰 Case-geluk van {cached_name}",
-            description=(
-                "⚠️ De API is offline — gecachete data wordt weergegeven."
-                f"\n-# Gegevens bijgewerkt: {updated_at} UTC"
-            ),
+            description=description,
             color=discord.Color.gold(),
         )
 
@@ -295,6 +304,93 @@ class Geluk(commands.Cog, name="geluk"):
             " • epic 15% • rare 32% • uncommon 50%"
         )
         return embed
+
+    async def _send_cached_luck_result(
+        self,
+        interaction: discord.Interaction,
+        db,
+        entry: dict,
+        type: Optional[Literal["normaal", "elite", "gecombineerd"]],
+        note: Optional[str] = None,
+    ) -> None:
+        """Build and send a /geluk embed from a citizen_luck-shaped row.
+
+        Shared by the cache-hit fast path (the common case — daily_luck_refresh
+        keeps every NL citizen's row current), the offline fallback path, and
+        the live-refresh path (a synthetic row merging cached + newly-fetched
+        counts). Never re-pages a player's full openCase transaction history.
+        """
+        embed = self._build_cached_luck_embed(entry, type, note=note)
+        nl_country_id = self.config.get("nl_country_id")
+        if nl_country_id and entry.get("country_id") == nl_country_id:
+            try:
+                ranking = await db.get_luck_ranking(nl_country_id)
+                if ranking:
+                    try:
+                        _stored = await db.get_poll_state("luck_ranking_total")
+                        rank_total = int(_stored) if _stored else len(ranking)
+                    except Exception:
+                        rank_total = len(ranking)
+                    rank_total = min(rank_total, len(ranking))
+                    _MIN_NORMAL = 20
+                    _MIN_ELITE = 10
+                    e_uid = entry.get("user_id")
+                    e_name = entry.get("citizen_name") or ""
+                    updated_at_r = (ranking[0].get("updated_at") or "")[:16].replace("T", " ")
+
+                    if type == "normaal":
+                        ns = sorted(ranking, key=lambda e: e["luck_score"], reverse=True)
+                        tgt = Geluk._find_in_ranking(ns, e_uid, e_name)
+                        if tgt is not None:
+                            rpct = ns[tgt]["luck_score"]; rsign = "+" if rpct >= 0 else ""
+                            rt = f"🏆 Gelukranking NL (normale cases) — rang **#{tgt+1}/{rank_total}** — **{rsign}{rpct:.1f}%** {_luck_indicator_overall(rpct)}"
+                        else:
+                            rt = f"🏆 Gelukranking NL (normale cases) — _{rank_total} spelers, niet in ranking (min. {_MIN_NORMAL} cases)_"
+                        embed.add_field(name=rt, value=Geluk._build_ranking_block(ns, tgt, lambda e: e["luck_score"]), inline=False)
+
+                    elif type == "elite":
+                        eo = [e for e in ranking if e.get("elite_luck_score") is not None]
+                        es = sorted(eo, key=lambda e: e["elite_luck_score"], reverse=True)
+                        tgt = Geluk._find_in_ranking(es, e_uid, e_name)
+                        n_e = len(es)
+                        if tgt is not None:
+                            rpct = es[tgt]["elite_luck_score"]; rsign = "+" if rpct >= 0 else ""
+                            rt = f"🏆 Gelukranking NL (elite cases) — rang **#{tgt+1}/{n_e}** — **{rsign}{rpct:.1f}%** {_luck_indicator_overall(rpct)}"
+                        else:
+                            rt = f"🏆 Gelukranking NL (elite cases) — _{n_e} spelers, niet in ranking (min. {_MIN_ELITE} elite cases)_"
+                        embed.add_field(name=rt, value=Geluk._build_ranking_block(es, tgt, lambda e: e["elite_luck_score"]) if es else "_Geen data beschikbaar._", inline=False)
+
+                    else:
+                        def _cs(e: dict) -> float:
+                            ls = e.get("luck_score"); es_ = e.get("elite_luck_score")
+                            if ls is not None and es_ is not None: return (ls + es_) / 2.0
+                            return ls if ls is not None else (es_ if es_ is not None else 0.0)
+                        ns_c = sorted(ranking, key=lambda e: e["luck_score"], reverse=True)
+                        nt_c = Geluk._find_in_ranking(ns_c, e_uid, e_name)
+                        if nt_c is not None:
+                            embed.add_field(name="🎲 Rang NL (normale cases)", value=f"**#{nt_c+1}/{rank_total}** _(min. {_MIN_NORMAL} cases)_", inline=True)
+                        eo_c = [e for e in ranking if e.get("elite_luck_score") is not None]
+                        es_c = sorted(eo_c, key=lambda e: e["elite_luck_score"], reverse=True)
+                        et_c = Geluk._find_in_ranking(es_c, e_uid, e_name)
+                        if et_c is not None:
+                            embed.add_field(name="💎 Rang NL (elite cases)", value=f"**#{et_c+1}/{len(es_c)}** _(min. {_MIN_ELITE} elite cases)_", inline=True)
+                        comb = sorted(ranking, key=_cs, reverse=True)
+                        ct = Geluk._find_in_ranking(comb, e_uid, e_name)
+                        lb = Geluk._build_ranking_block(comb, ct, _cs)
+                        if ct is not None:
+                            rpct = _cs(comb[ct]); rsign = "+" if rpct >= 0 else ""
+                            rt = f"🏆 Gelukranking NL (gecombineerd) — rang **#{ct+1}/{rank_total}** — **{rsign}{rpct:.1f}%** {_luck_indicator_overall(rpct)}"
+                        else:
+                            rt = f"🏆 Gelukranking NL (gecombineerd) — _{rank_total} spelers, niet in ranking (min. {_MIN_NORMAL} cases)_"
+                        embed.add_field(name=rt, value=lb, inline=False)
+
+                    if updated_at_r:
+                        ft = embed.footer.text or ""
+                        if "Ranking" not in ft:
+                            embed.set_footer(text=ft + f"  •  Ranking wordt 1x per dag bijgewerkt (laatst: {updated_at_r} UTC)")
+            except Exception:
+                logger.exception("Geluk: failed to add ranking to cached embed")
+        await interaction.followup.send(embed=embed)
 
     def _api_offline_embed(self, note: str = "") -> discord.Embed:
         """Return a standardised 'API offline' embed."""
@@ -621,6 +717,7 @@ class Geluk(commands.Cog, name="geluk"):
         gebruiker_id="Optioneel: WarEra user ID van de speler",
         aantal_cases="Optioneel: analyseer alleen de X meest recente case openings",
         type="Toon alleen normale cases, elite cases, of gecombineerd (standaard: gecombineerd)",
+        live="Haal nieuwe cases op sinds de laatste update voor realtime geluk (standaard: gecachete data van vandaag)",
     )
     @app_commands.autocomplete(speler=citizen_autocomplete)
     async def geluk(
@@ -630,6 +727,7 @@ class Geluk(commands.Cog, name="geluk"):
         gebruiker_id: Optional[str] = None,
         aantal_cases: Optional[int] = None,
         type: Optional[Literal["normaal", "elite", "gecombineerd"]] = None,
+        live: bool = False,
     ) -> None:
         await interaction.response.defer(thinking=True)
 
@@ -664,78 +762,10 @@ class Geluk(commands.Cog, name="geluk"):
                     except Exception as exc:
                         logger.warning("Geluk: DB name lookup failed: %s", exc)
                 if entry is not None:
-                    embed_off = self._build_cached_luck_embed(entry, type)
-                    # Add ranking if this is an NL citizen
-                    nl_country_id_off = self.config.get("nl_country_id")
-                    if nl_country_id_off and entry.get("country_id") == nl_country_id_off:
-                        try:
-                            ranking_off = await db.get_luck_ranking(nl_country_id_off)
-                            if ranking_off:
-                                try:
-                                    _stored_off = await db.get_poll_state("luck_ranking_total")
-                                    rank_total_off = int(_stored_off) if _stored_off else len(ranking_off)
-                                except Exception:
-                                    rank_total_off = len(ranking_off)
-                                rank_total_off = min(rank_total_off, len(ranking_off))
-                                _MIN_NORMAL_OFF = 20
-                                _MIN_ELITE_OFF = 10
-                                _e_uid = entry.get("user_id")
-                                _e_name = entry.get("citizen_name") or ""
-                                updated_at_r = (ranking_off[0].get("updated_at") or "")[:16].replace("T", " ")
-
-                                if type == "normaal":
-                                    ns = sorted(ranking_off, key=lambda e: e["luck_score"], reverse=True)
-                                    tgt = Geluk._find_in_ranking(ns, _e_uid, _e_name)
-                                    if tgt is not None:
-                                        rpct = ns[tgt]["luck_score"]; rsign = "+" if rpct >= 0 else ""
-                                        rt = f"\U0001f3c6 Gelukranking NL (normale cases) \u2014 rang **#{tgt+1}/{rank_total_off}** \u2014 **{rsign}{rpct:.1f}%** {_luck_indicator_overall(rpct)}"
-                                    else:
-                                        rt = f"\U0001f3c6 Gelukranking NL (normale cases) \u2014 _{rank_total_off} spelers, niet in ranking (min. {_MIN_NORMAL_OFF} cases)_"
-                                    embed_off.add_field(name=rt, value=Geluk._build_ranking_block(ns, tgt, lambda e: e["luck_score"]), inline=False)
-
-                                elif type == "elite":
-                                    eo = [e for e in ranking_off if e.get("elite_luck_score") is not None]
-                                    es = sorted(eo, key=lambda e: e["elite_luck_score"], reverse=True)
-                                    tgt = Geluk._find_in_ranking(es, _e_uid, _e_name)
-                                    n_e = len(es)
-                                    if tgt is not None:
-                                        rpct = es[tgt]["elite_luck_score"]; rsign = "+" if rpct >= 0 else ""
-                                        rt = f"\U0001f3c6 Gelukranking NL (elite cases) \u2014 rang **#{tgt+1}/{n_e}** \u2014 **{rsign}{rpct:.1f}%** {_luck_indicator_overall(rpct)}"
-                                    else:
-                                        rt = f"\U0001f3c6 Gelukranking NL (elite cases) \u2014 _{n_e} spelers, niet in ranking (min. {_MIN_ELITE_OFF} elite cases)_"
-                                    embed_off.add_field(name=rt, value=Geluk._build_ranking_block(es, tgt, lambda e: e["elite_luck_score"]) if es else "_Geen data beschikbaar._", inline=False)
-
-                                else:
-                                    def _cs_off(e: dict) -> float:
-                                        ls = e.get("luck_score"); es_ = e.get("elite_luck_score")
-                                        if ls is not None and es_ is not None: return (ls + es_) / 2.0
-                                        return ls if ls is not None else (es_ if es_ is not None else 0.0)
-                                    ns_c = sorted(ranking_off, key=lambda e: e["luck_score"], reverse=True)
-                                    nt_c = Geluk._find_in_ranking(ns_c, _e_uid, _e_name)
-                                    if nt_c is not None:
-                                        embed_off.add_field(name="\U0001f3b2 Rang NL (normale cases)", value=f"**#{nt_c+1}/{rank_total_off}** _(min. {_MIN_NORMAL_OFF} cases)_", inline=True)
-                                    eo_c = [e for e in ranking_off if e.get("elite_luck_score") is not None]
-                                    es_c = sorted(eo_c, key=lambda e: e["elite_luck_score"], reverse=True)
-                                    et_c = Geluk._find_in_ranking(es_c, _e_uid, _e_name)
-                                    if et_c is not None:
-                                        embed_off.add_field(name="\U0001f48e Rang NL (elite cases)", value=f"**#{et_c+1}/{len(es_c)}** _(min. {_MIN_ELITE_OFF} elite cases)_", inline=True)
-                                    comb = sorted(ranking_off, key=_cs_off, reverse=True)
-                                    ct = Geluk._find_in_ranking(comb, _e_uid, _e_name)
-                                    lb_off = Geluk._build_ranking_block(comb, ct, _cs_off)
-                                    if ct is not None:
-                                        rpct = _cs_off(comb[ct]); rsign = "+" if rpct >= 0 else ""
-                                        rt = f"\U0001f3c6 Gelukranking NL (gecombineerd) \u2014 rang **#{ct+1}/{rank_total_off}** \u2014 **{rsign}{rpct:.1f}%** {_luck_indicator_overall(rpct)}"
-                                    else:
-                                        rt = f"\U0001f3c6 Gelukranking NL (gecombineerd) \u2014 _{rank_total_off} spelers, niet in ranking (min. {_MIN_NORMAL_OFF} cases)_"
-                                    embed_off.add_field(name=rt, value=lb_off, inline=False)
-
-                                if updated_at_r:
-                                    _ft = embed_off.footer.text or ""
-                                    if "Ranking bijgewerkt" not in _ft:
-                                        embed_off.set_footer(text=_ft + f"  \u2022  Ranking bijgewerkt: {updated_at_r} UTC")
-                        except Exception:
-                            logger.exception("Geluk: failed to add ranking to offline embed")
-                    await interaction.followup.send(embed=embed_off)
+                    await self._send_cached_luck_result(
+                        interaction, db, entry, type,
+                        note="⚠️ De API is offline — gecachete data wordt weergegeven.",
+                    )
                 else:
                     await interaction.followup.send(
                         embed=self._api_offline_embed(), ephemeral=True
@@ -753,6 +783,109 @@ class Geluk(commands.Cog, name="geluk"):
         cases_ranking: dict = rankings.get("userCasesOpened") or {}
         total_cases_opened: int = int(cases_ranking.get("value") or 0)
         cases_rank: Optional[int] = cases_ranking.get("rank")
+
+        # Fast path: serve from the citizen_luck cache instead of live-paging
+        # the player's full openCase transaction history. daily_luck_refresh
+        # (cogs/tasks/luck.py) keeps every NL citizen's row current once a
+        # day, and covers the overwhelming majority of /geluk calls — a live
+        # per-player fetch can be hundreds of paginated API calls for an
+        # active player, which is why this command used to be slow.
+        # aantal_cases ("most recent N") can't be served by the cache (it
+        # only stores full-history aggregate counts), so that still goes live.
+        if aantal_cases is None:
+            db_cache = await self._get_db()
+            cached_entry: Optional[dict] = None
+            if db_cache:
+                try:
+                    cached_entry = await db_cache.get_luck_entry_by_user_id(resolved_user_id)
+                except Exception as exc:
+                    logger.warning("Geluk: cache lookup failed: %s", exc)
+
+            if live:
+                # Realtime mode: fetch only NEW transactions since the cache's
+                # last-seen cutoff (or a full history fetch if this player has
+                # never been cached), merge onto the cached counts, and
+                # persist the merged result — so the daily sweep and future
+                # cache-hit calls both benefit from this fresher cutoff too.
+                cutoff_id = cached_entry.get("last_seen_transaction_id") if cached_entry else None
+                prior_normal = (
+                    json.loads(cached_entry["rarity_json"])
+                    if cached_entry and cached_entry.get("rarity_json") else {}
+                )
+                prior_elite = (
+                    json.loads(cached_entry["elite_rarity_json"])
+                    if cached_entry and cached_entry.get("elite_rarity_json") else {}
+                )
+                item_rarities = await self._get_item_rarities()
+                client = await self._get_client()
+                delta_normal, delta_elite, newest_id, fetched = await fetch_case_transactions(
+                    client, resolved_user_id, item_rarities, cutoff_id=cutoff_id
+                )
+                if cutoff_id:
+                    # True incremental fetch — delta is only what's new since
+                    # cutoff_id, so add it onto the existing cached counts.
+                    merged_normal = merge_counts(prior_normal, delta_normal)
+                    merged_elite = merge_counts(prior_elite, delta_elite)
+                else:
+                    # No cutoff (never cached, OR a cached row whose
+                    # last_seen_transaction_id is still NULL — e.g. every row
+                    # that predates this column). fetch_case_transactions had
+                    # nothing to stop early at, so it already paged the
+                    # player's ENTIRE history — delta_normal/delta_elite ARE
+                    # the full, authoritative totals. Merging them onto
+                    # prior_normal/prior_elite here would double-count
+                    # everything the cached row already had (this is exactly
+                    # how a player's case count got reported at ~2x reality).
+                    merged_normal = delta_normal
+                    merged_elite = delta_elite
+                new_cutoff = newest_id or cutoff_id
+                total_opens = sum(merged_normal.values())
+                elite_total = sum(merged_elite.values())
+                luck_val = calc_luck_pct(merged_normal, total_opens)
+                elite_luck_val = calc_elite_luck_pct(merged_elite, elite_total) if elite_total >= 5 else None
+                now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+                _nl_cid = self.config.get("nl_country_id", "")
+                _player_country = (profile.get("country") or "") if profile else ""
+                if db_cache and _nl_cid and _player_country == _nl_cid:
+                    try:
+                        await db_cache.upsert_luck_score(
+                            resolved_user_id, _nl_cid, username, luck_val, total_opens,
+                            json.dumps(merged_normal), now_iso,
+                            elite_luck_score=elite_luck_val,
+                            elite_opens_count=elite_total if elite_total >= 5 else None,
+                            elite_rarity_json=json.dumps(merged_elite) if elite_total >= 5 else None,
+                            last_seen_transaction_id=new_cutoff,
+                        )
+                        await db_cache.flush_luck_scores()
+                    except Exception:
+                        logger.exception("Geluk: failed to persist live-refreshed luck score")
+
+                synthetic_entry = {
+                    "user_id": resolved_user_id,
+                    "citizen_name": username,
+                    "country_id": _player_country,
+                    "luck_score": luck_val,
+                    "opens_count": total_opens,
+                    "rarity_json": json.dumps(merged_normal),
+                    "updated_at": now_iso,
+                    "elite_luck_score": elite_luck_val,
+                    "elite_opens_count": elite_total if elite_total >= 5 else None,
+                    "elite_rarity_json": json.dumps(merged_elite) if elite_total >= 5 else None,
+                }
+                live_note = (
+                    f"🔴 Live — {fetched} nieuwe case(s) opgehaald sinds laatste update"
+                    if cutoff_id else
+                    "🔴 Live — volledige case-geschiedenis opgehaald"
+                )
+                await self._send_cached_luck_result(
+                    interaction, db_cache, synthetic_entry, type, note=live_note
+                )
+                return
+
+            if cached_entry is not None:
+                await self._send_cached_luck_result(interaction, db_cache, cached_entry, type)
+                return
 
         # 3. Load item rarities from game config
         item_rarities = await self._get_item_rarities()
@@ -1016,7 +1149,7 @@ class Geluk(commands.Cog, name="geluk"):
                         embed.add_field(name=rank_title, value=lb, inline=False)
 
                     if updated_at:
-                        footer_base += f"  •  Ranking bijgewerkt: {updated_at} UTC"
+                        footer_base += f"  •  Ranking wordt 1x per dag bijgewerkt (laatst: {updated_at} UTC)"
         except Exception:
             logger.exception("Geluk: failed to load ranking for /geluk")
 
@@ -1025,10 +1158,10 @@ class Geluk(commands.Cog, name="geluk"):
 
     @app_commands.command(
         name="caserang",
-        description="Toon de NL top op cases; optioneel met rang van een speler",
+        description="Toon de wereldwijde en NL top op cases; optioneel met rang van een speler",
     )
     @app_commands.describe(
-        speler="De gebruikersnaam van de speler (optioneel)",
+        speler="De gebruikersnaam van de speler (optioneel) — werkt voor elke speler in het spel",
         gebruiker_id="Optioneel: WarEra user ID van de speler",
         top_n="Hoeveel spelers in de top tonen (standaard: 10)",
     )
@@ -1043,108 +1176,173 @@ class Geluk(commands.Cog, name="geluk"):
         await interaction.response.defer(thinking=True)
 
         top = max(1, min(top_n or 10, 100))
-
-        nl_country_id = self.config.get("nl_country_id")
-        if not nl_country_id:
-            await interaction.followup.send(
-                "❌ `nl_country_id` is niet geconfigureerd.", ephemeral=True
-            )
-            return
+        nl_country_id = self.config.get("nl_country_id", "")
 
         db = await self._get_db()
-        ranking = await db.get_luck_ranking(nl_country_id)
-        if not ranking:
+        if not db:
+            await interaction.followup.send("❌ Database niet beschikbaar.", ephemeral=True)
+            return
+
+        all_entries = await db.get_global_luck_ranking(limit=None)
+        if not all_entries:
             await interaction.followup.send(
-                "⚠️ Geen gecachete case-data gevonden. Voer eerst `!pollgeluk` uit.",
-                ephemeral=True,
+                "⚠️ Geen gecachete case-data gevonden.", ephemeral=True
             )
             return
 
-        rows: list[dict] = [
-            {
+        def _to_row(r: dict) -> dict:
+            return {
                 "user_id": r.get("user_id") or "",
                 "username": (r.get("citizen_name") or r.get("user_id") or "?").strip(),
+                "country_id": r.get("country_id") or "",
                 "cases": int(r.get("opens_count") or 0),
             }
-            for r in ranking
-        ]
-        rows.sort(key=lambda r: (-r["cases"], r["username"].lower()))
-        for idx, row in enumerate(rows, start=1):
-            row["rank"] = idx
 
-        # Resolve player if requested
-        target_row: Optional[dict] = None
+        global_rows = [_to_row(r) for r in all_entries]
+
+        # Resolve the requested player against citizen_levels — the full
+        # citizen roster (same source the speler: autocomplete suggests
+        # from) — NOT by fuzzy-matching against global_rows, which only
+        # holds the ~1500 players with 20+ case opens who've been through a
+        # sweep. Fuzzy-matching against that narrower pool actively produces
+        # wrong results whenever the real target isn't in it: "best
+        # available" still returns *something*, e.g. "PrinceRealMarijn" vs
+        # "Biermann" scores 0.50 and "DeKapitein" vs "de_Kaiser" scores 0.63
+        # — neither is remotely the right player, but with no correct
+        # candidate in the pool to compare against, the wrong one still won.
+        # Resolving against the full roster first means an exact name match
+        # succeeds directly for any real player, and fuzzy matching (via
+        # fuzzy_citizen_by_name's own cutoff) only kicks in for genuine typos.
+        target_uid: Optional[str] = None
+        target_username: Optional[str] = None
         if gebruiker_id:
-            target_row = next((r for r in rows if r["user_id"] == gebruiker_id), None)
-        if target_row is None and speler:
-            s_low = speler.lower().strip()
-            target_row = next(
-                (r for r in rows if r["username"].lower().strip() == s_low), None
-            )
-            if target_row is None:
-                best_ratio = -1.0
-                for r in rows:
-                    ratio = difflib.SequenceMatcher(
-                        None, s_low, r["username"].lower().strip()
-                    ).ratio()
-                    if ratio > best_ratio:
-                        best_ratio = ratio
-                        target_row = r
+            details = await db.get_citizen_details_by_ids([gebruiker_id])
+            d = details.get(gebruiker_id)
+            if d:
+                target_uid = gebruiker_id
+                target_username = d.get("citizen_name") or gebruiker_id
+        elif speler:
+            resolved = await db.get_citizen_by_name_exact(speler)
+            if resolved is None:
+                resolved = await db.fuzzy_citizen_by_name(speler)
+            if resolved is not None:
+                target_uid, target_username = resolved
 
-        if (speler or gebruiker_id) and target_row is None:
+        if (speler or gebruiker_id) and target_uid is None:
             lookup_label = gebruiker_id or speler or "?"
             await interaction.followup.send(
-                f"❌ Speler **{discord.utils.escape_markdown(lookup_label)}** niet gevonden in de cache.",
+                f"❌ Speler **{discord.utils.escape_markdown(lookup_label)}** niet gevonden.",
                 ephemeral=True,
             )
             return
 
-        def _fmt_row(r: dict) -> str:
+        target_in_ranking = target_uid is not None and any(
+            r["user_id"] == target_uid for r in global_rows
+        )
+
+        # Not in the cached ranking yet — fetch their case history live so
+        # the command works for every real player, not just already-cached
+        # ones, and cache the result opportunistically so the next lookup
+        # for this player is instant.
+        if target_uid is not None and not target_in_ranking:
+            uid = target_uid
+            name = target_username or uid
+            details = await db.get_citizen_details_by_ids([uid])
+            player_country = details.get(uid, {}).get("country_id", "")
+
+            item_rarities = await self._get_item_rarities()
+            client = await self._get_client()
+            normal_counts, elite_counts, newest_id, _fetched = await fetch_case_transactions(
+                client, uid, item_rarities
+            )
+            total_opens = sum(normal_counts.values())
+            elite_total = sum(elite_counts.values())
+
+            if player_country:
+                try:
+                    luck_val = calc_luck_pct(normal_counts, total_opens)
+                    elite_luck_val = calc_elite_luck_pct(elite_counts, elite_total) if elite_total >= 5 else None
+                    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    await db.upsert_global_luck_score(
+                        uid, player_country, name, luck_val, total_opens,
+                        json.dumps(normal_counts), now_iso,
+                        elite_luck_score=elite_luck_val,
+                        elite_opens_count=elite_total if elite_total >= 5 else None,
+                        elite_rarity_json=json.dumps(elite_counts) if elite_total >= 5 else None,
+                        last_seen_transaction_id=newest_id,
+                    )
+                    await db.flush_global_luck_scores()
+                except Exception:
+                    logger.exception("caserang: failed to persist live-fetched case count for %s", uid)
+
+            # Insert into the in-memory ranking so their position is reflected
+            # immediately, without needing another DB round-trip.
+            global_rows.append({
+                "user_id": uid, "username": name,
+                "country_id": player_country, "cases": total_opens,
+            })
+
+        global_rows.sort(key=lambda r: (-r["cases"], r["username"].lower()))
+        for idx, row in enumerate(global_rows, start=1):
+            row["rank"] = idx
+
+        nl_rows = [r for r in global_rows if r["country_id"] == nl_country_id]
+        for idx, row in enumerate(nl_rows, start=1):
+            row["nl_rank"] = idx
+
+        target_global = next((r for r in global_rows if r["user_id"] == target_uid), None) if target_uid else None
+        target_nl = next((r for r in nl_rows if r["user_id"] == target_uid), None) if target_uid else None
+        is_dutch = target_global is not None and target_global["country_id"] == nl_country_id
+
+        def _fmt_row(r: dict, rank_key: str) -> str:
             name = (r["username"] or "?")[:16]
-            return f"#{r['rank']:<4} {name:<16} {r['cases']:>8,}"
+            return f"#{r[rank_key]:<4} {name:<16} {r['cases']:>8,}"
 
-        top_rows = rows[:top]
-        header = f"{'rang':<5} {'naam':<16} {'cases':>8}"
-        sep = "─" * 34
-        # Add player below top if they fall outside it
-        extra: list[dict] = []
-        if target_row and target_row["rank"] > top:
-            extra = [None, target_row]  # None → ellipsis row
+        def _build_section(rows: list[dict], rank_key: str, target: Optional[dict], title: str) -> list[tuple[str, str]]:
+            header = f"{'rang':<5} {'naam':<16} {'cases':>8}"
+            sep = "─" * 34
+            top_rows = rows[:top]
+            extra: list = []
+            if target and target[rank_key] > top:
+                extra = [None, target]
+            all_data_rows = top_rows + extra
+            CHUNK = 25
+            chunks = [all_data_rows[i : i + CHUNK] for i in range(0, len(all_data_rows), CHUNK)]
+            fields: list[tuple[str, str]] = []
+            for chunk_idx, chunk in enumerate(chunks):
+                lines: list[str] = [header, sep] if chunk_idx == 0 else []
+                for r in chunk:
+                    lines.append("    • • •" if r is None else _fmt_row(r, rank_key))
+                block = "```\n" + "\n".join(lines) + "\n```"
+                label = title if chunk_idx == 0 else f"{title} (vervolg)"
+                fields.append((label, block))
+            return fields
 
-        # Split into chunks of 25 so each field stays under Discord's 1024-char limit
-        CHUNK = 25
-        all_data_rows = top_rows + extra  # type: ignore[operator]
-        chunks: list[list] = [
-            all_data_rows[i : i + CHUNK] for i in range(0, len(all_data_rows), CHUNK)
-        ]
-
-        if target_row:
-            resolved_name = target_row["username"]
-            description = f"Speler: **{discord.utils.escape_markdown(resolved_name)}**"
-            field_title = f"Top {top} + gevraagde speler"
+        if target_global:
+            description = f"Speler: **{discord.utils.escape_markdown(target_global['username'])}**"
         else:
             description = None
-            field_title = f"Top {top}"
 
         embed = discord.Embed(
-            title="🎟️ NL case-rang",
+            title="🎟️ Case-rang",
             description=description,
             color=discord.Color.gold(),
         )
-        for chunk_idx, chunk in enumerate(chunks):
-            lines: list[str] = []
-            if chunk_idx == 0:
-                lines = [header, sep]
-            for r in chunk:
-                if r is None:
-                    lines.append("    • • •")
-                else:
-                    lines.append(_fmt_row(r))
-            block = "```\n" + "\n".join(lines) + "\n```"
-            name_label = field_title if chunk_idx == 0 else f"Top {top} (vervolg)"
-            embed.add_field(name=name_label, value=block, inline=False)
+        for label, block in _build_section(
+            global_rows, "rank", target_global, f"🌍 Wereldwijd top {top}"
+        ):
+            embed.add_field(name=label, value=block, inline=False)
+        for label, block in _build_section(
+            nl_rows, "nl_rank", target_nl if is_dutch else None, f"🇳🇱 NL top {top}"
+        ):
+            embed.add_field(name=label, value=block, inline=False)
 
-        embed.set_footer(text=f"Cache-bron: citizen_luck • NL spelers: {len(rows)}")
+        embed.set_footer(
+            text=(
+                f"Wordt periodiek bijgewerkt • {len(global_rows)} spelers wereldwijd, "
+                f"{len(nl_rows)} NL spelers"
+            )
+        )
         await interaction.followup.send(embed=embed)
 
 

@@ -354,7 +354,12 @@ class MuSubscriptionsCog(TaskCogBase, name="mu_subscriptions"):
                 )
                 continue
 
-            await self._post_auction_won(channel, mu_name, auction)
+            await self._post_auction_won(
+                channel, mu_name, auction,
+                mu_id=mu_id,
+                guild_id=sub["guild_id"],
+                ping_enabled=sub.get("ping_enabled", False),
+            )
             if auction_id > new_cutoff:
                 new_cutoff = auction_id
 
@@ -366,8 +371,37 @@ class MuSubscriptionsCog(TaskCogBase, name="mu_subscriptions"):
                     "mu_subscriptions: failed to update cutoff for %s: %s", mu_name, exc
                 )
 
+    async def _resolve_war_member_role(
+        self, mu_id: str, mu_name: str, guild_id: str
+    ) -> discord.Role | None:
+        """Resolve the war-guild "<MU> Member" role for pinging.
+
+        Tries the war_mu_roles DB cache first (maintained by war_sync), then
+        falls back to a by-name lookup — the same self-healing pattern
+        war_sync.py itself uses, since the DB cache can be briefly stale
+        right after a role is recreated.
+        """
+        guild = self.bot.get_guild(int(guild_id))
+        if not guild or not self._db:
+            return None
+        try:
+            role_id = await self._db.get_war_mu_role(mu_id, "member", guild_id)
+        except Exception:
+            role_id = None
+        role = guild.get_role(role_id) if role_id else None
+        if role is None:
+            role = discord.utils.get(guild.roles, name=f"{mu_name} Member")
+        return role
+
     async def _post_auction_won(
-        self, channel: discord.abc.Messageable, mu_name: str, auction: dict
+        self,
+        channel: discord.abc.Messageable,
+        mu_name: str,
+        auction: dict,
+        *,
+        mu_id: str = "",
+        guild_id: str = "",
+        ping_enabled: bool = False,
     ) -> None:
         battle_id = str(auction.get("battle") or "")
         payout = float(auction.get("currentPayout") or auction.get("budget") or 0)
@@ -401,8 +435,24 @@ class MuSubscriptionsCog(TaskCogBase, name="mu_subscriptions"):
             colour=discord.Colour(0x2ECC71),
         )
 
+        content = None
+        allowed_mentions = None
+        if ping_enabled and mu_id and guild_id:
+            role = await self._resolve_war_member_role(mu_id, mu_name, guild_id)
+            if role:
+                content = role.mention
+                allowed_mentions = discord.AllowedMentions(
+                    roles=True, everyone=False, users=False
+                )
+            else:
+                logger.warning(
+                    "mu_subscriptions: ping enabled for %s but no war-guild "
+                    "member role found (mu_id=%s, guild_id=%s)",
+                    mu_name, mu_id, guild_id,
+                )
+
         try:
-            await channel.send(embed=embed)
+            await channel.send(content=content, embed=embed, allowed_mentions=allowed_mentions)
         except Exception as exc:
             logger.warning(
                 "mu_subscriptions: failed to send auction embed for %s: %s", mu_name, exc
@@ -454,9 +504,14 @@ class MuSubscriptionsCog(TaskCogBase, name="mu_subscriptions"):
         name="contract_gewonnen",
         description="Ping dit kanaal wanneer een MU een auctiecontract wint. Opnieuw uitvoeren stopt het.",
     )
-    @app_commands.describe(mu="Naam van de MU")
+    @app_commands.describe(
+        mu="Naam van de MU",
+        ping="Ping ook de @<MU> Member rol van de war guild (standaard uit)",
+    )
     @app_commands.autocomplete(mu=_mu_autocomplete)
-    async def contract_gewonnen(self, interaction: discord.Interaction, mu: str) -> None:
+    async def contract_gewonnen(
+        self, interaction: discord.Interaction, mu: str, ping: bool = False
+    ) -> None:
         await interaction.response.defer(ephemeral=True)
         if not self._db:
             await interaction.followup.send("❌ Database niet beschikbaar.", ephemeral=True)
@@ -505,10 +560,18 @@ class MuSubscriptionsCog(TaskCogBase, name="mu_subscriptions"):
                         "mu_subscriptions: could not fetch cutoff for %s: %s", mu_name, exc
                     )
 
-            await self._db.add_auction_win_sub(channel_id, guild_id, mu_name, mu_id, cutoff_at)
+            await self._db.add_auction_win_sub(
+                channel_id, guild_id, mu_name, mu_id, cutoff_at, ping_enabled=ping
+            )
+            ping_note = (
+                "\nDe **@" + mu_name + " Member** rol wordt hierbij gepingd."
+                if ping else
+                "\nEr wordt niet gepingd (zet `ping:True` om dat aan te zetten)."
+            )
             await interaction.followup.send(
                 f"✅ Aangemeld voor contractmeldingen van **{mu_name}**.\n"
-                "Zodra deze MU een auctiecontract wint wordt dat hier gemeld.",
+                "Zodra deze MU een auctiecontract wint wordt dat hier gemeld."
+                + ping_note,
                 ephemeral=True,
             )
 

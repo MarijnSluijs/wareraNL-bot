@@ -24,14 +24,16 @@ class LuckMixin:
         elite_luck_score: Optional[float] = None,
         elite_opens_count: Optional[int] = None,
         elite_rarity_json: Optional[str] = None,
+        last_seen_transaction_id: Optional[str] = None,
     ) -> None:
         """Insert or replace a luck score (call flush_luck_scores to commit batch)."""
         await self._conn.execute(
             """
             INSERT OR REPLACE INTO citizen_luck
                 (user_id, country_id, citizen_name, luck_score, opens_count, rarity_json,
-                 updated_at, elite_luck_score, elite_opens_count, elite_rarity_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 updated_at, elite_luck_score, elite_opens_count, elite_rarity_json,
+                 last_seen_transaction_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -44,6 +46,7 @@ class LuckMixin:
                 elite_luck_score,
                 elite_opens_count,
                 elite_rarity_json,
+                last_seen_transaction_id,
             ),
         )
 
@@ -86,6 +89,39 @@ class LuckMixin:
                 )
         return rows
 
+    async def get_luck_entry_by_user_id(self, user_id: str) -> Optional[dict]:
+        """Exact-match lookup of a cached luck row by WarEra user_id.
+
+        Preferred over get_luck_entry_by_name whenever the caller already has
+        the resolved user_id — no fuzzy matching, always the right player.
+        """
+        async with self._conn.execute(
+            """
+            SELECT user_id, citizen_name, country_id, luck_score, opens_count,
+                   rarity_json, updated_at, elite_luck_score, elite_opens_count,
+                   elite_rarity_json, last_seen_transaction_id
+            FROM citizen_luck
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "user_id": row[0],
+            "citizen_name": row[1],
+            "country_id": row[2],
+            "luck_score": row[3],
+            "opens_count": row[4],
+            "rarity_json": row[5],
+            "updated_at": row[6],
+            "elite_luck_score": row[7],
+            "elite_opens_count": row[8],
+            "elite_rarity_json": row[9],
+            "last_seen_transaction_id": row[10],
+        }
+
     async def get_luck_entry_by_name(
         self, name: str, cutoff: float = 0.55
     ) -> Optional[dict]:
@@ -100,7 +136,7 @@ class LuckMixin:
             """
             SELECT user_id, citizen_name, country_id, luck_score, opens_count,
                    rarity_json, updated_at, elite_luck_score, elite_opens_count,
-                   elite_rarity_json
+                   elite_rarity_json, last_seen_transaction_id
             FROM citizen_luck
             WHERE citizen_name IS NOT NULL
             """
@@ -118,6 +154,7 @@ class LuckMixin:
                         "elite_luck_score": row[7],
                         "elite_opens_count": row[8],
                         "elite_rarity_json": row[9],
+                        "last_seen_transaction_id": row[10],
                     }
                 )
         if not rows:
@@ -132,32 +169,59 @@ class LuckMixin:
                 best_ratio = ratio
                 best = entry
         return best
-        """All luck entries for a country, sorted by luck_score DESC."""
-        rows: list[dict] = []
+
+    async def get_luck_entries_for_country(self, country_id: str) -> dict[str, dict]:
+        """Bulk-load existing citizen_luck rows for a country, keyed by user_id.
+
+        Used by the daily sweep to preload prior counts + last_seen_transaction_id
+        for every citizen in one query, instead of one query per citizen.
+        """
+        result: dict[str, dict] = {}
         async with self._conn.execute(
             """
-            SELECT user_id, citizen_name, luck_score, opens_count, updated_at,
-                   elite_luck_score, elite_opens_count, elite_rarity_json
+            SELECT user_id, rarity_json, elite_rarity_json, last_seen_transaction_id
             FROM citizen_luck
             WHERE country_id = ?
-            ORDER BY luck_score DESC
             """,
             (country_id,),
         ) as cur:
             async for row in cur:
-                rows.append(
-                    {
-                        "user_id": row[0],
-                        "citizen_name": row[1] or row[0],
-                        "luck_score": row[2],
-                        "opens_count": row[3],
-                        "updated_at": row[4],
-                        "elite_luck_score": row[5],
-                        "elite_opens_count": row[6],
-                        "elite_rarity_json": row[7],
-                    }
-                )
-        return rows
+                result[row[0]] = {
+                    "rarity_json": row[1],
+                    "elite_rarity_json": row[2],
+                    "last_seen_transaction_id": row[3],
+                }
+        return result
+
+    async def delete_luck_scores_not_in(
+        self, country_id: str, keep_user_ids: list[str]
+    ) -> None:
+        """Remove citizen_luck rows for *country_id* whose user_id isn't in keep_user_ids.
+
+        Cleans up citizens who left the tracked country since the last sweep.
+        Safe to call with an empty keep list (deletes nothing, to avoid
+        wiping the whole country on a degenerate empty citizen list).
+
+        Uses a temp table rather than chunking a NOT IN list directly: unlike
+        IN, NOT IN can't be split into independent chunked queries (each
+        chunk would wrongly delete rows that only appear in a different
+        chunk), so every id must be visible to one single query.
+        """
+        if not keep_user_ids:
+            return
+        await self._conn.execute("DROP TABLE IF EXISTS _luck_keep")
+        await self._conn.execute("CREATE TEMP TABLE _luck_keep (user_id TEXT PRIMARY KEY)")
+        await self._conn.executemany(
+            "INSERT OR IGNORE INTO _luck_keep (user_id) VALUES (?)",
+            [(uid,) for uid in keep_user_ids],
+        )
+        await self._conn.execute(
+            "DELETE FROM citizen_luck WHERE country_id = ? "
+            "AND user_id NOT IN (SELECT user_id FROM _luck_keep)",
+            (country_id,),
+        )
+        await self._conn.execute("DROP TABLE _luck_keep")
+        await self._conn.commit()
 
     async def get_citizens_for_luck_refresh(
         self, country_id: str
@@ -199,14 +263,16 @@ class LuckMixin:
         elite_luck_score: Optional[float] = None,
         elite_opens_count: Optional[int] = None,
         elite_rarity_json: Optional[str] = None,
+        last_seen_transaction_id: Optional[str] = None,
     ) -> None:
         """Insert or replace a global luck entry (call flush_global_luck_scores to commit)."""
         await self._conn.execute(
             """
             INSERT OR REPLACE INTO global_citizen_luck
                 (user_id, country_id, citizen_name, luck_score, opens_count, rarity_json,
-                 updated_at, elite_luck_score, elite_opens_count, elite_rarity_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 updated_at, elite_luck_score, elite_opens_count, elite_rarity_json,
+                 last_seen_transaction_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -219,6 +285,7 @@ class LuckMixin:
                 elite_luck_score,
                 elite_opens_count,
                 elite_rarity_json,
+                last_seen_transaction_id,
             ),
         )
 
@@ -227,8 +294,53 @@ class LuckMixin:
         await self._conn.commit()
 
     async def clear_global_luck(self) -> None:
-        """Delete all global luck entries (called at the start of a full sweep)."""
+        """Delete all global luck entries.
+
+        No longer called by the sweep itself (which is now incremental and
+        must preserve prior rows to merge deltas onto) — kept for manual
+        recovery/debugging use only.
+        """
         await self._conn.execute("DELETE FROM global_citizen_luck")
+        await self._conn.commit()
+
+    async def get_all_global_luck_entries(self) -> dict[str, dict]:
+        """Bulk-load existing global_citizen_luck rows, keyed by user_id.
+
+        Used by the global sweep to preload prior counts + last_seen_transaction_id
+        for every citizen in one query, instead of one query per citizen.
+        """
+        result: dict[str, dict] = {}
+        async with self._conn.execute(
+            "SELECT user_id, rarity_json, elite_rarity_json, last_seen_transaction_id "
+            "FROM global_citizen_luck"
+        ) as cur:
+            async for row in cur:
+                result[row[0]] = {
+                    "rarity_json": row[1],
+                    "elite_rarity_json": row[2],
+                    "last_seen_transaction_id": row[3],
+                }
+        return result
+
+    async def delete_global_luck_scores_not_in(self, keep_user_ids: list[str]) -> None:
+        """Remove global_citizen_luck rows whose user_id isn't in keep_user_ids.
+
+        See delete_luck_scores_not_in for why this uses a temp table instead
+        of chunking (NOT IN can't be split into independent chunked queries).
+        """
+        if not keep_user_ids:
+            return
+        await self._conn.execute("DROP TABLE IF EXISTS _global_luck_keep")
+        await self._conn.execute("CREATE TEMP TABLE _global_luck_keep (user_id TEXT PRIMARY KEY)")
+        await self._conn.executemany(
+            "INSERT OR IGNORE INTO _global_luck_keep (user_id) VALUES (?)",
+            [(uid,) for uid in keep_user_ids],
+        )
+        await self._conn.execute(
+            "DELETE FROM global_citizen_luck "
+            "WHERE user_id NOT IN (SELECT user_id FROM _global_luck_keep)"
+        )
+        await self._conn.execute("DROP TABLE _global_luck_keep")
         await self._conn.commit()
 
     async def get_global_luck_ranking(
@@ -407,11 +519,18 @@ class LuckMixin:
         return rows
 
     async def search_global_luck_by_name(self, name: str) -> list[dict]:
-        """Case-insensitive name search in global_citizen_luck."""
+        """Case-insensitive name search in global_citizen_luck.
+
+        Includes the elite_* and last_seen_transaction_id columns — a prior
+        version of this query omitted them, which silently meant /globalluck's
+        cached-fallback path never had elite luck data to show.
+        """
         rows: list[dict] = []
         async with self._conn.execute(
             """
-            SELECT user_id, country_id, citizen_name, luck_score, opens_count, rarity_json, updated_at
+            SELECT user_id, country_id, citizen_name, luck_score, opens_count, rarity_json,
+                   updated_at, elite_luck_score, elite_opens_count, elite_rarity_json,
+                   last_seen_transaction_id
             FROM global_citizen_luck
             WHERE lower(citizen_name) LIKE lower(?)
             ORDER BY luck_score DESC
@@ -428,6 +547,10 @@ class LuckMixin:
                         "opens_count": row[4],
                         "rarity_json": row[5],
                         "updated_at": row[6],
+                        "elite_luck_score": row[7],
+                        "elite_opens_count": row[8],
+                        "elite_rarity_json": row[9],
+                        "last_seen_transaction_id": row[10],
                     }
                 )
         return rows

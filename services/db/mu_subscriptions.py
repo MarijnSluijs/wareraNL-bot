@@ -99,21 +99,23 @@ class MuSubscriptionsMixin:
         mu_name: str,
         mu_id: str,
         cutoff_at: str | None = None,
+        ping_enabled: bool = False,
     ) -> None:
         now = datetime.now(timezone.utc).isoformat()
         await self._conn.execute(
             """
             INSERT INTO mu_auction_win_subs
-                (channel_id, guild_id, mu_name, mu_id, seen_ids, initialized, cutoff_at, added_at)
-            VALUES (?, ?, ?, ?, '[]', 1, ?, ?)
+                (channel_id, guild_id, mu_name, mu_id, seen_ids, initialized, cutoff_at, added_at, ping_enabled)
+            VALUES (?, ?, ?, ?, '[]', 1, ?, ?, ?)
             ON CONFLICT(channel_id, mu_name) DO UPDATE SET
-                mu_id       = excluded.mu_id,
-                guild_id    = excluded.guild_id,
-                seen_ids    = '[]',
-                initialized = 1,
-                cutoff_at   = excluded.cutoff_at
+                mu_id        = excluded.mu_id,
+                guild_id     = excluded.guild_id,
+                seen_ids     = '[]',
+                initialized  = 1,
+                cutoff_at    = excluded.cutoff_at,
+                ping_enabled = excluded.ping_enabled
             """,
-            (channel_id, guild_id, mu_name, mu_id, cutoff_at, now),
+            (channel_id, guild_id, mu_name, mu_id, cutoff_at, now, int(ping_enabled)),
         )
         await self._conn.commit()
 
@@ -145,7 +147,7 @@ class MuSubscriptionsMixin:
     async def get_all_auction_win_subs(self) -> list[dict]:
         rows: list[dict] = []
         async with self._conn.execute(
-            "SELECT channel_id, guild_id, mu_name, mu_id, seen_ids, cutoff_at"
+            "SELECT channel_id, guild_id, mu_name, mu_id, seen_ids, cutoff_at, ping_enabled"
             " FROM mu_auction_win_subs"
         ) as cur:
             async for row in cur:
@@ -154,12 +156,13 @@ class MuSubscriptionsMixin:
                 except (ValueError, TypeError):
                     seen = []
                 rows.append({
-                    "channel_id": row[0],
-                    "guild_id":   row[1],
-                    "mu_name":    row[2],
-                    "mu_id":      row[3],
-                    "seen_ids":   seen,
-                    "cutoff_at":  row[5] or "",
+                    "channel_id":   row[0],
+                    "guild_id":     row[1],
+                    "mu_name":      row[2],
+                    "mu_id":        row[3],
+                    "seen_ids":     seen,
+                    "cutoff_at":    row[5] or "",
+                    "ping_enabled": bool(row[6]),
                 })
         return rows
 

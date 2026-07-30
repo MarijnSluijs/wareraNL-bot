@@ -299,7 +299,6 @@ class General(commands.Cog, name="general"):
             "libben", "tige", "mem", "heit", "skoalle", "wetter", "brea",
             "moai", "wer", "hjir", "buter", "griene", "grien",
             "tsiis", "sizze", "gjin", "oprjochte",
-            # +31: numbers, days, seasons, body, animals, colors, verbs
             "twa", "trije", "fjouwer", "fiif", "seis", "san",
             "snein", "moandei", "tiisdei", "woansdei", "sneon",
             "simmer", "hjerst", "maitiid", "dei", "wike",
