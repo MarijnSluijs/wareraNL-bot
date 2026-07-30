@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from discord.ext import tasks
 
 from cogs.tasks._base import TaskCogBase
+from services.case_luck import fetch_case_transactions, merge_counts
 
 logger = logging.getLogger("discord_bot")
 
@@ -103,9 +104,15 @@ class LuckTasks(TaskCogBase, name="luck_tasks"):
     # Daily luck score sweep                                               #
     # ------------------------------------------------------------------ #
 
-    @tasks.loop(hours=1)
+    @tasks.loop(hours=24)
     async def daily_luck_refresh(self):
-        """Calculate and cache luck scores for all NL citizens once per hour."""
+        """Calculate and cache luck scores for all NL citizens once per day.
+
+        This does a full openCase transaction-history fetch per citizen, which
+        is expensive (thousands of transaction.getPaginatedTransactions calls
+        for an active playerbase) — was previously hours=1, which meant the
+        full sweep ran every hour despite the "daily" name.
+        """
         if not self._client or not self._db:
             return
 
@@ -119,16 +126,16 @@ class LuckTasks(TaskCogBase, name="luck_tasks"):
         if not nl_country_id:
             return
 
-        # 0.9-hour cooldown guard (prevents double-runs on restart)
+        # 20-hour cooldown guard (prevents double-runs on restart within the same day)
         try:
             last_run_str = await self._db.get_poll_state("luck_refresh_last_run")
             if last_run_str:
                 elapsed_h = (
                     now_utc - datetime.fromisoformat(last_run_str)
                 ).total_seconds() / 3600
-                if elapsed_h < 0.9:
+                if elapsed_h < 20:
                     logger.info(
-                        "daily_luck_refresh: skipping — last run %.1fh ago (< 0.9h)",
+                        "daily_luck_refresh: skipping — last run %.1fh ago (< 20h)",
                         elapsed_h,
                     )
                     return
@@ -164,62 +171,6 @@ class LuckTasks(TaskCogBase, name="luck_tasks"):
     # ------------------------------------------------------------------ #
     # Internals                                                            #
     # ------------------------------------------------------------------ #
-
-    async def _fetch_luck_data(
-        self, user_id: str, item_rarities: dict
-    ) -> tuple[dict[str, int], dict[str, int]]:
-        """Page all openCase transactions for a user.
-
-        Returns (normal_counts, elite_counts) separated by case type.
-        """
-        rarity_keys = list(_LUCK_EXPECTED.keys())
-        normal_counts: dict[str, int] = {r: 0 for r in rarity_keys}
-        elite_counts: dict[str, int] = {r: 0 for r in rarity_keys}
-        cursor = None
-        while True:
-            payload: dict = {
-                "userId": user_id,
-                "transactionType": "openCase",
-                "limit": 100,
-            }
-            if cursor:
-                payload["cursor"] = cursor
-            try:
-                raw = await self._client.get(
-                    "/transaction.getPaginatedTransactions",
-                    params={"input": __import__("json").dumps(payload)},
-                )
-            except Exception:
-                break
-            data = (
-                raw.get("result", {}).get("data", raw) if isinstance(raw, dict) else {}
-            )
-            if isinstance(data, dict):
-                items = data.get("items") or data.get("transactions") or []
-                cursor = data.get("nextCursor") or data.get("cursor")
-            elif isinstance(data, list):
-                items = data
-                cursor = None
-            else:
-                break
-            for tx in items:
-                if not isinstance(tx, dict):
-                    continue
-                opened_case = tx.get("itemCode", "")
-                is_elite = item_rarities.get(opened_case) == "mythic"
-                received = tx.get("item") or {}
-                item_code = (
-                    received.get("code") if isinstance(received, dict) else received
-                ) or ""
-                rarity = item_rarities.get(item_code, "common")
-                if is_elite:
-                    elite_counts[rarity] = elite_counts.get(rarity, 0) + 1
-                else:
-                    normal_counts[rarity] = normal_counts.get(rarity, 0) + 1
-            if not cursor or not items:
-                break
-            # await asyncio.sleep(0.2)
-        return normal_counts, elite_counts
 
     async def _daily_luck_refresh_sweep(
         self,
@@ -261,15 +212,44 @@ class LuckTasks(TaskCogBase, name="luck_tasks"):
             except Exception:
                 logger.debug("daily_luck_refresh: progress_cb failed at start")
 
-        await self._db.delete_luck_scores_for_country(nl_country_id)
+        # Preload every citizen's prior counts + cutoff in one query, instead
+        # of wiping the table and re-fetching each player's ENTIRE lifetime
+        # case history from scratch every day. transaction.getPaginatedTransactions
+        # pages newest-first, so fetch_case_transactions can stop as soon as
+        # it reaches last_seen_transaction_id — only new opens since
+        # yesterday get fetched, and their counts are added onto the old ones.
+        prior_entries = await self._db.get_luck_entries_for_country(nl_country_id)
 
         MIN_OPENS = 20
         recorded = 0
         for i, (user_id, citizen_name) in enumerate(citizens):
             try:
-                normal_counts, elite_counts = await self._fetch_luck_data(
-                    user_id, item_rarities
+                prior = prior_entries.get(user_id)
+                prior_normal = json.loads(prior["rarity_json"]) if prior and prior.get("rarity_json") else {}
+                prior_elite = json.loads(prior["elite_rarity_json"]) if prior and prior.get("elite_rarity_json") else {}
+                cutoff_id = prior.get("last_seen_transaction_id") if prior else None
+
+                delta_normal, delta_elite, newest_id, _fetched = await fetch_case_transactions(
+                    self._client, user_id, item_rarities, cutoff_id=cutoff_id
                 )
+                if cutoff_id:
+                    # True incremental fetch — delta is only what's new since
+                    # cutoff_id, so add it onto the existing counts.
+                    normal_counts = merge_counts(prior_normal, delta_normal)
+                    elite_counts = merge_counts(prior_elite, delta_elite)
+                else:
+                    # No cutoff (first-ever scan, OR an existing row whose
+                    # last_seen_transaction_id is still NULL — e.g. every row
+                    # that predates this column). fetch_case_transactions had
+                    # nothing to stop early at, so it already paged the
+                    # player's ENTIRE history — delta_normal/delta_elite ARE
+                    # the full, authoritative totals. Merging them onto
+                    # prior_normal/prior_elite here would double-count
+                    # everything the prior row already had.
+                    normal_counts = delta_normal
+                    elite_counts = delta_elite
+                new_cutoff = newest_id or cutoff_id
+
                 total_opens = sum(normal_counts.values())
                 if total_opens < MIN_OPENS:
                     continue
@@ -288,6 +268,7 @@ class LuckTasks(TaskCogBase, name="luck_tasks"):
                     elite_luck_score=elite_luck_pct,
                     elite_opens_count=elite_total if elite_total >= 5 else None,
                     elite_rarity_json=json.dumps(elite_counts) if elite_total >= 5 else None,
+                    last_seen_transaction_id=new_cutoff,
                 )
                 recorded += 1
             except Exception:
@@ -302,6 +283,15 @@ class LuckTasks(TaskCogBase, name="luck_tasks"):
                     pass
 
         await self._db.flush_luck_scores()
+        # Drop rows for citizens no longer in the tracked NL list (left the
+        # country, etc). Replaces the old unconditional pre-loop wipe, which
+        # would have destroyed the cutoff/counts this sweep now depends on.
+        try:
+            await self._db.delete_luck_scores_not_in(
+                nl_country_id, [uid for uid, _ in citizens]
+            )
+        except Exception:
+            logger.exception("daily_luck_refresh: stale-row cleanup failed")
         try:
             await self._db.set_poll_state("luck_ranking_total", str(recorded))
         except Exception:

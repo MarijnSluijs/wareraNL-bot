@@ -53,6 +53,11 @@ VERIFIED_ROLE_ID        = 1521895797757575168   # given to everyone on approval
 
 STAFF_ROLE_IDS = [1495692303367540767, 1495692272728150016, 1495692461375357009, 1495847731963494400]
 
+# Resolved from this file's location, not cwd, so it works regardless of the
+# working directory the process was launched from.
+_PROJECT_ROOT   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_GEAR_IMAGE_PATH = os.path.join(_PROJECT_ROOT, "equipment-item-icons", "gear.png")
+
 AMBASSADOR_ROLES: dict[str, int] = {
     "Netherlands":             1495785962234577037,
     "Angola":                  1495786072305569863,
@@ -1208,6 +1213,18 @@ class VerificationCog(commands.Cog, name="verification"):
         if errors:
             result += "\n⚠️ " + " | ".join(errors)
         await interaction.followup.send(result, ephemeral=True)
+
+    @app_commands.command(name="gear", description="Stuur de gear-afbeelding.")
+    async def gear(self, interaction: discord.Interaction) -> None:
+        if not os.path.isfile(_GEAR_IMAGE_PATH):
+            logger.warning("gear: image not found at %s", _GEAR_IMAGE_PATH)
+            await interaction.response.send_message(
+                "❌ Afbeelding niet gevonden.", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            file=discord.File(_GEAR_IMAGE_PATH, filename="gear.png")
+        )
 
     async def cog_app_command_error(
         self,

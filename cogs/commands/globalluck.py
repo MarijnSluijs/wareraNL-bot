@@ -11,6 +11,7 @@ import difflib
 import json
 import logging
 import math as _luck_math
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Literal, Optional
 
 import discord
@@ -19,6 +20,7 @@ from discord.ext import commands
 
 from cogs.commands._base import citizen_autocomplete, fmt_nl_time
 from services.api_client import APIClient
+from services.case_luck import fetch_case_transactions, merge_counts
 
 if TYPE_CHECKING:
     from bot import DiscordBot
@@ -311,6 +313,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         speler="Optional: search by player name for personal analysis + worldwide rank",
         aantal_cases="Optional: analyse only the X most recent case openings (player mode only)",
         type="Show only normal cases, elite cases, or combined (default: combined)",
+        live="Fetch new cases since the last update for realtime luck (default: today's cached data)",
     )
     @app_commands.autocomplete(speler=citizen_autocomplete)
     async def globalluck(
@@ -319,6 +322,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         speler: Optional[str] = None,
         aantal_cases: Optional[int] = None,
         type: Optional[Literal["normaal", "elite", "gecombineerd"]] = None,
+        live: bool = False,
     ) -> None:
         await interaction.response.defer(thinking=True)
 
@@ -347,7 +351,7 @@ class GlobalLuck(commands.Cog, name="globalluck"):
             return country_names.get(cid, cid[:8] + "…" if len(cid) > 8 else cid)
 
         if speler:
-            await self._show_player(interaction, db, speler, total_ranked, _cname, max_cases=aantal_cases, weergave=type)
+            await self._show_player(interaction, db, speler, total_ranked, _cname, max_cases=aantal_cases, weergave=type, live=live)
         else:
             await self._show_leaderboard(interaction, db, total_ranked, _cname)
 
@@ -435,70 +439,173 @@ class GlobalLuck(commands.Cog, name="globalluck"):
         _cname,
         max_cases: Optional[int] = None,
         weergave: Optional[Literal["normaal", "elite", "gecombineerd"]] = None,
+        live: bool = False,
     ) -> None:
-        # Search by name (DB LIKE search, then fuzzy-match)
+        # Search by name in the global_citizen_luck ranking table (fast path).
         candidates = await db.search_global_luck_by_name(speler)
 
-        if not candidates:
-            await interaction.followup.send(
-                f"❌ No player found matching **{discord.utils.escape_markdown(speler)}** "
-                f"in the global ranking.\n"
-                f"Check the spelling or wait until the ranking is updated.",
-                ephemeral=True,
+        target: Optional[dict] = None
+        if candidates:
+            # Exact match first, then best fuzzy match
+            s_low = speler.lower().strip()
+            target = next(
+                (
+                    c
+                    for c in candidates
+                    if (c.get("citizen_name") or "").lower().strip() == s_low
+                ),
+                None,
             )
-            return
+            if target is None:
+                best_ratio = -1.0
+                for c in candidates:
+                    ratio = difflib.SequenceMatcher(
+                        None, s_low, (c.get("citizen_name") or "").lower().strip()
+                    ).ratio()
+                    if ratio > best_ratio:
+                        best_ratio = ratio
+                        target = c
 
-        # Exact match first, then best fuzzy match
-        s_low = speler.lower().strip()
-        target = next(
-            (
-                c
-                for c in candidates
-                if (c.get("citizen_name") or "").lower().strip() == s_low
-            ),
-            None,
-        )
+        not_yet_ranked = False
         if target is None:
-            best_ratio = -1.0
-            for c in candidates:
-                ratio = difflib.SequenceMatcher(
-                    None, s_low, (c.get("citizen_name") or "").lower().strip()
-                ).ratio()
-                if ratio > best_ratio:
-                    best_ratio = ratio
-                    target = c
-
-        if target is None:
-            await interaction.followup.send(
-                f"❌ No result for **{discord.utils.escape_markdown(speler)}**.",
-                ephemeral=True,
-            )
-            return
+            # Not (yet) in global_citizen_luck — this does NOT mean the player
+            # doesn't exist: the ranking table only holds players with 20+
+            # case opens who have been through a completed sweep. The
+            # /globalluck speler: autocomplete suggests from citizen_levels
+            # (every known citizen), which is a much broader set — so a
+            # perfectly valid player can autocomplete successfully and then
+            # get "not found" here. Resolve them from citizen_levels instead
+            # and fetch their case history live so the command still works.
+            resolved = await db.get_citizen_by_name_exact(speler)
+            if resolved is None:
+                resolved = await db.fuzzy_citizen_by_name(speler)
+            if resolved is None:
+                await interaction.followup.send(
+                    f"❌ No player found matching **{discord.utils.escape_markdown(speler)}**.\n"
+                    f"Check the spelling — they may not be a tracked citizen yet.",
+                    ephemeral=True,
+                )
+                return
+            uid, name = resolved
+            details = await db.get_citizen_details_by_ids([uid])
+            cid = details.get(uid, {}).get("country_id", "")
+            target = {
+                "user_id": uid,
+                "citizen_name": name,
+                "country_id": cid,
+                "luck_score": 0.0,
+                "opens_count": 0,
+                "rarity_json": None,
+                "elite_rarity_json": None,
+                "updated_at": "",
+                "last_seen_transaction_id": None,
+            }
+            not_yet_ranked = True
+            live = True  # no cache row exists — must fetch live to show anything
 
         username = target.get("citizen_name") or target.get("user_id") or "?"
         user_id = target["user_id"]
         country_id = target.get("country_id", "")
         rank_updated_at = fmt_nl_time(target.get("updated_at") or "") or "?"
 
-        rank, _total = await db.get_global_luck_rank(user_id)
-        elite_rank, elite_rank_total = await db.get_global_luck_rank_elite(user_id)
-        combined_rank, _combined_total = await db.get_global_luck_rank_combined(user_id)
-        rank_str = f"#{rank:,}" if rank is not None else "?"
-        elite_rank_str = f"#{elite_rank:,}" if elite_rank is not None else "?"
-        combined_rank_str = f"#{combined_rank:,}" if combined_rank is not None else "?"
+        if not_yet_ranked:
+            # Rank queries compare against this user_id's own luck_score via a
+            # subquery; with no row yet that subquery is NULL, and SQL's
+            # `x > NULL` is never true — every comparison would be filtered
+            # out and COUNT(*) would come back 0, producing a false "rank #1".
+            # Skip them entirely until the live fetch below (maybe) adds a row.
+            rank = elite_rank = combined_rank = None
+            elite_rank_total = 0
+        else:
+            rank, _total = await db.get_global_luck_rank(user_id)
+            elite_rank, elite_rank_total = await db.get_global_luck_rank_elite(user_id)
+            combined_rank, _combined_total = await db.get_global_luck_rank_combined(user_id)
+        rank_str = f"#{rank:,}" if rank is not None else "not ranked"
+        elite_rank_str = f"#{elite_rank:,}" if elite_rank is not None else "not ranked"
+        combined_rank_str = f"#{combined_rank:,}" if combined_rank is not None else "not ranked"
 
-        # Fetch live case data (same query as /geluk) so the analysis is always
-        # up-to-date, regardless of when the last global sweep ran.
-        live = await self._fetch_live_luck(user_id, max_cases=max_cases)
+        # Serve from the global_citizen_luck cache (refreshed by the daily
+        # sweep) instead of live-paging this player's full openCase history —
+        # that can be hundreds of API calls for an active player, which is
+        # why this command used to be slow. "Most recent N cases" can't be
+        # served by the cache (only full-history aggregates are stored),
+        # so that mode always goes live. The `live` option instead fetches
+        # only NEW transactions since the cache's cutoff (cheap either way)
+        # and persists the merged result back to the cache.
+        live_fetch = None
+        if max_cases is not None:
+            live_fetch = await self._fetch_live_luck(user_id, max_cases=max_cases)
 
-        if live is not None:
-            normal_counts, elite_counts = live
+        if live_fetch is not None:
+            normal_counts, elite_counts = live_fetch
             opens = sum(normal_counts.values())
             luck_score = _calc_luck_score(normal_counts, opens)
             analysis_note = (
                 f"🔴 Live ({opens:,} most recent)"
                 if max_cases is not None
                 else "🔴 Live"
+            )
+        elif live and (client := await self._get_client()) is not None:
+            cutoff_id = target.get("last_seen_transaction_id")
+            prior_raw = target.get("rarity_json")
+            prior_normal = json.loads(prior_raw) if prior_raw else {}
+            prior_elite_raw = target.get("elite_rarity_json")
+            prior_elite = json.loads(prior_elite_raw) if prior_elite_raw else {}
+            item_rarities = await self._get_item_rarities()
+            delta_normal, delta_elite, newest_id, fetched = await fetch_case_transactions(
+                client, user_id, item_rarities, cutoff_id=cutoff_id
+            )
+            if cutoff_id:
+                # True incremental fetch — delta is only what's new since
+                # cutoff_id, so add it onto the existing cached counts.
+                normal_counts = merge_counts(prior_normal, delta_normal)
+                elite_counts = merge_counts(prior_elite, delta_elite)
+            else:
+                # No cutoff (never cached, OR a cached row whose
+                # last_seen_transaction_id is still NULL — e.g. every row
+                # that predates this column). fetch_case_transactions had
+                # nothing to stop early at, so it already paged the player's
+                # ENTIRE history — delta_normal/delta_elite ARE the full,
+                # authoritative totals. Merging them onto prior_normal/
+                # prior_elite here would double-count everything the cached
+                # row already had.
+                normal_counts = delta_normal
+                elite_counts = delta_elite
+            new_cutoff = newest_id or cutoff_id
+            opens = sum(normal_counts.values())
+            luck_score = _calc_luck_score(normal_counts, opens)
+            now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            elite_total_live = sum(elite_counts.values())
+            elite_luck_for_db = (
+                _calc_elite_luck_score(elite_counts, elite_total_live)
+                if elite_total_live >= 5 else None
+            )
+            try:
+                await db.upsert_global_luck_score(
+                    user_id, country_id, username, luck_score, opens,
+                    json.dumps(normal_counts), now_iso,
+                    elite_luck_score=elite_luck_for_db,
+                    elite_opens_count=elite_total_live if elite_total_live >= 5 else None,
+                    elite_rarity_json=json.dumps(elite_counts) if elite_total_live >= 5 else None,
+                    last_seen_transaction_id=new_cutoff,
+                )
+                await db.flush_global_luck_scores()
+                if not_yet_ranked:
+                    # This player just got their first row — re-fetch rank
+                    # positions now that the comparison subquery has something
+                    # to compare against.
+                    rank, _total = await db.get_global_luck_rank(user_id)
+                    elite_rank, elite_rank_total = await db.get_global_luck_rank_elite(user_id)
+                    combined_rank, _combined_total = await db.get_global_luck_rank_combined(user_id)
+                    rank_str = f"#{rank:,}" if rank is not None else "not ranked"
+                    elite_rank_str = f"#{elite_rank:,}" if elite_rank is not None else "not ranked"
+                    combined_rank_str = f"#{combined_rank:,}" if combined_rank is not None else "not ranked"
+            except Exception:
+                logger.exception("globalluck: failed to persist live-refreshed luck score")
+            analysis_note = (
+                f"🔴 Live — {fetched} new since last update"
+                if cutoff_id else
+                "🔴 Live — full history fetched"
             )
         else:
             # Fall back to cached data

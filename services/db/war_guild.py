@@ -38,7 +38,7 @@ class WarGuildMixin:
             "VALUES (?, ?, ?, ?, ?) "
             "ON CONFLICT(mu_id, role_type, guild_id) DO UPDATE SET "
             "discord_role_id = excluded.discord_role_id, mu_name = excluded.mu_name",
-            (mu_id, role_type, guild_id, discord_role_id, mu_name),
+            (mu_id, role_type, discord_role_id, guild_id, mu_name),
         )
         await self._conn.commit()
 
