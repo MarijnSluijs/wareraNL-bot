@@ -21,8 +21,6 @@ from cogs.tasks.war_guild_divisions import DIVISION_MUS
 
 logger = logging.getLogger("discord_bot")
 
-_DUTCH_MU_NAMES: list[str] = [name for names in DIVISION_MUS.values() for name in names]
-
 # Wait this long after services are ready before the first run, so the citizen
 # refresh task has time to populate citizen_levels first.
 _STARTUP_DELAY_S = 180  # 3 minutes
@@ -192,7 +190,8 @@ class DamageTasks(TaskCogBase, name="damage_tasks"):
 
         # Also include non-NL members of Dutch MUs (e.g. players who switched country)
         nl_ids = {uid for uid, _ in nl_citizens}
-        du_mu_citizens = await self._db.get_citizens_in_mus(_DUTCH_MU_NAMES)
+        dutch_mu_names = [name for names in DIVISION_MUS.values() for name in names]
+        du_mu_citizens = await self._db.get_citizens_in_mus(dutch_mu_names)
         extra = [(uid, name, cid) for uid, name, cid in du_mu_citizens if uid not in nl_ids]
         if extra:
             logger.info(
