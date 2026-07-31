@@ -79,6 +79,7 @@
         "nederlander_role_id":         0,
         "verify_channel_id":           1505218633431912710,
         "admin_role_id":               1505218068861685840,
+        "admin_role_ids":              [1511093476270538752],
         "verifier_url":                "http://wareranl-bot-verifier-bot-1:8765",
         "war_status_channel_id":       1505666266189402212,
         "dashboard_channel_id":        1505665115779895436

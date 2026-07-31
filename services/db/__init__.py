@@ -39,6 +39,7 @@ from .company_bonus import CompanyBonusMixin
 from .company_move_advice import CompanyMoveAdviceMixin
 from .daily_dmg import DailyDmgMixin
 from .discord_allies import DiscordAlliesMixin
+from .division_overrides import DivisionOverridesMixin
 from .events import EventsMixin
 from .freshness import FreshnessMixin
 from .gems import GemsMixin
@@ -76,6 +77,7 @@ class Database(
     LuckMixin,
     ResistanceMixin,
     MusRegistryMixin,
+    DivisionOverridesMixin,
     BattleDropsMixin,
     BattleRankingsMixin,
     ArticleTipsMixin,

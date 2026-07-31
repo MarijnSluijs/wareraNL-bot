@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import discord
 from discord import app_commands
@@ -123,6 +123,47 @@ def _build_mu_to_div() -> dict[str, int]:
 _MU_TO_DIV: dict[str, int] = _build_mu_to_div()
 
 
+def _apply_division_override(mu_name: str, division: int) -> None:
+    """Move/add/remove *mu_name* to *division* in DIVISION_MUS.
+
+    ``division == 0`` removes the MU from every division. Mutates
+    ``DIVISION_MUS`` and ``_MU_TO_DIV`` in place (never reassigns) so every
+    ``from cogs.tasks.war_guild_divisions import DIVISION_MUS`` import
+    elsewhere in the bot (mu.py, mudmg.py, damage.py, citizens.py,
+    war_guild_status.py, paraatheid.py, mu_subscriptions.py, sync_tasks.py)
+    observes the change immediately, without a restart.
+    """
+    norm_target = _norm(mu_name)
+    for mus in DIVISION_MUS.values():
+        for existing in list(mus):
+            if _norm(existing) == norm_target:
+                mus.remove(existing)
+    if division:
+        DIVISION_MUS.setdefault(division, [])
+        if mu_name not in DIVISION_MUS[division]:
+            DIVISION_MUS[division].append(mu_name)
+    _MU_TO_DIV.clear()
+    _MU_TO_DIV.update(_build_mu_to_div())
+
+
+async def _mu_naam_autocomplete(
+    interaction: discord.Interaction, current: str
+) -> list[app_commands.Choice[str]]:
+    """Suggest MU names: current DIVISION_MUS entries + live known_mus DB."""
+    names: set[str] = set()
+    for mus in DIVISION_MUS.values():
+        names.update(mus)
+    db = getattr(interaction.client, "_ext_db", None)
+    if db:
+        try:
+            names.update(await db.get_known_mu_names(current))
+        except Exception:
+            pass
+    q = current.strip().lower()
+    filtered = sorted(n for n in names if q in n.lower())[:25]
+    return [app_commands.Choice(name=n, value=n) for n in filtered]
+
+
 def _unwrap_trpc(resp: dict) -> object:
     """Unwrap ``{"result": {"data": ...}}`` tRPC response envelope."""
     try:
@@ -157,6 +198,43 @@ class WarGuildDivisionsCog(TaskCogBase):
     def _war_guild(self) -> discord.Guild | None:
         gid = self._war_cfg.get("guild_id")
         return self.bot.get_guild(int(gid)) if gid else None
+
+    @property
+    def _admin_role_ids(self) -> set[int]:
+        """War-guild admin role IDs allowed to run /syncdivisions and /mudivisie.
+
+        Supports both the legacy single ``admin_role_id`` key and a
+        ``admin_role_ids`` list, so multiple roles can be granted access.
+        """
+        ids: set[int] = set()
+        single = self._war_cfg.get("admin_role_id")
+        if single:
+            ids.add(int(single))
+        for rid in self._war_cfg.get("admin_role_ids") or []:
+            ids.add(int(rid))
+        return ids
+
+    def _is_war_admin(self, member: discord.Member) -> bool:
+        return any(r.id in self._admin_role_ids for r in member.roles)
+
+    async def _load_division_overrides(self) -> None:
+        """Apply persisted /mudivisie edits on top of the hardcoded DIVISION_MUS."""
+        if not self._db:
+            return
+        try:
+            overrides = await self._db.get_all_division_mu_overrides()
+        except Exception as exc:
+            logger.warning(
+                "war_guild_divisions: failed to load division overrides: %s", exc
+            )
+            return
+        for mu_name, division in overrides:
+            _apply_division_override(mu_name, division)
+        if overrides:
+            logger.info(
+                "war_guild_divisions: applied %d persisted division override(s)",
+                len(overrides),
+            )
 
     # ── Role management ───────────────────────────────────────────────────────
 
@@ -720,6 +798,81 @@ class WarGuildDivisionsCog(TaskCogBase):
         logger.info("war_guild_divisions: category sync done — %s", counts)
         return counts
 
+    async def _ensure_mu_category(
+        self,
+        guild: discord.Guild,
+        mu_name: str,
+        division: int,
+        mu_id: str | None,
+    ) -> str:
+        """Create the MU's Discord category if it doesn't exist yet, prefixed [Dn].
+
+        Grants view access to the MU's owner/commander/member roles (looked up
+        from war_mu_roles via *mu_id*, if known) and hides it from @everyone.
+        Returns a short human-readable status string for the /mudivisie reply.
+        """
+        norm_target = _norm(mu_name)
+        expected_name = f"[D{division}] {mu_name}"
+
+        existing = None
+        for cat in guild.categories:
+            bare = _NICK_PREFIX_RE.sub("", cat.name)
+            if _norm(bare) == norm_target:
+                existing = cat
+                break
+
+        if existing is not None:
+            if existing.name == expected_name:
+                return f"bestond al ({expected_name})"
+            try:
+                await existing.edit(
+                    name=expected_name,
+                    reason="war_guild_divisions: mudivisie categorie-sync",
+                )
+                return f"bestond al, hernoemd → {expected_name}"
+            except discord.Forbidden:
+                return f"bestond al ({existing.name}), kon niet hernoemen (rechten)"
+
+        overwrites: dict = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False)
+        }
+        if mu_id and self._db:
+            # No dedicated "owner" role anymore — owners get Commander+Member.
+            for role_type in ("commander", "member"):
+                try:
+                    rid = await self._db.get_war_mu_role(
+                        mu_id, role_type, str(guild.id)
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "war_guild_divisions: role lookup failed for %s/%s: %s",
+                        mu_name, role_type, exc,
+                    )
+                    continue
+                role = guild.get_role(rid) if rid else None
+                if role:
+                    overwrites[role] = discord.PermissionOverwrite(view_channel=True)
+
+        try:
+            await guild.create_category(
+                expected_name,
+                overwrites=overwrites,
+                reason=f"war_guild_divisions: nieuwe MU-categorie voor '{mu_name}'",
+            )
+            logger.info(
+                "war_guild_divisions: created category %r for MU %r",
+                expected_name, mu_name,
+            )
+            return f"aangemaakt → {expected_name}"
+        except discord.Forbidden:
+            return "geen rechten om categorie aan te maken"
+        except Exception as exc:
+            logger.warning(
+                "war_guild_divisions: category creation failed for %s: %s",
+                mu_name, exc,
+            )
+            return f"mislukt ({exc})"
+
     # ── Government sync ───────────────────────────────────────────────────────
 
     async def _sync_government(self, guild: discord.Guild) -> dict:
@@ -899,6 +1052,7 @@ class WarGuildDivisionsCog(TaskCogBase):
     @daily_sync.before_loop
     async def _before_daily_sync(self) -> None:
         await self._wait_for_services()
+        await self._load_division_overrides()
         # Initialise roles immediately at startup so they are available right away
         guild = self._war_guild
         if guild:
@@ -925,8 +1079,7 @@ class WarGuildDivisionsCog(TaskCogBase):
             )
             return
 
-        admin_role_id = self._war_cfg.get("admin_role_id", 0)
-        is_admin = any(r.id == int(admin_role_id) for r in interaction.user.roles)
+        is_admin = self._is_war_admin(interaction.user)
         is_owner = await self.bot.is_owner(interaction.user)
         if not is_admin and not is_owner:
             await interaction.response.send_message("❌ Geen toegang.", ephemeral=True)
@@ -1000,6 +1153,128 @@ class WarGuildDivisionsCog(TaskCogBase):
             ),
             ephemeral=True,
         )
+
+    @app_commands.command(
+        name="mudivisie",
+        description="Voeg een MU toe aan, verplaats binnen, of verwijder uit de divisie-indeling.",
+    )
+    @app_commands.describe(
+        actie="Wat wil je doen?",
+        mu_naam="Naam van de Military Unit (exact zoals in-game)",
+        divisie="Doeldivisie (1-5) — verplicht bij toevoegen/verplaatsen",
+    )
+    @app_commands.choices(
+        actie=[
+            app_commands.Choice(name="Toevoegen", value="add"),
+            app_commands.Choice(name="Verplaatsen", value="move"),
+            app_commands.Choice(name="Verwijderen", value="remove"),
+        ]
+    )
+    @app_commands.autocomplete(mu_naam=_mu_naam_autocomplete)
+    async def mudivisie(
+        self,
+        interaction: discord.Interaction,
+        actie: app_commands.Choice[str],
+        mu_naam: str,
+        divisie: Optional[app_commands.Range[int, 1, 5]] = None,
+    ) -> None:
+        """Add/move/remove a MU in DIVISION_MUS, then wire up its roles + category."""
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                "❌ Alleen uitvoerbaar op de server.", ephemeral=True
+            )
+            return
+
+        is_admin = self._is_war_admin(interaction.user)
+        is_owner = await self.bot.is_owner(interaction.user)
+        if not is_admin and not is_owner:
+            await interaction.response.send_message("❌ Geen toegang.", ephemeral=True)
+            return
+
+        if actie.value in ("add", "move") and divisie is None:
+            await interaction.response.send_message(
+                "❌ Geef een divisie (1-5) op bij toevoegen/verplaatsen.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        guild = self._war_guild
+        if not guild:
+            await interaction.followup.send("❌ War-guild niet gevonden.", ephemeral=True)
+            return
+
+        # Resolve canonical name + mu_id via the known_mus registry so we store
+        # the correctly-cased in-game name and can look up its Discord roles.
+        canonical_name = mu_naam
+        mu_id: Optional[str] = None
+        if self._db:
+            try:
+                found_id, found_name = await self._db.get_known_mu_by_name(mu_naam)
+                if found_id:
+                    mu_id, canonical_name = found_id, found_name
+            except Exception as exc:
+                logger.warning("mudivisie: known_mus lookup failed for %r: %s", mu_naam, exc)
+
+        old_div = _MU_TO_DIV.get(_norm(canonical_name))
+
+        if actie.value == "remove":
+            if old_div is None:
+                await interaction.followup.send(
+                    f"⚠️ **{canonical_name}** zit niet in een divisie.", ephemeral=True
+                )
+                return
+            _apply_division_override(canonical_name, 0)
+            if self._db:
+                try:
+                    await self._db.upsert_division_mu_override(canonical_name, 0)
+                except Exception as exc:
+                    logger.warning("mudivisie: failed to persist removal: %s", exc)
+            await interaction.followup.send(
+                f"✅ **{canonical_name}** verwijderd uit Divisie {old_div}.",
+                ephemeral=True,
+            )
+            return
+
+        # add / move (divisie is guaranteed non-None here, checked above)
+        new_div = divisie
+        _apply_division_override(canonical_name, new_div)
+        if self._db:
+            try:
+                await self._db.upsert_division_mu_override(canonical_name, new_div)
+            except Exception as exc:
+                logger.warning("mudivisie: failed to persist override: %s", exc)
+
+        lines = [
+            f"✅ **{canonical_name}** "
+            + (
+                f"toegevoegd aan Divisie {new_div}."
+                if old_div is None
+                else f"verplaatst van Divisie {old_div} naar Divisie {new_div}."
+            )
+        ]
+
+        # Ensure the MU's Discord roles (Owner/Commander/Member) exist — role
+        # creation is driven independently by the live game API, not by
+        # DIVISION_MUS, so re-running the MU scan picks up this MU too.
+        war_sync_cog = self.bot.cogs.get("war_sync")
+        if war_sync_cog and hasattr(war_sync_cog, "scan_dutch_mus"):
+            try:
+                await war_sync_cog.scan_dutch_mus()
+                role_status = "gecontroleerd/aangemaakt via MU-scan"
+            except Exception as exc:
+                role_status = f"scan mislukt: {exc}"
+                logger.warning("mudivisie: scan_dutch_mus failed: %s", exc)
+        else:
+            role_status = "niet gecontroleerd (war_sync cog niet geladen)"
+        lines.append(f"• MU-rollen (Owner/Commander/Member): {role_status}")
+
+        # Ensure a [Dn]-prefixed category exists for this MU.
+        cat_status = await self._ensure_mu_category(guild, canonical_name, new_div, mu_id)
+        lines.append(f"• Discord-categorie: {cat_status}")
+
+        await interaction.followup.send("\n".join(lines), ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

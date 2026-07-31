@@ -11,7 +11,8 @@ Expected config shape (under ``config["war_guild"]``):
         "source_nederlander_role_id":  <int>,  # Nederlander role ID in prod guild
         "nederlander_role_id":         <int>,  # Nederlander role ID in war guild
         "verify_channel_id":           <int>,  # channel for the Verifieren button
-        "admin_role_id":               <int>   # war admin role that can trigger /syncwar
+        "admin_role_id":               <int>,  # war admin role that can trigger /syncwar (legacy, single role)
+        "admin_role_ids":              [<int>, ...]  # optional: additional war admin roles
     }
 """
 
@@ -138,8 +139,19 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
         return int(self._war_cfg["verify_channel_id"])
 
     @property
-    def _admin_role_id(self) -> int:
-        return int(self._war_cfg["admin_role_id"])
+    def _admin_role_ids(self) -> set[int]:
+        """War-guild admin role IDs allowed to run /syncwar.
+
+        Supports both the legacy single ``admin_role_id`` key and a
+        ``admin_role_ids`` list, so multiple roles can be granted access.
+        """
+        ids: set[int] = set()
+        single = self._war_cfg.get("admin_role_id")
+        if single:
+            ids.add(int(single))
+        for rid in self._war_cfg.get("admin_role_ids") or []:
+            ids.add(int(rid))
+        return ids
 
     @property
     def _nl_country_id(self) -> str:
@@ -498,9 +510,11 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
                 )
 
         for mu_id, mu_name, role_type in memberships:
-            # role_type is the specific role; owner/commander also get the member role
-            role_types_to_grant = [role_type]
-            if role_type in ("owner", "commander"):
+            # Owners have the same in-game rights as commanders and no longer
+            # get a dedicated Discord role — grant Commander (+ Member) instead.
+            discord_role_type = "commander" if role_type == "owner" else role_type
+            role_types_to_grant = [discord_role_type]
+            if discord_role_type == "commander":
                 role_types_to_grant.append("member")
             for rt in role_types_to_grant:
                 # Try in-memory map first (fast path)
@@ -542,9 +556,12 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
             return
 
         for mu_id, role_type in mu_map.items():
+            # Owners have the same in-game rights as commanders and no longer
+            # get a dedicated Discord role — grant Commander (+ Member) instead.
+            discord_role_type = "commander" if role_type == "owner" else role_type
             role_ids = self._mu_discord_role_ids.get(mu_id, {})
-            role_id_list = [role_ids.get(role_type)]
-            if role_type in ("owner", "commander"):
+            role_id_list = [role_ids.get(discord_role_type)]
+            if discord_role_type == "commander":
                 role_id_list.append(role_ids.get("member"))
             for role_id in role_id_list:
                 if not role_id:
@@ -684,11 +701,15 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
             desired_role_ids: set[int] = set()
             if in_game_id and self._user_mu_roles:
                 for mu_id, role_type in self._user_mu_roles.get(in_game_id, {}).items():
+                    # Owners have the same in-game rights as commanders and no
+                    # longer get a dedicated Discord role — grant Commander
+                    # (+ Member) instead.
+                    discord_role_type = "commander" if role_type == "owner" else role_type
                     role_ids = self._mu_discord_role_ids.get(mu_id, {})
-                    rid = role_ids.get(role_type)
+                    rid = role_ids.get(discord_role_type)
                     if rid:
                         desired_role_ids.add(rid)
-                    if role_type in ("owner", "commander"):
+                    if discord_role_type == "commander":
                         member_rid = role_ids.get("member")
                         if member_rid:
                             desired_role_ids.add(member_rid)
@@ -900,8 +921,66 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
         # Atomically update cached data
         self._user_mu_roles = new_user_mu_roles
         self._mu_discord_role_ids = new_mu_discord_role_ids
+
+        try:
+            n_owner_removed = await self._cleanup_owner_roles(war_guild)
+            if n_owner_removed:
+                logger.info("war_sync: owner-role cleanup removed %d role(s)", n_owner_removed)
+        except Exception as exc:
+            logger.warning("war_sync: owner-role cleanup failed: %s", exc)
+
         logger.info("war_sync: MU scan complete, %d Dutch MUs with Discord roles", len(dutch_mus))
         return len(dutch_mus)
+
+    async def _cleanup_owner_roles(self, war_guild: discord.Guild) -> int:
+        """Delete all per-MU 'Owner' Discord roles — no longer used.
+
+        The war guild hit Discord's 250-role hard cap, blocking role creation
+        for new/renamed MUs. Owner roles were dropped as a category (owners
+        still get the Member role via the existing owner→also-member grant in
+        _assign_mu_roles_from_db/sync_war_guild), freeing up headroom. Catches
+        both DB-tracked owner roles and orphaned ones left over from past
+        in-game MU renames (matched by name against the known_mus registry).
+        """
+        if not self._db:
+            return 0
+        removed = 0
+
+        try:
+            tracked = await self._db.get_all_war_mu_roles(str(war_guild.id))
+        except Exception as exc:
+            logger.warning("war_sync: owner-role cleanup: DB read failed: %s", exc)
+            tracked = []
+        owner_role_ids = {row["discord_role_id"] for row in tracked if row["role_type"] == "owner"}
+        owner_mu_ids = {row["mu_id"] for row in tracked if row["role_type"] == "owner"}
+
+        try:
+            known_names = {name.lower() for _mid, name, _cid in await self._db.get_all_known_mu_ids()}
+        except Exception:
+            known_names = set()
+
+        for role in list(war_guild.roles):
+            if not role.name.endswith(" Owner"):
+                continue
+            base = role.name[: -len(" Owner")]
+            if role.id not in owner_role_ids and base.lower() not in known_names:
+                continue  # not a recognised MU-owner role — leave unrelated roles alone
+            try:
+                await role.delete(reason="war_sync: MU Owner-rollen niet langer gebruikt (250-rol limiet)")
+                removed += 1
+                logger.info("war_sync: deleted owner role '%s' (id=%d)", role.name, role.id)
+            except discord.Forbidden:
+                logger.warning("war_sync: no permission to delete owner role '%s'", role.name)
+            except discord.NotFound:
+                pass
+
+        for mu_id in owner_mu_ids:
+            try:
+                await self._db.delete_war_mu_role(mu_id, "owner", str(war_guild.id))
+            except Exception as exc:
+                logger.warning("war_sync: failed to clear owner DB row for %s: %s", mu_id, exc)
+
+        return removed
 
     async def _paginate_all_mus(self) -> list[dict[str, str]]:
         """Return [{mu_id, mu_name}] for all MUs in the game."""
@@ -1003,8 +1082,11 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
         Returns {owner: role_id, commander: role_id, member: role_id}.
         Persists IDs in the war_mu_roles table so they survive restarts.
         """
+        # No dedicated "Owner" role anymore — the guild hit Discord's 250-role
+        # hard cap, and owners already get the Member role via the
+        # owner→also-member grant in _assign_mu_roles_from_db/sync_war_guild.
+        # See _cleanup_owner_roles for removal of previously-created ones.
         role_defs = [
-            ("owner",      f"{mu_name} Owner"),
             ("commander",  f"{mu_name} Commander"),
             ("member",     f"{mu_name} Member"),
         ]
@@ -1055,6 +1137,38 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
                 result[role_type] = existing.id
                 await self._upsert_war_mu_role(mu_id, role_type, str(war_guild.id), existing.id, mu_name)
                 continue
+
+            # Fallback: this MU may have been renamed in-game since its roles
+            # were created (its Discord role names still reflect the OLD
+            # name, so the by-name search above found nothing). Look up any
+            # previously-tracked role for this mu_id regardless of guild_id
+            # and rename it in place instead of creating a brand new role —
+            # the war guild has a hard 250-role cap, and leaving old-named
+            # roles behind on every rename burns through it permanently.
+            stale_id = await self._db.get_war_mu_role_any_guild(mu_id, role_type) if self._db else None
+            if stale_id and stale_id != stored_id and stale_id != war_guild.id:
+                stale_role = war_guild.get_role(stale_id)
+                # Never touch @everyone — its role ID always equals the guild
+                # ID, and corrupted legacy war_mu_roles rows can contain the
+                # guild ID in the discord_role_id column, which would
+                # otherwise make this fallback edit @everyone's name/colour.
+                if stale_role and stale_role != war_guild.default_role:
+                    try:
+                        await stale_role.edit(
+                            name=role_name,
+                            colour=colour,
+                            mentionable=True,
+                            reason=f"war_sync: MU hernoemd → '{mu_name}'",
+                        )
+                        result[role_type] = stale_role.id
+                        await self._upsert_war_mu_role(mu_id, role_type, str(war_guild.id), stale_role.id, mu_name)
+                        logger.info(
+                            "war_sync: renamed stale role → '%s' (id=%d, MU hernoemd)",
+                            role_name, stale_role.id,
+                        )
+                        continue
+                    except discord.Forbidden:
+                        logger.warning("war_sync: no permission to rename stale role for '%s'", mu_name)
 
             # Create the role
             try:
@@ -1283,7 +1397,7 @@ class WarSyncCog(TaskCogBase, name="war_sync"):
             await interaction.response.send_message("❌ Alleen uitvoerbaar op de server.", ephemeral=True)
             return
 
-        is_admin = any(r.id == self._admin_role_id for r in interaction.user.roles)
+        is_admin = any(r.id in self._admin_role_ids for r in interaction.user.roles)
         is_owner = await self.bot.is_owner(interaction.user)
         if not is_admin and not is_owner:
             await interaction.response.send_message("❌ Geen toegang.", ephemeral=True)

@@ -91,6 +91,16 @@ CREATE TABLE IF NOT EXISTS war_mu_roles (
     PRIMARY KEY (mu_id, role_type, guild_id)
 );
 
+-- division_mu_overrides: runtime add/move/remove edits to DIVISION_MUS
+--   (cogs/tasks/war_guild_divisions.py), made via /mudivisie instead of
+--   hand-editing the source file. division 0 means "removed" (excluded even
+--   if the MU is still hardcoded in DIVISION_MUS). Applied on top of the
+--   hardcoded dict at startup so they survive restarts.
+CREATE TABLE IF NOT EXISTS division_mu_overrides (
+    mu_name  TEXT PRIMARY KEY,
+    division INTEGER NOT NULL
+);
+
 -- ── Citizens ──────────────────────────────────────────────────────────────────
 
 -- citizen_levels: hourly snapshot of level, skill mode, and MU per citizen

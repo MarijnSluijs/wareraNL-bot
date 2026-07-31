@@ -382,6 +382,30 @@ class General(commands.Cog, name="general"):
             except discord.HTTPException as e:
                 self.bot.logger.error(f"Failed to send transparantie message for message {message.id}: {e}")
 
+        # congres → random meeting/debate GIF, 5% chance
+        if "congres" in words and random.random() < 0.05:
+            gif = random.choice((
+                "https://i.imgur.com/wn0ogiX.gif",
+                "https://klipy.com/gifs/meeting-yesterdays-meeting",
+                "https://klipy.com/gifs/democracy-palpatine",
+                "https://tenor.com/view/court-leap-court-room-jump-attack-gif-17768758501529871397",
+            ))
+            try:
+                await message.channel.send(gif)
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to send congres gif for message {message.id}: {e}")
+
+        # slapinet / slaapinet → random GIF, 20% chance
+        if any(w in words for w in ("slapinet", "slaapinet")) and random.random() < 0.20:
+            gif = random.choice((
+                "https://klipy.com/gifs/muppetwiki-muppet-wiki-94",
+                "https://klipy.com/gifs/angry-mob-mad",
+            ))
+            try:
+                await message.channel.send(gif)
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to send slapinet gif for message {message.id}: {e}")
+
         if "app.warera.io" not in content.lower():
             return
         try:

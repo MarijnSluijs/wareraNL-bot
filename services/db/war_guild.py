@@ -24,6 +24,25 @@ class WarGuildMixin:
             row = await cur.fetchone()
         return int(row[0]) if row else None
 
+    async def get_war_mu_role_any_guild(
+        self, mu_id: str, role_type: str
+    ) -> Optional[int]:
+        """Return a previously-tracked Discord role ID for (mu_id, role_type),
+        ignoring guild_id.
+
+        Used as a fallback when no row matches the *current* guild_id — e.g.
+        after an in-game MU rename, where the stored guild_id can be stale/
+        inconsistent but the role itself may still exist and just needs
+        renaming instead of a wasteful, potentially rate-limited re-create.
+        """
+        async with self._conn.execute(
+            "SELECT discord_role_id FROM war_mu_roles "
+            "WHERE mu_id = ? AND role_type = ? LIMIT 1",
+            (mu_id, role_type),
+        ) as cur:
+            row = await cur.fetchone()
+        return int(row[0]) if row else None
+
     async def upsert_war_mu_role(
         self,
         mu_id: str,
@@ -65,6 +84,14 @@ class WarGuildMixin:
         await self._conn.execute(
             "DELETE FROM war_mu_roles WHERE mu_id = ? AND guild_id = ?",
             (mu_id, guild_id),
+        )
+        await self._conn.commit()
+
+    async def delete_war_mu_role(self, mu_id: str, role_type: str, guild_id: str) -> None:
+        """Remove a single (mu_id, role_type, guild_id) role entry."""
+        await self._conn.execute(
+            "DELETE FROM war_mu_roles WHERE mu_id = ? AND role_type = ? AND guild_id = ?",
+            (mu_id, role_type, guild_id),
         )
         await self._conn.commit()
 
