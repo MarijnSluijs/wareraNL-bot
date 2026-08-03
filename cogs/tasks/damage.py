@@ -118,6 +118,25 @@ class DamageTasks(TaskCogBase, name="damage_tasks"):
     async def weekly_damage_refresh(self) -> None:
         if not self._client or not self._db:
             return
+        # services/full_fetcher.py now owns weekly damage: it snapshots the
+        # same ranking for every country and also writes the weekly-history and
+        # derived daily-damage tables.  Only fall back to this NL-only refresh
+        # when the fetcher isn't running on this deployment.
+        try:
+            last = await self._db.get_poll_state("weekly_damage_fetcher_last_run")
+            if last:
+                age_h = (
+                    datetime.now(timezone.utc) - datetime.fromisoformat(last)
+                ).total_seconds() / 3600
+                if age_h < 3:
+                    logger.debug(
+                        "weekly_damage_refresh: skipping — full_fetcher ran %.1fh ago",
+                        age_h,
+                    )
+                    return
+        except Exception:
+            logger.exception("weekly_damage_refresh: failed to read fetcher state")
+
         try:
             await self._run_damage_refresh()
         except Exception:

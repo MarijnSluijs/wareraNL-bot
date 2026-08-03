@@ -71,11 +71,27 @@ class DailyDmgTask(TaskCogBase, name="daily_dmg_task"):
     def __init__(self, bot) -> None:
         self.bot = bot
 
+    # Superseded by the fetcher's weekly-damage sweep, which derives daily
+    # damage from the game's own weekly counter (services/db/damage_history.py)
+    # instead of scanning every finished battle and calling
+    # battleLootSummary.getByBattleAndUser per participant.  That made this the
+    # single most API-expensive task in the bot for data /dailydmg no longer
+    # reads.  The sweep is kept for the manual /peil backfill commands, which
+    # still populate the legacy per-battle daily_dmg_hits table.
+    AUTO_SWEEP_ENABLED = False
+
     def cog_load(self) -> None:
-        self.hourly_daily_dmg.start()
+        if self.AUTO_SWEEP_ENABLED:
+            self.hourly_daily_dmg.start()
+        else:
+            logger.info(
+                "daily_dmg_task: hourly sweep disabled — daily damage now comes "
+                "from the weekly-damage snapshots written by full_fetcher"
+            )
 
     def cog_unload(self) -> None:
-        self.hourly_daily_dmg.cancel()
+        if self.hourly_daily_dmg.is_running():
+            self.hourly_daily_dmg.cancel()
 
     # ------------------------------------------------------------------ #
     # Loop

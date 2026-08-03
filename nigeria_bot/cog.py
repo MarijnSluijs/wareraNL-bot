@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -52,6 +53,128 @@ DUTCH_ROLE_ID           = 1495692245519699978
 VERIFIED_ROLE_ID        = 1521895797757575168   # given to everyone on approval
 
 STAFF_ROLE_IDS = [1495692303367540767, 1495692272728150016, 1495692461375357009, 1495847731963494400]
+
+# Word groups that trigger the "not allowed" GIF reply. Plain page URLs
+# (tenor.com/view/..., giphy.com/gifs/...) — Discord auto-unfurls these into
+# a GIF embed when sent as their own message; hotlinking the direct media
+# file via a manually built embed did not render.
+# send_text: whether the "Dat woord is niet toegestaan!" line is sent before
+# the GIF — False means the GIF is posted on its own.
+FORBIDDEN_WORD_GROUPS: tuple[tuple[tuple[str, ...], tuple[str, ...], bool], ...] = (
+    (
+        ("eco", "democratie", "revolutie", "coup", "coups"),
+        (
+            "https://tenor.com/view/jiskefet-debiteuren-crediteuren-korfbal-dat-mag-dus-niet-gif-17582094",
+            "https://tenor.com/view/no-party-geen-feest-party-mag-nie-mag-niet-gif-18158017",
+            "https://tenor.com/view/get-the-fuck-out-gtfo-get-out-go-away-gif-8055436",
+            "https://tenor.com/view/get-out-the-lion-king-comedy-humor-throw-gif-9615975",
+            "https://tenor.com/view/damin-toell-get-out-gif-2960077830144535500",
+            "https://tenor.com/view/no-babyjake-nope-not-allowed-cant-do-that-gif-21337058",
+            "https://tenor.com/view/out-gif-21952548",
+            "https://tenor.com/view/get-out-leave-gif-5785321051025239919",
+            "https://tenor.com/view/get-out-gif-4007870892487612180",
+        ),
+        True,
+    ),
+    (
+        ("dictatuur",),
+        (
+            "https://giphy.com/gifs/reactionseditor-yes-awesome-3ohzdIuqJoo8QdKlnW",
+            "https://giphy.com/gifs/dYZuqJLDVsWMLWyIxJ",
+            "https://giphy.com/gifs/primevideo-2020-borat-subsequent-moviefilm-Od0QRnzwRBYmDU3eEO",
+            "https://giphy.com/gifs/vh1-reactions-love-and-hip-hop-lhhatl-4fYg3bSQuv8K2oZ7LK",
+        ),
+        False,
+    ),
+    (
+        ("corruptie", "corruption"),
+        (
+            "https://giphy.com/gifs/money-make-it-rain-MFsqcBSoOKPbjtmvWz",
+            "https://giphy.com/gifs/reaction-kj41Ti8GLVs1STX0bH",
+            "https://giphy.com/gifs/trump-fifa-african-gGh45VhxyX67eIfnub",
+        ),
+        False,
+    ),
+    (
+        ("opstand",),
+        (
+            "https://giphy.com/gifs/netflix-adam-sandler-spaceman-im-not-allowing-that-TL8lZcqnQP0uDnYoGM",
+        ),
+        True,
+    ),
+    (
+        ("gelijkwaardigheid", "emancipatie", "stemmen", "vrijheid", "loonsverhoging", "referendum"),
+        (
+            "https://giphy.com/gifs/paramountnetwork-paramount-network-68whiskey-VG",
+            "https://giphy.com/gifs/FlexxedTV-wow-whats-that-XPrN8DrbFIqjbBo8rK",
+            # TODO: one gif here was a malformed/truncated URL ("tS0dsIv2h4o2E4tc")
+            # — needs the real link before it can be added.
+            "https://giphy.com/gifs/cbc-funny-comedy-l1J9DlCFh2h90HrnW",
+            "https://giphy.com/gifs/iiTXaJVjiSHew",
+            "https://giphy.com/gifs/HelpUsDefend-fish-scam-scammer-YQ2IS26vDsr2gDSCHZ",
+        ),
+        True,
+    ),
+    (
+        ("generaal", "dictator"),
+        (
+            "https://giphy.com/gifs/GoArmy-respect-salute-gesture-fxsAcheaMi1PnxPJaf",
+            "https://giphy.com/gifs/france-mbappe-quipe-de-btpfcvZPLA5w9zQ0Tj",
+        ),
+        False,
+    ),
+    (
+        ("staking", "vakbond"),
+        (
+            "https://giphy.com/gifs/netflix-umbrella-academy-hargreeves-4-t4HFdwzbg4x8XNZF8I",
+            "https://giphy.com/gifs/no-not-at-all-KxtqqFuP4a31rZOhyq",
+        ),
+        True,
+    ),
+    (
+        ("minimumloon", "overuren"),
+        (
+            "https://giphy.com/gifs/sunnyfxx-always-sunny-iasip-its-in-philadelphia-FEfO77A2PKgME2QZgP",
+            "https://giphy.com/gifs/cbc-schitts-creek-MBxYX5HEvi0svTHNgV",
+        ),
+        False,
+    ),
+    (
+        ("kiesrecht",),
+        (
+            "https://giphy.com/gifs/cbc-funny-comedy-2yA8KXwI7QBykLizf8",
+        ),
+        True,
+    ),
+    (
+        ("martijn",),
+        (
+            "https://giphy.com/gifs/stfu-FzyoyDSaAsjHG",
+        ),
+        True,
+    ),
+    (
+        ("sr",),
+        (
+            "https://giphy.com/gifs/mrw-civilization-gandhi-slErRFjUBNoeQ",
+        ),
+        True,
+    ),
+    (
+        ("pyramidscheme", "pyramid scheme", "ponzi"),
+        (
+            "https://giphy.com/gifs/scheme-7wToiGB3M5wME",
+        ),
+        False,
+    ),
+    (
+        ("419",),
+        (
+            "https://tenor.com/view/money-rain-make-it-with-gif-10901444",
+        ),
+        False,
+    ),
+)
 
 # Resolved from this file's location, not cwd, so it works regardless of the
 # working directory the process was launched from.
@@ -188,6 +311,11 @@ def _is_staff(member: discord.Member) -> bool:
     return any(r.id in STAFF_ROLE_IDS for r in member.roles)
 
 
+def _ticket_is_english(ticket_type: str) -> bool:
+    """Nigerian and embassy tickets use English; Dutch/Dutch-Nigerian stay Dutch."""
+    return ticket_type in ("nigerian", "embassy")
+
+
 async def _get_or_create_ticket_category(guild: discord.Guild) -> discord.CategoryChannel:
     for cat in guild.categories:
         if cat.name == TICKET_CATEGORY_NAME:
@@ -225,7 +353,7 @@ async def _get_or_create_ambassador_role(
     new_role = await guild.create_role(
         name=role_name,
         mentionable=True,
-        reason=f"Ambassade rol automatisch aangemaakt voor {country}",
+        reason=f"Embassy role automatically created for {country}",
     )
     AMBASSADOR_ROLES[country] = new_role.id
     logger.info("Created ambassador role %r (id=%d)", role_name, new_role.id)
@@ -241,7 +369,7 @@ async def _ensure_embassy_channel(
     for channel in category.text_channels:
         if channel.overwrites_for(ambassador_role).view_channel:
             return channel
-    safe_name = f"ambassade-{country.lower().replace(' ', '-')}"
+    safe_name = f"embassy-{country.lower().replace(' ', '-')}"
     overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         ambassador_role: discord.PermissionOverwrite(
@@ -256,7 +384,7 @@ async def _ensure_embassy_channel(
             )
     channel = await category.create_text_channel(
         name=safe_name, overwrites=overwrites,
-        reason=f"Ambassade kanaal automatisch aangemaakt voor {country}",
+        reason=f"Embassy channel automatically created for {country}",
     )
     logger.info("Created embassy channel %r for %r", safe_name, country)
     return channel
@@ -389,7 +517,7 @@ async def _create_ticket(
         "nigerian":       "🇳🇬 Nigerian",
         "dutch_nigerian": "🇳🇱🇳🇬 Nederlander in Nigeria",
         "dutch":          "🇳🇱 Nederlander",
-        "embassy":        f"🏛️ Ambassade — {country}" if country else "🏛️ Ambassade",
+        "embassy":        f"🏛️ Embassy — {country}" if country else "🏛️ Embassy",
     }.get(ticket_type, ticket_type)
 
     # Info embed for staff — shows the submitted profile URL
@@ -404,8 +532,8 @@ async def _create_ticket(
     )
     await channel.send(embed=info_embed)
 
-    # User instruction — English for Nigerian, Dutch for the rest
-    if ticket_type == "nigerian":
+    # User instruction — English for Nigerian/embassy, Dutch for the rest
+    if _ticket_is_english(ticket_type):
         await channel.send(
             f"{user.mention} Thank you! Please send a **screenshot of your WarEra profile** "
             "in this channel to complete your verification.\n\n"
@@ -437,7 +565,7 @@ async def _create_ticket(
     )
     await channel.send(embed=staff_embed, view=TicketActionView())
 
-    if ticket_type == "nigerian":
+    if _ticket_is_english(ticket_type):
         confirm = (
             f"✅ Your verification request has been created in {channel.mention}.\n"
             "Please send a screenshot of your WarEra profile there to complete verification."
@@ -455,6 +583,8 @@ class _RetryView(discord.ui.View):
     def __init__(self, ticket_type: str) -> None:
         super().__init__(timeout=120)
         self.ticket_type = ticket_type
+        if _ticket_is_english(ticket_type):
+            self.retry.label = "↩️ Try again"
 
     @discord.ui.button(label="↩️ Probeer opnieuw", style=discord.ButtonStyle.primary)
     async def retry(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -501,15 +631,15 @@ class CitizenModal(discord.ui.Modal):
 
 class EmbassyModal(discord.ui.Modal):
     def __init__(self) -> None:
-        super().__init__(title="Ambassadeverzoek")
+        super().__init__(title="Embassy request")
         self.country = discord.ui.TextInput(
-            label="Land dat je vertegenwoordigt",
-            placeholder="Bijv. Belgium, Morocco, Germany…",
+            label="Country you represent",
+            placeholder="E.g. Belgium, Morocco, Germany…",
             min_length=2,
             max_length=60,
         )
         self.warera_url = discord.ui.TextInput(
-            label="WarEra profiel URL",
+            label="WarEra profile URL",
             placeholder="https://app.warera.io/user/695579c03f0cff6efb694b3a",
             min_length=10,
             max_length=120,
@@ -521,9 +651,9 @@ class EmbassyModal(discord.ui.Modal):
         url = self.warera_url.value.strip()
         if not _extract_warera_id(url):
             await interaction.response.send_message(
-                "❌ **Ongeldige URL.** Zorg dat je URL er precies zo uitziet:\n"
+                "❌ **Invalid URL.** Make sure your URL looks exactly like this:\n"
                 "`https://app.warera.io/user/695579c03f0cff6efb694b3a`\n\n"
-                "Klik op de knop om het opnieuw te proberen.",
+                "Click the button to try again.",
                 ephemeral=True,
                 view=_RetryView("embassy"),
             )
@@ -549,9 +679,12 @@ async def _execute_approve(
     country      = ctx.get("country", "")
     warera_url   = ctx.get("warera_url", "")
     guild        = ticket.guild
+    english      = _ticket_is_english(ticket_type)
 
     warera_id = _extract_warera_id(warera_url) if warera_url else None
     if not warera_id:
+        if english:
+            return "❌ No valid WarEra URL found in the ticket.", ""
         return "❌ Geen geldige WarEra URL gevonden in het ticket.", ""
 
     username = await _fetch_warera_username(warera_id)
@@ -589,10 +722,10 @@ async def _execute_approve(
     elif ticket_type == "embassy":
         try:
             amb_role = await _get_or_create_ambassador_role(guild, country)
-            await user.add_roles(amb_role, reason=f"Goedgekeurd door {approver}")
+            await user.add_roles(amb_role, reason=f"Approved by {approver}")
             await _ensure_embassy_channel(guild, country, amb_role)
         except Exception as exc:
-            errors.append(f"Ambassade fout: {exc}")
+            errors.append(f"Embassy error: {exc}")
     else:
         return f"❌ Onbekend ticket type: `{ticket_type}`.", ""
 
@@ -600,21 +733,32 @@ async def _execute_approve(
     verified_role = guild.get_role(VERIFIED_ROLE_ID)
     if verified_role:
         try:
-            await user.add_roles(verified_role, reason=f"Geverifieerd door {approver}")
+            reason = f"Verified by {approver}" if english else f"Geverifieerd door {approver}"
+            await user.add_roles(verified_role, reason=reason)
         except discord.Forbidden:
-            errors.append(f"Geen toegang om rol **{verified_role.name}** toe te voegen.")
+            if english:
+                errors.append(f"No permission to add role **{verified_role.name}**.")
+            else:
+                errors.append(f"Geen toegang om rol **{verified_role.name}** toe te voegen.")
     else:
         logger.warning("_execute_approve: Verified role %d not found in guild", VERIFIED_ROLE_ID)
 
     if username:
         try:
-            await user.edit(nick=username[:32], reason=f"WarEra naam ingesteld door {approver}")
+            reason = f"WarEra name set by {approver}" if english else f"WarEra naam ingesteld door {approver}"
+            await user.edit(nick=username[:32], reason=reason)
         except discord.Forbidden:
-            errors.append("Geen toegang om nickname in te stellen (hogere rol?).")
+            if english:
+                errors.append("No permission to set nickname (higher role?).")
+            else:
+                errors.append("Geen toegang om nickname in te stellen (hogere rol?).")
     else:
-        errors.append("WarEra gebruikersnaam kon niet worden opgehaald — nickname ongewijzigd.")
+        if english:
+            errors.append("Could not fetch WarEra username — nickname unchanged.")
+        else:
+            errors.append("WarEra gebruikersnaam kon niet worden opgehaald — nickname ongewijzigd.")
 
-    result = f"✅ **{user.mention}** goedgekeurd."
+    result = f"✅ **{user.mention}** approved." if english else f"✅ **{user.mention}** goedgekeurd."
     if errors:
         result += "\n⚠️ " + " | ".join(errors)
     return result, username
@@ -634,9 +778,13 @@ class DenyReasonModal(discord.ui.Modal, title="Verificatie afwijzen"):
         max_length=200,
     )
 
-    def __init__(self, button_message: discord.Message) -> None:
-        super().__init__(title="Verificatie afwijzen")
+    def __init__(self, button_message: discord.Message, english: bool = False) -> None:
+        super().__init__(title="Reject verification" if english else "Verificatie afwijzen")
         self.button_message = button_message
+        self.english = english
+        if english:
+            self.reden.label = "Reason (optional)"
+            self.reden.placeholder = "E.g. profile not found, wrong country…"
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
@@ -647,12 +795,20 @@ class DenyReasonModal(discord.ui.Modal, title="Verificatie afwijzen"):
             pass
         reden = self.reden.value.strip()
         # Post a visible message in the channel for everyone to see
-        await interaction.channel.send(
-            f"❌ **Afgewezen** door {interaction.user.mention}"
-            + (f"\nReden: {reden}" if reden else "")
-            + "\nDit kanaal wordt over 8 uur verwijderd."
-        )
-        await interaction.followup.send("✅ Ticket afgewezen.", ephemeral=True)
+        if self.english:
+            await interaction.channel.send(
+                f"❌ **Denied** by {interaction.user.mention}"
+                + (f"\nReason: {reden}" if reden else "")
+                + "\nThis channel will be deleted in 8 hours."
+            )
+            await interaction.followup.send("✅ Ticket denied.", ephemeral=True)
+        else:
+            await interaction.channel.send(
+                f"❌ **Afgewezen** door {interaction.user.mention}"
+                + (f"\nReden: {reden}" if reden else "")
+                + "\nDit kanaal wordt over 8 uur verwijderd."
+            )
+            await interaction.followup.send("✅ Ticket afgewezen.", ephemeral=True)
         db = getattr(interaction.client, "nigeria_db", None)
         asyncio.create_task(_close_ticket_later(interaction.channel, hours=8, db=db))
 
@@ -671,26 +827,26 @@ class TicketActionView(discord.ui.View):
     async def approve_btn(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
+        ctx         = _parse_topic(interaction.channel.topic or "")
+        ticket_type = ctx.get("type", "")
+        english     = _ticket_is_english(ticket_type)
+
         if not isinstance(interaction.user, discord.Member) or not _is_staff(interaction.user):
-            await interaction.response.send_message(
-                "❌ Alleen staff kan dit doen.", ephemeral=True
-            )
+            msg = "❌ Only staff can do this." if english else "❌ Alleen staff kan dit doen."
+            await interaction.response.send_message(msg, ephemeral=True)
             return
         if _ticket_already_closed(interaction.channel):
-            await interaction.response.send_message(
-                "⚠️ Dit ticket is al verwerkt.", ephemeral=True
-            )
+            msg = "⚠️ This ticket has already been processed." if english else "⚠️ Dit ticket is al verwerkt."
+            await interaction.response.send_message(msg, ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
 
-        ctx     = _parse_topic(interaction.channel.topic or "")
         user_id = ctx.get("user_id", "")
         try:
             member = await interaction.guild.fetch_member(int(user_id))
         except Exception:
-            await interaction.followup.send(
-                "❌ Gebruiker niet meer in de server.", ephemeral=True
-            )
+            msg = "❌ User is no longer in the server." if english else "❌ Gebruiker niet meer in de server."
+            await interaction.followup.send(msg, ephemeral=True)
             return
 
         # Remove the buttons immediately so no one can double-click
@@ -699,14 +855,23 @@ class TicketActionView(discord.ui.View):
         except Exception:
             pass
 
-        await interaction.followup.send("⏳ Gebruikersnaam ophalen van WarEra…", ephemeral=True)
+        wait_msg = "⏳ Fetching username from WarEra…" if english else "⏳ Gebruikersnaam ophalen van WarEra…"
+        await interaction.followup.send(wait_msg, ephemeral=True)
         db = getattr(interaction.client, "nigeria_db", None)
         result, username = await _execute_approve(interaction.channel, member, interaction.user, db=db)
 
         # Post a visible message in the channel for everyone to see
-        await interaction.channel.send(
-            f"✅ **Goedgekeurd** door {interaction.user.mention}\nDit kanaal wordt over 8 uur verwijderd."
-        )
+        if english:
+            channel_msg = (
+                f"✅ **Approved** by {interaction.user.mention}\n"
+                "This channel will be deleted in 8 hours."
+            )
+        else:
+            channel_msg = (
+                f"✅ **Goedgekeurd** door {interaction.user.mention}\n"
+                "Dit kanaal wordt over 8 uur verwijderd."
+            )
+        await interaction.channel.send(channel_msg)
         await interaction.followup.send(result, ephemeral=True)
         asyncio.create_task(_close_ticket_later(interaction.channel, hours=8, db=db))
 
@@ -718,17 +883,21 @@ class TicketActionView(discord.ui.View):
     async def deny_btn(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
+        ctx         = _parse_topic(interaction.channel.topic or "")
+        ticket_type = ctx.get("type", "")
+        english     = _ticket_is_english(ticket_type)
+
         if not isinstance(interaction.user, discord.Member) or not _is_staff(interaction.user):
-            await interaction.response.send_message(
-                "❌ Alleen staff kan dit doen.", ephemeral=True
-            )
+            msg = "❌ Only staff can do this." if english else "❌ Alleen staff kan dit doen."
+            await interaction.response.send_message(msg, ephemeral=True)
             return
         if _ticket_already_closed(interaction.channel):
-            await interaction.response.send_message(
-                "⚠️ Dit ticket is al verwerkt.", ephemeral=True
-            )
+            msg = "⚠️ This ticket has already been processed." if english else "⚠️ Dit ticket is al verwerkt."
+            await interaction.response.send_message(msg, ephemeral=True)
             return
-        await interaction.response.send_modal(DenyReasonModal(button_message=interaction.message))
+        await interaction.response.send_modal(
+            DenyReasonModal(button_message=interaction.message, english=english)
+        )
 
 
 # ── Persistent views ──────────────────────────────────────────────────────────
@@ -764,7 +933,7 @@ class VerificationView(discord.ui.View):
         await interaction.response.send_modal(CitizenModal("dutch"))
 
     @discord.ui.button(
-        label="🏛️ Ambassade",
+        label="🏛️ Embassy",
         style=discord.ButtonStyle.secondary,
         custom_id="verify:embassy",
     )
@@ -800,6 +969,31 @@ class VerificationCog(commands.Cog, name="verification"):
 
     def cog_unload(self) -> None:
         self.nick_sync.cancel()
+
+    # ── Forbidden-word reaction ────────────────────────────────────────────────
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        if message.author.bot:
+            return
+        content_lower = (message.content or "").lower()
+        words = content_lower.split()
+        for trigger_words, gifs, send_text in FORBIDDEN_WORD_GROUPS:
+            # Multi-word triggers (e.g. "pyramid scheme") match as a substring
+            # of the raw message; single-word triggers match as a whole token
+            # so they don't fire on partial-word matches inside other words.
+            if not any(
+                tw in content_lower if " " in tw else tw in words
+                for tw in trigger_words
+            ):
+                continue
+            try:
+                if send_text:
+                    await message.channel.send("Dat woord is niet toegestaan!")
+                await message.channel.send(random.choice(gifs))
+            except discord.HTTPException as e:
+                logger.error(f"Failed to send forbidden-word gif for message {message.id}: {e}")
+            return
 
     # ── Daily nickname sync ───────────────────────────────────────────────────
 
@@ -863,7 +1057,7 @@ class VerificationCog(commands.Cog, name="verification"):
                 "**🇳🇬 Nigerian** — You are a Nigerian citizen in WarEra.\n"
                 "**🇳🇱 Nederlander in Nigeria** — You are a Dutch player who lives in Nigeria in WarEra.\n"
                 "**🇳🇱 Nederlander** — You are a Dutch citizen in WarEra.\n"
-                "**🏛️ Ambassade** — You are an ambassador from another country.\n\n"
+                "**🏛️ Embassy** — You are an ambassador from another country.\n\n"
                 "After clicking you will receive a private channel. "
                 "Send a screenshot of your WarEra profile there to complete your verification."
             ),
@@ -891,9 +1085,17 @@ class VerificationCog(commands.Cog, name="verification"):
             )
             return
         result, username = await _execute_approve(ticket, user, interaction.user, db=self._db)
-        await ticket.send(
-            f"✅ **Goedgekeurd** door {interaction.user.mention}\nDit kanaal wordt over 8 uur verwijderd."
-        )
+        ticket_type = _parse_topic(ticket.topic or "").get("type", "")
+        if _ticket_is_english(ticket_type):
+            await ticket.send(
+                f"✅ **Approved** by {interaction.user.mention}\n"
+                "This channel will be deleted in 8 hours."
+            )
+        else:
+            await ticket.send(
+                f"✅ **Goedgekeurd** door {interaction.user.mention}\n"
+                "Dit kanaal wordt over 8 uur verwijderd."
+            )
         await interaction.followup.send(result, ephemeral=True)
         asyncio.create_task(_close_ticket_later(ticket, hours=8, db=self._db))
 
@@ -924,7 +1126,7 @@ class VerificationCog(commands.Cog, name="verification"):
 
     @app_commands.command(
         name="setup_ambassades",
-        description="Maak ontbrekende ambassadekanalen aan voor bestaande rollen.",
+        description="Maak ontbrekende embassykanalen aan voor bestaande rollen.",
     )
     @_staff_check()
     async def setup_ambassades(self, interaction: discord.Interaction) -> None:
@@ -933,7 +1135,7 @@ class VerificationCog(commands.Cog, name="verification"):
         category = guild.get_channel(EMBASSY_CATEGORY_ID)
         if not isinstance(category, discord.CategoryChannel):
             await interaction.followup.send(
-                f"❌ Ambassadecategorie ({EMBASSY_CATEGORY_ID}) niet gevonden.", ephemeral=True
+                f"❌ Embassycategorie ({EMBASSY_CATEGORY_ID}) niet gevonden.", ephemeral=True
             )
             return
 
@@ -954,7 +1156,7 @@ class VerificationCog(commands.Cog, name="verification"):
             if role_id in covered:
                 skipped.append(f"{country} — kanaal bestaat al")
                 continue
-            safe_name = f"ambassade-{country.lower().replace(' ', '-')}"
+            safe_name = f"embassy-{country.lower().replace(' ', '-')}"
             overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
                 guild.default_role: discord.PermissionOverwrite(view_channel=False),
                 role: discord.PermissionOverwrite(
@@ -970,7 +1172,7 @@ class VerificationCog(commands.Cog, name="verification"):
             try:
                 ch = await category.create_text_channel(
                     name=safe_name, overwrites=overwrites,
-                    reason="Ambassadekanaal aangemaakt door /setup_ambassades",
+                    reason="Embassy channel created by /setup_ambassades",
                 )
                 created.append(f"{country} → {ch.mention}")
             except Exception as exc:

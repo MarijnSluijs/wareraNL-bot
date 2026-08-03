@@ -1,11 +1,18 @@
-"""Slash command /weeklydmg — top weekly battle damage for NL citizens.
+"""Slash command /weeklydmg — weekly battle damage ranking per country.
+
+Data comes from ``citizen_weekly_damage_history``, which the hourly fetcher
+sweep fills from ``ranking.getRanking(weeklyUserDamages)`` for **every** player
+in the game.  The ranking is therefore built purely from in-game data — no
+Discord-account matching is involved — so players who have since moved country
+still appear correctly under the country they fought for that week.
 
 Usage
 -----
-/weeklydmg                    — show top 10 NL players this week
-/weeklydmg speler:PlayerName  — show a specific player's weekly damage
-/weeklydmg top_n:25           — show top 25 players
-/weeklydmg top_n:25 speler:X  — ignored if speler is given
+/weeklydmg                          — top 10 for the Netherlands, this week
+/weeklydmg land:Poland              — top 10 for another country
+/weeklydmg week:2026-07-27          — a past game week
+/weeklydmg speler:PlayerName        — one player's damage + rank
+/weeklydmg top_n:25                 — longer leaderboard
 """
 
 from __future__ import annotations
@@ -18,8 +25,16 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import Context
 
-from cogs.commands._base import CommandCogBase, citizen_autocomplete, fmt_nl_time
+from cogs.commands._base import (
+    CommandCogBase,
+    citizen_autocomplete,
+    country_autocomplete,
+    fmt_nl_time,
+)
+from services.country_utils import country_id as get_country_id
+from services.country_utils import extract_country_list, find_country
 from services.damage_calc import fmt_damage
+from services.game_time import fmt_week_range, game_week_start, iso_week_label
 
 if TYPE_CHECKING:
     from bot import DiscordBot
@@ -28,6 +43,31 @@ logger = logging.getLogger("discord_bot")
 
 _DEFAULT_TOP = 10
 _MAX_TOP = 50
+_MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
+
+
+async def _week_autocomplete(
+    interaction: discord.Interaction, current: str
+) -> list[app_commands.Choice[str]]:
+    """Offer the game weeks we actually have recorded, newest first."""
+    db = getattr(interaction.client, "_ext_db", None)
+    if not db:
+        return []
+    try:
+        weeks = await db.get_recorded_weeks(limit=25)
+    except Exception:  # noqa: BLE001
+        return []
+    current_week = game_week_start()
+    q = current.strip().lower()
+    out: list[app_commands.Choice[str]] = []
+    for w in weeks:
+        label = f"{iso_week_label(w)} ({fmt_week_range(w)})"
+        if w == current_week:
+            label = f"Deze week — {label}"
+        if q and q not in label.lower() and q not in w:
+            continue
+        out.append(app_commands.Choice(name=label[:100], value=w))
+    return out[:25]
 
 
 class WeeklydmgCog(CommandCogBase, name="weeklydmg"):
@@ -36,22 +76,70 @@ class WeeklydmgCog(CommandCogBase, name="weeklydmg"):
     def __init__(self, bot: DiscordBot) -> None:
         self.bot = bot
 
+    # ── helpers ───────────────────────────────────────────────────────
+
+    async def _country_map(self) -> dict[str, str]:
+        """Return {country_id: name}, preferring the local snapshot cache."""
+        if self._db:
+            try:
+                name_map = await self._db.get_country_name_map()
+                if name_map:
+                    return dict(name_map)
+            except Exception:  # noqa: BLE001
+                pass
+        if self._client:
+            try:
+                resp = await self._client.get("/country.getAllCountries")
+                return {
+                    get_country_id(c): (c.get("name") or get_country_id(c))
+                    for c in extract_country_list(resp)
+                    if get_country_id(c)
+                }
+            except Exception:  # noqa: BLE001
+                pass
+        return {}
+
+    async def _resolve_country(
+        self, land: Optional[str]
+    ) -> tuple[Optional[str], str]:
+        """Return (country_id, display_name); defaults to the configured NL."""
+        name_map = await self._country_map()
+        if not land:
+            nl_id = self.config.get("nl_country_id")
+            return nl_id, name_map.get(nl_id or "", "Nederland")
+        country_list = [{"_id": cid, "name": n} for cid, n in name_map.items()]
+        hit = find_country(land, country_list)
+        if hit:
+            cid = get_country_id(hit)
+            return cid, str(hit.get("name") or land)
+        return None, land
+
+    # ── command ───────────────────────────────────────────────────────
+
     @commands.hybrid_command(
         name="weeklydmg",
-        description="Toon de top wekelijkse gevechtsschade van Nederlandse burgers.",
+        description="Toon de wekelijkse gevechtsschade-ranglijst van een land.",
     )
     @app_commands.describe(
+        land="Land om de ranglijst van te tonen (standaard Nederland).",
+        week="Game-week om te tonen (standaard deze week).",
         speler="Optioneel: zoek een specifieke speler op naam of ID.",
         top_n="Optioneel: toon de top N spelers (standaard 10, max 50).",
     )
-    @app_commands.autocomplete(speler=citizen_autocomplete)
+    @app_commands.autocomplete(
+        speler=citizen_autocomplete,
+        land=country_autocomplete,
+        week=_week_autocomplete,
+    )
     async def weeklydmg(
         self,
         ctx: Context,
+        land: Optional[str] = None,
+        week: Optional[str] = None,
         speler: Optional[str] = None,
         top_n: Optional[int] = None,
     ) -> None:
-        """Show weekly battle damage leaderboard for NL citizens."""
+        """Weekly battle damage leaderboard, ranked from in-game data."""
         if not self._db:
             await ctx.send("Diensten niet geïnitialiseerd.")
             return
@@ -59,87 +147,123 @@ class WeeklydmgCog(CommandCogBase, name="weeklydmg"):
         if hasattr(ctx, "defer"):
             await ctx.defer()
 
-        nl_country_id = self.config.get("nl_country_id")
-        if not nl_country_id:
-            await ctx.send("nl_country_id is niet geconfigureerd.")
+        country_id, country_name = await self._resolve_country(land)
+        if not country_id:
+            await ctx.send(f"❌ Land **{land}** niet gevonden.")
             return
 
-        # ── Single player lookup ──────────────────────────────────────
+        week_start = (week or "").strip() or game_week_start()
+        is_current = week_start == game_week_start()
+        week_label = f"{iso_week_label(week_start)} ({fmt_week_range(week_start)})"
+
         if speler:
-            row = await self._db.get_weekly_damage_for_player(nl_country_id, speler)
-            if row is None:
-                await ctx.send(
-                    f"Geen wekelijkse schadedata gevonden voor **{speler}**.\n"
-                    "Controleer de naam of wacht tot de cache is bijgewerkt."
-                )
-                return
-            uid, name, dmg, updated_at = row
-
-            # Top 5 NL
-            top_rows, last_updated = await self._db.get_top_weekly_damages(
-                nl_country_id, 5
-            )
-            nl_rank = await self._db.get_player_nl_rank(nl_country_id, uid)
-
-            medal = {1: "🥇", 2: "🥈", 3: "🥉"}
-            top_lines: list[str] = []
-            player_in_top5 = False
-            for rank, (r_uid, r_name, r_dmg) in enumerate(top_rows, 1):
-                prefix = medal.get(rank, f"`{rank}.`")
-                url = f"https://app.warera.io/user/{r_uid}"
-                if r_uid == uid:
-                    top_lines.append(f"{prefix} **__[{r_name}]({url})__** — {fmt_damage(r_dmg)}")
-                    player_in_top5 = True
-                else:
-                    top_lines.append(f"{prefix} **[{r_name}]({url})** — {fmt_damage(r_dmg)}")
-
-            embed = discord.Embed(
-                title="⚔️ Wekelijkse schade Nederland — Top 5",
-                description="\n".join(top_lines) if top_lines else "*Nog geen data*",
-                colour=self._embed_colour(),
-            )
-
-            if not player_in_top5:
-                rank_str = f"#{nl_rank}" if nl_rank else "?"
-                embed.add_field(
-                    name=f"📍 {name}",
-                    value=f"Rang **{rank_str}** — {fmt_damage(dmg)}",
-                    inline=False,
-                )
-
-            ts = fmt_nl_time(updated_at or last_updated or "")
-            embed.set_footer(text=f"Bijgewerkt: {ts}")
-            await ctx.send(embed=embed)
+            await self._show_player(ctx, speler, week_start, week_label, country_id, country_name)
             return
 
-        # ── Leaderboard ───────────────────────────────────────────────
         limit = max(1, min(top_n or _DEFAULT_TOP, _MAX_TOP))
-        rows, last_updated = await self._db.get_top_weekly_damages(nl_country_id, limit)
+        rows, last_updated = await self._db.get_weekly_damage_ranking(
+            country_id, week_start, limit
+        )
 
         if not rows:
+            weeks = await self._db.get_recorded_weeks(limit=10)
+            hint = ""
+            if weeks and week_start not in weeks:
+                hint = "\nBeschikbare weken: " + ", ".join(
+                    iso_week_label(w) for w in weeks[:6]
+                )
             await ctx.send(
-                "Nog geen wekelijkse schadedata voor Nederland.\n"
-                "De cache wordt elk uur bijgewerkt (eerste run bij opstarten)."
+                f"Nog geen wekelijkse schadedata voor **{country_name}** "
+                f"in week {week_label}.{hint}"
             )
             return
 
-        # Build leaderboard text
-        lines: list[str] = []
-        medal = {1: "🥇", 2: "🥈", 3: "🥉"}
-        for rank, (uid, name, dmg) in enumerate(rows, 1):
-            prefix = medal.get(rank, f"`{rank:>2}.`")
-            url = f"https://app.warera.io/user/{uid}"
-            lines.append(f"{prefix} **[{name}]({url})** — {fmt_damage(dmg)}")
+        lines = []
+        for rank, r in enumerate(rows, 1):
+            prefix = _MEDALS.get(rank, f"`{rank:>2}.`")
+            url = f"https://app.warera.io/user/{r['user_id']}"
+            lines.append(
+                f"{prefix} **[{r['citizen_name']}]({url})** — {fmt_damage(r['damage'])}"
+            )
 
         embed = discord.Embed(
-            title=f"⚔️ Wekelijkse schade — Top {len(rows)} Nederland",
+            title=f"⚔️ Wekelijkse schade {country_name} — Top {len(rows)}",
             description="\n".join(lines),
             colour=self._embed_colour(),
         )
+        footer = f"Week {week_label}"
+        if is_current:
+            footer += " (lopend)"
         if last_updated:
-            embed.set_footer(
-                text=f"Bijgewerkt: {fmt_nl_time(last_updated)} · elk uur ververst"
+            footer += f" · bijgewerkt: {fmt_nl_time(last_updated)}"
+        embed.set_footer(text=footer)
+        await ctx.send(embed=embed)
+
+    # ── single-player view ────────────────────────────────────────────
+
+    async def _show_player(
+        self,
+        ctx: Context,
+        speler: str,
+        week_start: str,
+        week_label: str,
+        country_id: str,
+        country_name: str,
+    ) -> None:
+        row = await self._db.get_weekly_damage_player(week_start, speler)
+        if row is None:
+            await ctx.send(
+                f"Geen wekelijkse schadedata gevonden voor **{speler}** "
+                f"in week {week_label}."
             )
+            return
+
+        # Rank within the country the player actually fought for that week,
+        # which may differ from the requested country if they moved since.
+        player_country = row["country_id"] or country_id
+        rank = await self._db.get_weekly_damage_rank(
+            player_country, week_start, row["user_id"]
+        )
+        top_rows, _ = await self._db.get_weekly_damage_ranking(
+            player_country, week_start, 5
+        )
+
+        lines: list[str] = []
+        in_top5 = False
+        for i, r in enumerate(top_rows, 1):
+            prefix = _MEDALS.get(i, f"`{i}.`")
+            url = f"https://app.warera.io/user/{r['user_id']}"
+            if r["user_id"] == row["user_id"]:
+                in_top5 = True
+                lines.append(
+                    f"{prefix} **__[{r['citizen_name']}]({url})__** — {fmt_damage(r['damage'])}"
+                )
+            else:
+                lines.append(
+                    f"{prefix} **[{r['citizen_name']}]({url})** — {fmt_damage(r['damage'])}"
+                )
+
+        label = country_name
+        if player_country != country_id:
+            name_map = await self._country_map()
+            label = name_map.get(player_country, player_country)
+
+        embed = discord.Embed(
+            title=f"⚔️ Wekelijkse schade {label} — Top 5",
+            description="\n".join(lines) if lines else "*Nog geen data*",
+            colour=self._embed_colour(),
+        )
+        if not in_top5:
+            extra = f" · {row['mu_name']}" if row.get("mu_name") else ""
+            value = (
+                f"Rang **#{rank}** — {fmt_damage(row['damage'])}{extra}"
+                if rank
+                else f"{fmt_damage(row['damage'])}{extra}"
+            )
+            embed.add_field(name=f"📍 {row['citizen_name']}", value=value, inline=False)
+        embed.set_footer(
+            text=f"Week {week_label} · bijgewerkt: {fmt_nl_time(row.get('updated_at') or '')}"
+        )
         await ctx.send(embed=embed)
 
 
