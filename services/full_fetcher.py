@@ -46,6 +46,7 @@ from services.citizen_cache import CitizenCache
 from services.country_utils import country_id as cid_of
 from services.country_utils import extract_country_list
 from services.db import Database
+from services.game_time import game_day, game_week_start
 
 logger = logging.getLogger("full_fetcher")
 logging.basicConfig(
@@ -283,6 +284,136 @@ async def fetch_recent_trades(client: APIClient, db: Database) -> int:
         return 0
 
 
+def _ranking_entries(resp) -> list[dict]:
+    """Return the flat entry list from a ranking.getRanking response."""
+    data = _unwrap_trpc(resp)
+    if isinstance(data, list):
+        return [e for e in data if isinstance(e, dict)]
+    if isinstance(data, dict):
+        for key in ("items", "ranking", "rankings", "data", "results"):
+            v = data.get(key)
+            if isinstance(v, list):
+                return [e for e in v if isinstance(e, dict)]
+    return []
+
+
+def _entry_user_id(entry: dict) -> str | None:
+    """Extract the citizen's account id from a ranking entry.
+
+    ``user`` references the citizen; ``_id`` is the ranking record's own id,
+    so ``user`` must win when both are present.
+    """
+    user = entry.get("user")
+    if isinstance(user, str) and user:
+        return user
+    if isinstance(user, dict):
+        for key in ("_id", "id", "userId"):
+            v = user.get(key)
+            if v:
+                return str(v)
+    for key in ("userId", "citizenId", "id", "_id"):
+        v = entry.get(key)
+        if v:
+            return str(v)
+    return None
+
+
+def _entry_username(entry: dict) -> str | None:
+    for key in ("username", "name", "citizenName"):
+        v = entry.get(key)
+        if isinstance(v, str) and v:
+            return v
+    user = entry.get("user")
+    if isinstance(user, dict):
+        for key in ("username", "name"):
+            v = user.get(key)
+            if isinstance(v, str) and v:
+                return v
+    return None
+
+
+def _entry_damage(entry: dict) -> float:
+    for key in ("value", "damage", "totalDamage", "weeklyDamage",
+                "weeklyBattleDamage", "amount"):
+        v = entry.get(key)
+        if isinstance(v, (int, float)):
+            return float(v)
+    return 0.0
+
+
+async def fetch_weekly_damages(client: APIClient, db: Database) -> int:
+    """Snapshot the global weekly-damage ranking for every player.
+
+    ``ranking.getRanking(weeklyUserDamages)`` returns every player in the game
+    in one call, so this is cheap regardless of how many countries we track.
+    Each entry is tagged with the player's country/MU from ``citizen_levels``
+    and handed to :meth:`Database.apply_weekly_damage_snapshot`, which writes
+    the weekly history row and derives the game day's damage from the delta.
+    """
+    dataset = "all_countries.weekly_damage"
+    await db.mark_started(dataset, source="full_fetcher")
+    started = time.monotonic()
+    try:
+        resp = await client.post(
+            "/ranking.getRanking", json={"rankingType": "weeklyUserDamages"}
+        )
+        entries = _ranking_entries(resp)
+        if not entries:
+            raise RuntimeError("weeklyUserDamages returned no entries")
+
+        # country/MU per player, so history stays correct after someone moves
+        meta: dict[str, tuple] = {}
+        async with db._conn.execute(
+            "SELECT user_id, citizen_name, country_id, mu_id, mu_name FROM citizen_levels"
+        ) as cur:
+            async for row in cur:
+                meta[str(row[0])] = (row[1], row[2], row[3], row[4])
+
+        payload: list[dict] = []
+        seen: set[str] = set()
+        for e in entries:
+            uid = _entry_user_id(e)
+            if not uid or uid in seen:
+                continue
+            seen.add(uid)
+            name, country_id, mu_id, mu_name = meta.get(uid, (None, None, None, None))
+            payload.append({
+                "user_id": uid,
+                "citizen_name": _entry_username(e) or name,
+                "country_id": country_id,
+                "mu_id": mu_id,
+                "mu_name": mu_name,
+                "weekly_damage": _entry_damage(e),
+            })
+
+        now = datetime.now(timezone.utc)
+        # Let the Discord bot's own weekly-damage task know this sweep owns
+        # the data now, so it doesn't duplicate the work (or the API call).
+        await db.set_poll_state("weekly_damage_fetcher_last_run", now.isoformat())
+        counts = await db.apply_weekly_damage_snapshot(
+            payload,
+            game_date=game_day(now),
+            week_start=game_week_start(now),
+            updated_at=now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        )
+
+        duration_ms = int((time.monotonic() - started) * 1000)
+        await db.mark_finished(dataset, status="ok", duration_ms=duration_ms)
+        logger.info(
+            "weekly_damage: %d players (day=%s week=%s, %d prior days closed) (%.1fs)",
+            counts["weekly"], game_day(now), game_week_start(now),
+            counts["closed"], duration_ms / 1000,
+        )
+        return counts["weekly"]
+    except Exception as exc:  # noqa: BLE001
+        duration_ms = int((time.monotonic() - started) * 1000)
+        await db.mark_finished(
+            dataset, status="error", error=str(exc)[:500], duration_ms=duration_ms
+        )
+        logger.exception("weekly_damage sweep failed")
+        return 0
+
+
 async def fetch_all_mu_names(client: APIClient, db: Database) -> int:
     """Paginate mu.getManyPaginated globally and upsert into known_mus."""
     dataset = "all_countries.mu_registry"
@@ -419,6 +550,7 @@ async def run_once(client: APIClient, db: Database, *, country_limit: int = 0) -
     Tiers (each gated by an env flag, default-on for cheap ones):
       - country_snapshots   (always)
       - citizens per country (always)
+      - weekly_damage       FULL_FETCH_ENABLE_WEEKLY_DAMAGE (default 1)
       - trades              FULL_FETCH_ENABLE_TRADES (default 1)
       - mu_registry         FULL_FETCH_ENABLE_MU_REGISTRY (default 1)
       - mu_memberships      FULL_FETCH_ENABLE_MU_MEMBERSHIPS (default 0 — slow)
@@ -429,6 +561,8 @@ async def run_once(client: APIClient, db: Database, *, country_limit: int = 0) -
     cache = CitizenCache(client, db)
     await fetch_all_citizen_levels(cache, db, countries, limit=country_limit)
 
+    if _env_int("FULL_FETCH_ENABLE_WEEKLY_DAMAGE", 1) == 1:
+        await fetch_weekly_damages(client, db)
     if _env_int("FULL_FETCH_ENABLE_TRADES", 1) == 1:
         await fetch_recent_trades(client, db)
     if _env_int("FULL_FETCH_ENABLE_MU_REGISTRY", 1) == 1:

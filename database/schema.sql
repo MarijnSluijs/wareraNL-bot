@@ -239,7 +239,7 @@ CREATE TABLE IF NOT EXISTS wallet_transactions (
 
 -- ── Weekly damage ────────────────────────────────────────────────────────────
 
--- citizen_weekly_damages: latest weekly battle damage per NL citizen
+-- citizen_weekly_damages: latest weekly battle damage per citizen (all countries)
 CREATE TABLE IF NOT EXISTS citizen_weekly_damages (
     user_id       TEXT PRIMARY KEY,
     citizen_name  TEXT,
@@ -248,6 +248,51 @@ CREATE TABLE IF NOT EXISTS citizen_weekly_damages (
     updated_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_weekly_damages_country ON citizen_weekly_damages(country_id);
+
+-- citizen_weekly_damage_history: per-player weekly damage, one row per game week.
+--   Populated hourly by the full_fetcher from ranking.getRanking
+--   (rankingType=weeklyUserDamages), which covers every player in the game.
+--   week_start is the YYYY-MM-DD Monday of the game week (Monday 02:00 UTC
+--   boundary — see services/game_time.py).  country_id / mu_id are snapshotted
+--   at write time so historical rankings stay correct after a player moves.
+CREATE TABLE IF NOT EXISTS citizen_weekly_damage_history (
+    user_id       TEXT NOT NULL,
+    week_start    TEXT NOT NULL,
+    citizen_name  TEXT,
+    country_id    TEXT,
+    mu_id         TEXT,
+    mu_name       TEXT,
+    weekly_damage REAL NOT NULL DEFAULT 0,
+    updated_at    TEXT NOT NULL,
+    PRIMARY KEY (user_id, week_start)
+);
+CREATE INDEX IF NOT EXISTS idx_wdh_week_country ON citizen_weekly_damage_history(week_start, country_id);
+CREATE INDEX IF NOT EXISTS idx_wdh_week_mu      ON citizen_weekly_damage_history(week_start, mu_id);
+CREATE INDEX IF NOT EXISTS idx_wdh_user         ON citizen_weekly_damage_history(user_id);
+
+-- citizen_daily_damage: per-player damage per game day (02:00–02:00 UTC).
+--   Derived from the hourly weekly-damage snapshots rather than from
+--   individual battles: damage = weekly_end - baseline, where baseline is the
+--   weekly counter's value when the game day opened.  Because the weekly
+--   counter resets at Monday 02:00 — exactly a day boundary — a week rollover
+--   simply means baseline 0 for that Monday.
+CREATE TABLE IF NOT EXISTS citizen_daily_damage (
+    user_id      TEXT NOT NULL,
+    game_date    TEXT NOT NULL,
+    week_start   TEXT NOT NULL,
+    citizen_name TEXT,
+    country_id   TEXT,
+    mu_id        TEXT,
+    mu_name      TEXT,
+    baseline     REAL NOT NULL DEFAULT 0,
+    weekly_end   REAL NOT NULL DEFAULT 0,
+    damage       REAL NOT NULL DEFAULT 0,
+    updated_at   TEXT NOT NULL,
+    PRIMARY KEY (user_id, game_date)
+);
+CREATE INDEX IF NOT EXISTS idx_cdd_date_country ON citizen_daily_damage(game_date, country_id);
+CREATE INDEX IF NOT EXISTS idx_cdd_date_mu      ON citizen_daily_damage(game_date, mu_id);
+CREATE INDEX IF NOT EXISTS idx_cdd_user         ON citizen_daily_damage(user_id);
 
 -- ── Global luck ────────────────────────────────────────────────────────────────
 

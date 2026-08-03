@@ -38,6 +38,7 @@ from .citizens import CitizensMixin
 from .company_bonus import CompanyBonusMixin
 from .company_move_advice import CompanyMoveAdviceMixin
 from .daily_dmg import DailyDmgMixin
+from .damage_history import DamageHistoryMixin
 from .discord_allies import DiscordAlliesMixin
 from .division_overrides import DivisionOverridesMixin
 from .events import EventsMixin
@@ -65,6 +66,7 @@ class Database(
     MuSubscriptionsMixin,
     EcoDonationsMixin,
     DailyDmgMixin,
+    DamageHistoryMixin,
     GemsMixin,
     DiscordAlliesMixin,
     Level5NotifiedMixin,
