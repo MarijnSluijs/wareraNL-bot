@@ -67,20 +67,37 @@ async def citizen_autocomplete(
 
 
 async def country_autocomplete(
-    _interaction: discord.Interaction, current: str
+    interaction: discord.Interaction, current: str
 ) -> list[app_commands.Choice[str]]:
     """Module-level autocomplete callback for country name parameters.
+
+    Names come from ``country_snapshots`` — refreshed hourly by the fetcher —
+    so countries added or renamed in-game are offered immediately.  The static
+    ``ALL_COUNTRY_NAMES`` list is only a fallback for when the DB is not up
+    yet; relying on it alone silently hid newly added countries such as
+    Liechtenstein until someone edited the source.
 
     Matches English names as usual, and also Dutch names (showing them as
     "English (Dutch)" so the user can see both).
     Use this directly in ``@app_commands.autocomplete(country=country_autocomplete)``.
     """
+    names: list[str] = []
+    db = getattr(interaction.client, "_ext_db", None)
+    if db:
+        try:
+            name_map = await db.get_country_name_map()
+            names = sorted(name_map.values(), key=str.casefold)
+        except Exception:
+            names = []
+    if not names:
+        names = list(ALL_COUNTRY_NAMES)
+
     q = current.strip().lower()
     results: list[app_commands.Choice[str]] = []
     seen: set[str] = set()
 
     # English name matches
-    for name in ALL_COUNTRY_NAMES:
+    for name in names:
         if q in name.lower() and name not in seen:
             results.append(app_commands.Choice(name=name, value=name))
             seen.add(name)
@@ -90,7 +107,7 @@ async def country_autocomplete(
         for dutch_lower, english_lower in _COUNTRY_ALIASES.items():
             if q in dutch_lower and len(results) < 25:
                 english = next(
-                    (n for n in ALL_COUNTRY_NAMES if n.lower() == english_lower), None
+                    (n for n in names if n.lower() == english_lower), None
                 )
                 if english and english not in seen:
                     results.append(
