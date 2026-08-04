@@ -839,10 +839,6 @@
                     "type": "string",
                     "description": "Filter companies by user ID"
                   },
-                  "orgId": {
-                    "type": "string",
-                    "description": "Filter companies by organization ID"
-                  },
                   "perPage": {
                     "type": "number",
                     "minimum": 1,
@@ -1909,9 +1905,6 @@
                     "type": "string"
                   },
                   "userId": {
-                    "type": "string"
-                  },
-                  "orgId": {
                     "type": "string"
                   },
                   "search": {

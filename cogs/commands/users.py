@@ -389,17 +389,23 @@ class Users(CommandCogBase, name="users"):
 
     @app_commands.command(
         name="setmofa",
-        description="Stel de huidige MoFA in voor het embassy request kanaal"
+        description="Stel de MoFA-fallback in (normaal automatisch via de rol)"
     )
     @app_commands.describe(
         user="Discord gebruiker"
     )
     @app_commands.checks.has_permissions(manage_guild=True)
     async def set_mofa(self, interaction: discord.Interaction, user: discord.Member):
+        """Set the MoFA fallback used when nobody holds the minister role.
+
+        Embassy tickets normally resolve the MoFA live from the *Minister van
+        Buitenlandse Zaken* role, so this only needs setting if that role is
+        ever empty (see ``_resolve_mofa_line`` in cogs/welcome.py).
+        """
         db = await self._get_db()
-        in_game_id = db.get_identity_link_by_discord(
+        in_game_id = await db.get_identity_link_by_discord(
             discord_user_id=str(user.id)
-            )
+        )
 
         if not in_game_id or not in_game_id.get("in_game_user_id"):
             await interaction.response.send_message(
