@@ -267,6 +267,77 @@ async def _get_shared_db(client):
     return _welcome_db_fallback
 
 
+async def _resolve_mofa_line(client, guild, config) -> str:
+    """Build the "contact the MoFA" line for embassy tickets.
+
+    Resolved live from whoever currently holds the *Minister van Buitenlandse
+    Zaken* role, so the ticket never points at a former minister after a
+    cabinet change.  For each holder we try to include their WarEra profile
+    link, resolved in order of reliability:
+
+      1. ``identity_links`` — the mapping written when they were verified.
+      2. Their Discord display name matched against ``citizen_levels``
+         (the bot keeps nicknames in sync with in-game usernames).
+
+    Falls back to the ``users.mofa`` entry in config.json when the role has no
+    members (or is missing), so this can never end up mentioning nobody.
+    """
+    role_id = (config.get("roles") or {}).get("minister_foreign_affairs")
+    role = guild.get_role(int(role_id)) if role_id and guild else None
+    holders = [m for m in role.members if not m.bot] if role else []
+
+    role_mention = role.mention if role else "MoFA"
+
+    if not holders:
+        # Nobody currently holds the role — use the configured fallback.
+        info = (config.get("users") or {}).get("mofa") or {}
+        did, gid = info.get("discord_id"), info.get("in_game_id")
+        mention = f"<@{did}>" if did else role_mention
+        line = f"Hello, please send a message with your Discord name to our MoFA {mention} on WarEra "
+        line += "to complete your verification request."
+        if gid:
+            line += f"\nLink: https://app.warera.io/user/{gid}"
+        return line
+
+    db = None
+    try:
+        db = await _get_shared_db(client)
+    except Exception:
+        logger.warning("MoFA lookup: shared DB unavailable", exc_info=True)
+
+    async def _warera_id(member) -> str | None:
+        if not db:
+            return None
+        try:
+            link = await db.get_identity_link_by_discord(str(member.id))
+            if link and link.get("in_game_user_id"):
+                return str(link["in_game_user_id"])
+        except Exception:
+            logger.debug("MoFA lookup: identity_links failed for %s", member.id)
+        # Fall back to matching their display name against known citizens.
+        for name in filter(None, (member.nick, member.display_name, member.name)):
+            try:
+                matches = await db.search_citizen_names(name, limit=5)
+            except Exception:
+                break
+            for cname, uid in matches:
+                if cname.lower() == name.lower():
+                    return str(uid)
+        return None
+
+    mentions = " ".join(m.mention for m in holders)
+    line = (
+        f"Hello, please send a message with your Discord name to our MoFA "
+        f"{role_mention} {mentions} on WarEra to complete your verification request."
+    )
+    for member in holders:
+        gid = await _warera_id(member)
+        if gid:
+            label = member.display_name
+            line += f"\nLink ({label}): https://app.warera.io/user/{gid}"
+    return line
+
+
 async def create_verification_channel(
     interaction: discord.Interaction,
     request_type: str,
@@ -555,14 +626,8 @@ async def create_verification_channel(
             "Je kunt hier alvast meer context geven als dat nodig is."
         )
     elif request_type == "embassy":
-        mofa_user_info = config.get("users", {}).get("mofa")
-        mofa_user_id = mofa_user_info.get("discord_id") if mofa_user_info else None
-        mofa_ingame_id = mofa_user_info.get("in_game_id") if mofa_user_info else None
-        mofa_mention = f"<@{mofa_user_id}>" if mofa_user_id else ""
-        instruction_text = (
-            f"Hello, please send a message with your Discord name to our MoFA {mofa_mention} on WarEra "
-            "to complete your verification request. \n"
-            f"Link: https://app.warera.io/user/{mofa_ingame_id if mofa_ingame_id else 'unknown'}"
+        instruction_text = await _resolve_mofa_line(
+            interaction.client, guild, config
         )
     else:
         instruction_text = (
