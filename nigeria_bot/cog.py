@@ -105,7 +105,6 @@ FORBIDDEN_WORD_GROUPS: tuple[tuple[tuple[str, ...], tuple[str, ...], bool], ...]
     (
         ("gelijkwaardigheid", "emancipatie", "stemmen", "vrijheid", "loonsverhoging", "referendum"),
         (
-            "https://giphy.com/gifs/paramountnetwork-paramount-network-68whiskey-VG",
             "https://giphy.com/gifs/FlexxedTV-wow-whats-that-XPrN8DrbFIqjbBo8rK",
             # TODO: one gif here was a malformed/truncated URL ("tS0dsIv2h4o2E4tc")
             # — needs the real link before it can be added.

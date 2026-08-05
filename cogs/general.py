@@ -382,8 +382,8 @@ class General(commands.Cog, name="general"):
             except discord.HTTPException as e:
                 self.bot.logger.error(f"Failed to send transparantie message for message {message.id}: {e}")
 
-        # congres → random meeting/debate GIF, 5% chance
-        if "congres" in words and random.random() < 0.05:
+        # congres → random meeting/debate GIF, 1% chance
+        if "congres" in words and random.random() < 0.01:
             gif = random.choice((
                 "https://i.imgur.com/wn0ogiX.gif",
                 "https://klipy.com/gifs/meeting-yesterdays-meeting",
@@ -405,6 +405,21 @@ class General(commands.Cog, name="general"):
                 await message.channel.send(gif)
             except discord.HTTPException as e:
                 self.bot.logger.error(f"Failed to send slapinet gif for message {message.id}: {e}")
+
+        # pils → random beer GIF, 20% chance
+        if "pils" in words and random.random() < 0.20:
+            gif = random.choice((
+                "https://giphy.com/gifs/afv-funny-fail-lol-26tP21xUQnOCIIoFi",
+                "https://giphy.com/gifs/wJt98DnjJHbJW46KsA",
+                "https://tenor.com/view/dog-beer-happy-dog-party-dog-party-puppy-lets-celebrate-gif-27139602",
+                "https://tenor.com/view/beer-chug-drinking-drink-thirsty-gif-4362970331505802377",
+                "https://tenor.com/view/beer-bottle-beer-cup-beer-meme-gif-25674419",
+                "https://tenor.com/view/open-bottle-getting-sprayed-fail-funny-getting-blasted-gif-15850111",
+            ))
+            try:
+                await message.channel.send(gif)
+            except discord.HTTPException as e:
+                self.bot.logger.error(f"Failed to send pils gif for message {message.id}: {e}")
 
         if "app.warera.io" not in content.lower():
             return
