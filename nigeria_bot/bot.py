@@ -44,10 +44,41 @@ class NigeriaBot(commands.Bot):
         import nigeria_bot.cog as cog_module
         await self.add_cog(cog_module.VerificationCog(self, self.nigeria_db))
 
+        # Load the Nigerian Scam-Economy game
+        import nigeria_bot.scam_game as scam_game
+        self.scam_game = await scam_game.setup(self, self.nigeria_db)
+        import nigeria_bot.scam_targets as scam_targets
+        self.scam_targets = await scam_targets.setup(self, self.nigeria_db)
+        import nigeria_bot.scam_jail as scam_jail
+        self.scam_jail = await scam_jail.setup(self, self.nigeria_db)
+        # The fund owns /invest and its own risk-level scheduler.
+        import nigeria_bot.royal_fund as royal_fund
+        self.royal_fund = await royal_fund.setup(self, self.nigeria_db)
+
+        # /fabrieken — reads the hourly company census written by the
+        # data-fetcher container into database/external.db.
+        import nigeria_bot.fabrieken as fabrieken
+        await fabrieken.setup(self)
+
+        # /damage-projection — reads the hourly alliance/citizen sweep written
+        # by the data-fetcher container into database/external.db.
+        import nigeria_bot.damage_projection as damage_projection
+        await damage_projection.setup(self)
+
         # Register persistent views so buttons survive restarts
         from nigeria_bot.cog import VerificationView, TicketActionView
         self.add_view(VerificationView())
         self.add_view(TicketActionView())
+        from nigeria_bot.scam_game import BegView, OperationView
+        # free_entry=True so *both* join custom_ids are registered — a view
+        # built without the free seat never registers that button, and every
+        # free seat posted before the restart would go dead.
+        self.add_view(OperationView(free_entry=True))
+        self.add_view(BegView())
+        from nigeria_bot.scam_targets import TargetBoardView
+        self.add_view(TargetBoardView())
+        from nigeria_bot.scam_jail import AppealView
+        self.add_view(AppealView())
 
         # Sync slash commands to the guild
         from nigeria_bot.cog import GUILD_ID
@@ -64,6 +95,11 @@ class NigeriaBot(commands.Bot):
             self._reconciled_deletions = True
             from nigeria_bot.cog import _reconcile_pending_deletions
             await _reconcile_pending_deletions(self, self.nigeria_db)
+            # Resume any scam operation whose window elapsed while we were down.
+            try:
+                await self.scam_game.reconcile()
+            except Exception:
+                logger.exception("Failed to reconcile scam operations")
 
 
 def main() -> None:

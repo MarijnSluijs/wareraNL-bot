@@ -52,6 +52,7 @@ class CitizenCache:
 
         recorded = 0
         pill_tracking_rows: list[tuple] = []
+        combat_state_rows: list[tuple] = []
 
         # self._db._conn is ONE connection shared by every concurrent coroutine
         # in the bot process (every cog/task).  Do NOT wrap this loop in an
@@ -103,6 +104,15 @@ class CitizenCache:
                         pass
                 pill_tracking_rows.append((uid, country_id, _exp_ts, updated_at))
 
+                # Combat state (health/hunger) for /damage-projection — same
+                # getUserLite response, just persisting two fields that were
+                # previously read and discarded.
+                health_cur, health_max, hunger_cur, hunger_max = self._extract_combat_state(obj)
+                if health_cur is not None or hunger_cur is not None:
+                    combat_state_rows.append(
+                        (uid, country_id, health_cur, health_max, hunger_cur, hunger_max)
+                    )
+
             if (i + 1) % (batch_size * 2) == 0 and progress_msg:
                 batch_done = (i + 1) // batch_size
                 try:
@@ -120,6 +130,11 @@ class CitizenCache:
                 await self._db.bulk_upsert_pill_tracking(pill_tracking_rows)
             except Exception:
                 logger.warning("refresh_country: failed to persist pill tracking for %s", country_id)
+        if combat_state_rows:
+            try:
+                await self._db.bulk_upsert_combat_state(combat_state_rows, updated_at)
+            except Exception:
+                logger.warning("refresh_country: failed to persist combat state for %s", country_id)
         # Remove any citizens not seen in this refresh (they left the country)
         pruned = await self._db.prune_stale_citizens(country_id, updated_at)
         if pruned:
@@ -602,6 +617,41 @@ class CitizenCache:
             return None
 
         return "eco" if eco_pts >= war_pts else "war"
+
+    @staticmethod
+    def _extract_combat_state(
+        obj: Any,
+    ) -> tuple[float | None, float | None, float | None, float | None]:
+        """Pull (health_cur, health_max, hunger_cur, hunger_max) from getUserLite.
+
+        ``currentBarValue`` is the live amount, ``total`` the max (already the
+        convention used by :meth:`fetch_mu_players_live` below). Returns all
+        None when the skills object is absent or malformed.
+        """
+        if not isinstance(obj, dict):
+            return None, None, None, None
+        skills = obj.get("skills")
+        if not isinstance(skills, dict):
+            return None, None, None, None
+
+        def _bar(entry: Any) -> tuple[float | None, float | None]:
+            if not isinstance(entry, dict):
+                return None, None
+            cur = entry.get("currentBarValue")
+            mx = entry.get("total")
+            try:
+                cur = float(cur) if cur is not None else None
+            except (TypeError, ValueError):
+                cur = None
+            try:
+                mx = float(mx) if mx is not None else None
+            except (TypeError, ValueError):
+                mx = None
+            return cur, mx
+
+        health_cur, health_max = _bar(skills.get("health"))
+        hunger_cur, hunger_max = _bar(skills.get("hunger"))
+        return health_cur, health_max, hunger_cur, hunger_max
 
     @staticmethod
     def _extract_avatar_url(obj: Any) -> str | None:

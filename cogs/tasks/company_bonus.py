@@ -5,8 +5,9 @@ For each subscribed Discord user, fetches their in-game companies and:
   1. (Bonus check) Calls ``company.getProductionBonus`` per company.  When the
      total bonus is 0% the user is pinged via DM once per (company, region).
   2. (Move advice) Calls ``company.getRecommendedRegionIdsByItemCode`` per
-     company.  When a better region is found and the moving cost (5 concrete)
-     can be earned back in time, the user receives a one-time DM with advice.
+     company.  When a better region is found and the moving cost
+     (``gameConfig.company.moveCost`` concrete) can be earned back in time, the
+     user receives a one-time DM with advice.
 
 Move-advice rules:
   • Deposit region  : advise if payback_days ≤ deposit_days_left − 1
@@ -15,6 +16,25 @@ Move-advice rules:
 
 Payback time uses the *difference* in bonus (new − current), not the absolute
 bonus of the target region, to account for any existing bonus the company earns.
+
+Economics
+---------
+Both sides of the payback ratio are expressed in credits (CC), priced per the
+company's *own* item — never via a generic "average production point" proxy::
+
+    items/day   = (ae_level × 24) / productionPoints[item]
+    margin/item = price[item] × (1 − tax) − Σ productionNeeds × price[material]
+    extra/day   = items/day × (bonus_gain / 100) × margin/item
+    move_cost   = gameConfig.company.moveCost × price["concrete"]
+
+The production bonus scales raw-material consumption along with output, so the
+gain is a percentage of the *net* margin, not of gross revenue.
+
+Known limitations:
+  • Only the automated engine is counted; employee output is ignored, which
+    makes the payback estimate conservative (advice fires less often).
+  • ``taxPercent`` is only available for candidate regions, so the tax delta on
+    the company's *existing* output is not modelled — only tax on the gain.
 """
 
 from __future__ import annotations
@@ -23,6 +43,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 import discord
 from discord.ext import tasks
@@ -113,6 +134,34 @@ def _unwrap_region_list(api_response: object) -> list[dict]:
             if isinstance(v, list):
                 return [r for r in v if isinstance(r, dict)]
     return []
+
+
+class MoveEconomics(NamedTuple):
+    """Everything needed to price a company move, fetched once per scan."""
+
+    prices: dict[str, float]                  # {item_code: market price in CC}
+    prod_points: dict[str, float]             # {item_code: PP needed per unit}
+    prod_needs: dict[str, dict[str, float]]   # {item_code: {material: qty per unit}}
+    move_cost: float                          # CC to move one company
+    move_cost_units: float                    # concrete units to move one company
+
+    def margin_per_item(self, item_code: str, tax_percent: float = 0.0) -> float:
+        """CC earned per unit produced, after raw materials and region tax."""
+        sell = self.prices.get(item_code, 0.0)
+        if sell <= 0:
+            return 0.0
+        mat_cost = sum(
+            qty * self.prices.get(mat, 0.0)
+            for mat, qty in self.prod_needs.get(item_code, {}).items()
+        )
+        return sell * (1.0 - tax_percent / 100.0) - mat_cost
+
+    def items_per_day(self, item_code: str, ae_level: int) -> float:
+        """Base units produced per day by the automated engine (before bonus)."""
+        pp_per_item = self.prod_points.get(item_code) or 1.0
+        if pp_per_item <= 0:
+            return 0.0
+        return (ae_level * 24.0) / pp_per_item
 
 
 class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
@@ -254,16 +303,17 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
             await asyncio.sleep(1)
 
         if move_advice_watchers:
-            move_cost, avg_pp_value = await self._fetch_market_prices()
-            if move_cost <= 0 or avg_pp_value <= 0:
+            econ = await self._fetch_move_economics()
+            if econ is None:
                 logger.warning(
-                    "company_move_advice: could not fetch market prices, skipping move-advice scan"
+                    "company_move_advice: could not fetch market prices / game config, "
+                    "skipping move-advice scan"
                 )
             else:
                 for watcher in move_advice_watchers:
                     try:
                         await self._check_move_advice_watcher(
-                            watcher, now_iso, move_cost, avg_pp_value, now, force=force
+                            watcher, now_iso, econ, now, force=force
                         )
                     except Exception:
                         logger.exception(
@@ -355,31 +405,77 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
 
     # ── Move-advice scan helpers ──────────────────────────────────────────────
 
-    async def _fetch_market_prices(self) -> tuple[float, float]:
-        """Return (move_cost, avg_pp_value) from live market prices.
+    async def _fetch_move_economics(self) -> MoveEconomics | None:
+        """Fetch market prices and the game config needed to price a move.
 
-        move_cost   = 5 × concrete market price
-        avg_pp_value = average price of grain/lead/iron/limestone (proxy for PP value)
-        Returns (0.0, 0.0) on failure.
+        Returns None when either call fails or the data is unusable, in which
+        case the move-advice scan is skipped rather than run on bad numbers.
         """
         try:
-            raw = await self._client.get("/itemTrading.getPrices")
+            raw_prices = await self._client.get("/itemTrading.getPrices")
         except Exception as exc:
             logger.debug("company_move_advice: getPrices failed: %s", exc)
-            return 0.0, 0.0
+            return None
 
-        prices = _unwrap_prices(raw)
-        concrete_price = float(prices.get("concrete") or prices.get("Concrete") or 0)
+        prices = _unwrap_prices(raw_prices)
+        concrete_price = float(prices.get("concrete") or 0)
         if concrete_price <= 0:
-            return 0.0, 0.0
-        move_cost = 5.0 * concrete_price
+            logger.debug("company_move_advice: no concrete price available")
+            return None
 
-        pp_items = ["grain", "lead", "iron", "limestone"]
-        pp_vals = [float(prices[k]) for k in pp_items if prices.get(k) and float(prices[k]) > 0]
-        if not pp_vals:
-            return 0.0, 0.0
-        avg_pp_value = sum(pp_vals) / len(pp_vals)
-        return move_cost, avg_pp_value
+        try:
+            raw_cfg = await self._client.get(
+                "/gameConfig.getGameConfig", params={"input": "{}"}
+            )
+            cfg = _unwrap(raw_cfg)
+        except Exception as exc:
+            logger.debug("company_move_advice: getGameConfig failed: %s", exc)
+            return None
+        if not isinstance(cfg, dict):
+            return None
+
+        # Move cost comes from the live config rather than a hardcoded constant,
+        # so a game-side balance change is picked up automatically.
+        try:
+            move_cost_units = float((cfg.get("company") or {}).get("moveCost") or 0)
+        except (TypeError, ValueError):
+            move_cost_units = 0.0
+        if move_cost_units <= 0:
+            logger.warning("company_move_advice: config has no company.moveCost")
+            return None
+
+        items_cfg = cfg.get("items") or {}
+        if not isinstance(items_cfg, dict) or not items_cfg:
+            return None
+
+        prod_points: dict[str, float] = {}
+        prod_needs: dict[str, dict[str, float]] = {}
+        for code, info in items_cfg.items():
+            if not isinstance(info, dict):
+                continue
+            try:
+                pp = float(info.get("productionPoints") or 1)
+            except (TypeError, ValueError):
+                pp = 1.0
+            prod_points[code] = pp if pp > 0 else 1.0
+            needs = info.get("productionNeeds") or {}
+            if isinstance(needs, dict) and needs:
+                converted: dict[str, float] = {}
+                for mat, qty in needs.items():
+                    try:
+                        converted[mat] = float(qty)
+                    except (TypeError, ValueError):
+                        pass
+                if converted:
+                    prod_needs[code] = converted
+
+        return MoveEconomics(
+            prices=prices,
+            prod_points=prod_points,
+            prod_needs=prod_needs,
+            move_cost=move_cost_units * concrete_price,
+            move_cost_units=move_cost_units,
+        )
 
     async def _fetch_region_name(self, region_id: str) -> str:
         """Return the display name for a region, falling back to the region ID."""
@@ -399,8 +495,7 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
         self,
         company: dict,
         current_bonus_pct: float,
-        move_cost: float,
-        avg_pp_value: float,
+        econ: MoveEconomics,
         now: datetime,
     ) -> dict | None:
         """Find the best qualifying region to move this company to, or None.
@@ -412,13 +507,22 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
 
         Payback is calculated using the *gain* (new_bonus − current_bonus), not
         the absolute bonus, so companies with an existing bonus are treated fairly.
-        Among all qualifying candidates, the one with the highest bonus gain wins.
+        Both the gain and the move cost are valued in CC using the company's own
+        item (see the module docstring).  Among all qualifying candidates, the one
+        with the highest bonus gain wins.
         """
         item_code = str(company.get("itemCode") or "")
         current_region_id = str(company.get("region") or "")
         ae_level = max(1, int((company.get("activeUpgradeLevels") or {}).get("automatedEngine") or 0))
 
         if not item_code:
+            return None
+
+        base_items_per_day = econ.items_per_day(item_code, ae_level)
+        if base_items_per_day <= 0:
+            logger.debug(
+                "company_move_advice: no production data for item %r, skipping", item_code
+            )
             return None
 
         try:
@@ -452,12 +556,19 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
             if bonus_gain <= 0:
                 continue
 
-            # Calculate payback time based on *gain*, not absolute bonus
-            extra_per_hour = ae_level * (bonus_gain / 100) * avg_pp_value
-            if extra_per_hour <= 0:
+            # Value the gain in CC using this company's own item. The bonus
+            # scales raw-material consumption too, so the extra output earns the
+            # *net* margin per unit, not gross revenue.
+            tax_percent = float(region.get("taxPercent") or 0)
+            margin_per_item = econ.margin_per_item(item_code, tax_percent)
+            if margin_per_item <= 0:
+                continue  # Producing here loses money — never advise moving in
+
+            extra_per_day = base_items_per_day * (bonus_gain / 100) * margin_per_item
+            if extra_per_day <= 0:
                 continue
-            payback_hours = move_cost / extra_per_hour
-            payback_days = payback_hours / 24
+            payback_days = econ.move_cost / extra_per_day
+            payback_hours = payback_days * 24
 
             has_deposit = deposit_bonus > 0
             has_sr = sr_bonus > 0
@@ -508,6 +619,9 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
                     "ethics_bonus": ethics_bonus,
                     "ethics_dep_bonus": ethics_dep_bonus,
                     "ae_level": ae_level,
+                    "tax_percent": tax_percent,
+                    "margin_per_item": margin_per_item,
+                    "extra_per_day": extra_per_day,
                 }
 
         return best_candidate
@@ -516,8 +630,7 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
         self,
         watcher: dict,
         now_iso: str,
-        move_cost: float,
-        avg_pp_value: float,
+        econ: MoveEconomics,
         now: datetime,
         *,
         force: bool = False,
@@ -565,7 +678,7 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
                 continue
 
             candidate = await self._find_best_move_candidate(
-                company, current_bonus_pct, move_cost, avg_pp_value, now
+                company, current_bonus_pct, econ, now
             )
 
             if candidate is None:
@@ -586,8 +699,7 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
                 current_bonus_pct=current_bonus_pct,
                 candidate=candidate,
                 region_name=region_name,
-                move_cost=move_cost,
-                avg_pp_value=avg_pp_value,
+                econ=econ,
             )
             await self._db.set_company_move_advice_alert(
                 discord_user_id, company_id, region_id, candidate["region_id"], now_iso
@@ -604,8 +716,7 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
         current_bonus_pct: float,
         candidate: dict,
         region_name: str,
-        move_cost: float,
-        avg_pp_value: float,
+        econ: MoveEconomics,
     ) -> None:
         """Send a DM with move advice for one company."""
         try:
@@ -627,22 +738,24 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
         sr_bonus = candidate["sr_bonus"]
         ethics_bonus = candidate["ethics_bonus"]
         ethics_dep_bonus = candidate["ethics_dep_bonus"]
-        concrete_price = move_cost / 5.0
+        tax_percent = candidate["tax_percent"]
+        extra_per_day = candidate["extra_per_day"]
+        margin_per_item = candidate["margin_per_item"]
 
         # Bonus breakdown
         breakdown_parts: list[str] = []
         if sr_bonus > 0:
-            breakdown_parts.append(f"**{sr_bonus:.0f}%** strategische resources")
+            breakdown_parts.append(f"**{sr_bonus:.1f}%** strategische resources")
         if ethics_bonus > 0:
-            breakdown_parts.append(f"**{ethics_bonus:.0f}%** ethiek")
+            breakdown_parts.append(f"**{ethics_bonus:.1f}%** ethiek")
         if deposit_bonus > 0:
-            dep_str = f"**{deposit_bonus:.0f}%** deposit"
+            dep_str = f"**{deposit_bonus:.1f}%** deposit"
             if deposit_days_left is not None:
                 dep_str += f" (nog ~{deposit_days_left:.1f} dag(en))"
             breakdown_parts.append(dep_str)
         if ethics_dep_bonus > 0:
-            breakdown_parts.append(f"**{ethics_dep_bonus:.0f}%** ethiek deposit")
-        breakdown_str = " + ".join(breakdown_parts) if breakdown_parts else f"{target_bonus:.0f}%"
+            breakdown_parts.append(f"**{ethics_dep_bonus:.1f}%** ethiek deposit")
+        breakdown_str = " + ".join(breakdown_parts) if breakdown_parts else f"{target_bonus:.1f}%"
 
         # Rationale — explain why this advice passes the threshold
         if qualifier_type == "deposit":
@@ -672,14 +785,22 @@ class CompanyBonusTasks(TaskCogBase, name="company_bonus_tasks"):
             url=company_url,
             description=(
                 f"Je bedrijf **[{company_name}]({company_url})** (`{item_code}`) staat in een regio met "
-                f"**{current_bonus_pct:.0f}% productiebonus**.\n\n"
+                f"**{current_bonus_pct:.1f}% productiebonus**.\n\n"
                 f"**💡 Advies: Verhuizen naar {region_name}**\n"
-                f"Nieuwe bonus: **{target_bonus:.0f}%** *(+{bonus_gain:.0f}% winst t.o.v. huidige regio)*\n"
+                f"Nieuwe bonus: **{target_bonus:.1f}%** *(+{bonus_gain:.1f}% winst t.o.v. huidige regio)*\n"
+                f"Opbrengst: **+{extra_per_day:.2f} CC/dag** "
+                f"(automated engine {ae_level}, marge {margin_per_item:.3f} CC/stuk "
+                f"na materiaal en {tax_percent:.1f}% belasting)\n"
+                f"Verhuiskosten: **{econ.move_cost_units:.0f} beton** "
+                f"(~{econ.move_cost:.2f} CC)\n"
                 f"Terugverdientijd: ~{payback_days:.1f} dag(en)"
             ),
             colour=discord.Colour.gold(),
             timestamp=datetime.now(timezone.utc),
         )
+        embed.add_field(name="Bonusopbouw", value=breakdown_str, inline=False)
+        embed.add_field(name="Waarom dit advies?", value=rationale, inline=False)
+        embed.set_footer(text="WareraNL Bot")
 
         try:
             await user.send(embed=embed)

@@ -25,7 +25,6 @@ _EVENT_POLL_TYPES = [
     "peaceMade",
     "peace_agreement",
     "regionTransfer",
-    "depositDiscovered",
     "depositDepleted",
     "allianceBroken",
     "allianceFormed",
@@ -39,13 +38,18 @@ _EVENT_POLL_TYPES = [
     "financedRevolt",
 ]
 
+# Event types deliberately not announced. They are excluded from
+# _EVENT_POLL_TYPES so the API should not return them at all, but any that slip
+# through (queued before the change, or if the API ignores the filter) are
+# dropped silently instead of logging an "unsupported event type" warning.
+_EVENT_TYPES_IGNORED: frozenset[str] = frozenset({"depositDiscovered"})
+
 _EVENT_LABELS: dict[str, str] = {
     "battleOpened": "⚔️ Slag geopend",
     "warDeclared": "🚨 Oorlog verklaard",
     "peaceMade": "🕊️ Vrede gesloten",
     "peace_agreement": "🕊️ Vredesakkoord",
     "regionTransfer": "🗺️ Regio overgedragen",
-    "depositDiscovered": "⚒️ Deposit ontdekt",
     "depositDepleted": "📦 Deposit uitgeput",
     "allianceBroken": "💔 Alliantie verbroken",
     "allianceFormed": "🤝 Alliantie gesloten",
@@ -66,7 +70,6 @@ _EVENT_TYPE_ALIASES: dict[str, str] = {
     "peace_agreement": "peace_agreement",
     "peaceagreement": "peace_agreement",
     "regiontransfer": "regionTransfer",
-    "depositdiscovered": "depositDiscovered",
     "depositdepleted": "depositDepleted",
     "alliancebroken": "allianceBroken",
     "allianceformed": "allianceFormed",
@@ -86,7 +89,6 @@ _EVENT_TYPE_TO_CATEGORY: dict[str, str] = {
     "peaceMade": "peace",
     "peace_agreement": "peace",
     "regionTransfer": "transfer",
-    "depositDiscovered": "deposit",
     "depositDepleted": "deposit",
     "allianceBroken": "alliance",
     "allianceFormed": "alliance",
@@ -277,6 +279,9 @@ class EventTasks(TaskCogBase, name="event_tasks"):
                 await self._db.mark_event_seen(eid)
                 continue
             event_type = self._extract_event_type(event)
+            if event_type in _EVENT_TYPES_IGNORED:
+                await self._db.mark_event_seen(eid)
+                continue
             if event_type not in _EVENT_LABELS:
                 logger.warning(
                     "event_poll: skipping unsupported event type '%s' (id=%s)",
@@ -485,15 +490,6 @@ class EventTasks(TaskCogBase, name="event_tasks"):
                 f"**{dfn}** heeft regio **{rgn}** overgenomen van **{atk}**{amount_str}"
             )
             color = discord.Color.orange()
-
-        elif event_type == "depositDiscovered":
-            item = _s("itemCode", "item", "itemName", "resource") or "onbekend"
-            bonus = _num("bonusPercent", "bonus", "bonusValue")
-            days = _num("durationDays", "days", "duration")
-            b_str = f" +{bonus}%" if bonus else ""
-            d_str = f" voor {days} dagen" if days else ""
-            description = f"Deposit **{item}{b_str}** ontdekt in regio **{rgn}**{d_str}"
-            color = discord.Color.gold()
 
         elif event_type == "depositDepleted":
             description = f"Het deposit in regio **{rgn}** is uitgeput"

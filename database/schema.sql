@@ -790,3 +790,130 @@ CREATE TABLE IF NOT EXISTS citizen_name_history (
 );
 CREATE INDEX IF NOT EXISTS idx_citizen_name_history_user ON citizen_name_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_citizen_name_history_name ON citizen_name_history(name COLLATE NOCASE);
+
+-- ── Company census (hourly, all countries × all items) ────────────────────────
+-- Written by services/full_fetcher.py, which sweeps every company in the game
+-- once an hour.  A company counts towards a country when the region it sits in
+-- is currently controlled by that country.  Read by the Nigeria bot's
+-- /papierfabrieken command (and any future per-country/per-item command) so the
+-- command answers instantly instead of re-scanning ~73k companies on demand.
+CREATE TABLE IF NOT EXISTS company_census (
+    captured_at   TEXT NOT NULL,     -- ISO-8601 UTC timestamp of the sweep
+    country_id    TEXT NOT NULL,
+    item_code     TEXT NOT NULL,
+    company_count INTEGER NOT NULL DEFAULT 0,
+    worker_count  INTEGER NOT NULL DEFAULT 0,
+    -- How many of company_count have at least one worker. Cannot be derived
+    -- from the two columns above, so it is counted during the sweep.
+    staffed_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (captured_at, country_id, item_code)
+);
+CREATE INDEX IF NOT EXISTS idx_company_census_lookup
+    ON company_census(country_id, item_code, captured_at DESC);
+
+-- One row per sweep, so a command can report how many companies were actually
+-- checked (details fetched) versus how many the API listed.  The two differ
+-- because companies get sold/destroyed between the paginate and detail phases.
+CREATE TABLE IF NOT EXISTS company_census_runs (
+    captured_at       TEXT PRIMARY KEY,  -- matches company_census.captured_at
+    listed_companies  INTEGER NOT NULL DEFAULT 0,
+    checked_companies INTEGER NOT NULL DEFAULT 0,
+    duration_ms       INTEGER
+);
+
+-- ── Company owners (latest sweep only) ────────────────────────────────────────
+-- Written by services/full_fetcher.py from the same company.getById responses
+-- the census already fetches, so it costs no extra API calls.  Unlike
+-- company_census this keeps only the newest sweep: it answers "who owns the
+-- factories right now", and per-owner history at ~47k rows/hour is not worth
+-- the space.  Each sweep inserts its rows and then deletes every older
+-- captured_at, so a reader always sees one complete snapshot.
+CREATE TABLE IF NOT EXISTS company_owners (
+    captured_at   TEXT NOT NULL,
+    country_id    TEXT NOT NULL,
+    item_code     TEXT NOT NULL,
+    owner_id      TEXT NOT NULL,
+    company_count INTEGER NOT NULL DEFAULT 0,
+    worker_count  INTEGER NOT NULL DEFAULT 0,
+    staffed_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (captured_at, country_id, item_code, owner_id)
+);
+CREATE INDEX IF NOT EXISTS idx_company_owners_pair
+    ON company_owners(country_id, item_code, company_count DESC);
+CREATE INDEX IF NOT EXISTS idx_company_owners_item
+    ON company_owners(item_code, company_count DESC);
+
+-- ── Wage income-tax tracking ──────────────────────────────────────────────────
+-- When a worker is paid, the employer pays income tax to the country the
+-- company sits in.  Wage transactions carry no company or item, only the
+-- worker (sellerId) and employer (buyerId), so attribution goes:
+--     wage.sellerId → worker_company_map → company → (country, item)
+-- Populated by services/full_fetcher.py; read by /fabrieken.
+
+-- Worker → company lookup, refreshed every sweep from worker.getWorkers.
+-- Rows are upserted rather than wiped so a worker who has since left their job
+-- can still resolve the wages they earned before leaving.
+CREATE TABLE IF NOT EXISTS worker_company_map (
+    worker_id  TEXT PRIMARY KEY,
+    company_id TEXT NOT NULL,
+    country_id TEXT NOT NULL,
+    item_code  TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- Latest income-tax percentage per country, snapshotted each sweep because the
+-- rate can change and past days must keep the rate that was actually applied.
+CREATE TABLE IF NOT EXISTS country_tax_rates (
+    country_id TEXT PRIMARY KEY,
+    income_tax REAL NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+
+-- Tax revenue aggregated per day per (country, item, company).  Daily buckets
+-- keep this bounded at roughly one row per staffed company per day (~10k),
+-- instead of one row per wage transaction (~209k/day).
+CREATE TABLE IF NOT EXISTS company_tax_revenue (
+    day        TEXT NOT NULL,   -- YYYY-MM-DD, UTC, from the transaction's createdAt
+    country_id TEXT NOT NULL,
+    item_code  TEXT NOT NULL,
+    company_id TEXT NOT NULL,
+    tax_total  REAL NOT NULL DEFAULT 0,
+    wage_total REAL NOT NULL DEFAULT 0,
+    tx_count   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, country_id, item_code, company_id)
+);
+CREATE INDEX IF NOT EXISTS idx_company_tax_lookup
+    ON company_tax_revenue(country_id, item_code, day);
+CREATE INDEX IF NOT EXISTS idx_company_tax_day ON company_tax_revenue(day);
+
+-- ── Damage projection (alliances) ──────────────────────────────────────────────
+-- Feeds the Nigeria bot's /damage-projection command. Written by
+-- services/full_fetcher.py (alliance list) and services/citizen_cache.py (combat
+-- state, piggybacked on the hourly citizen sweep that already runs for every
+-- country in the game).
+
+-- Alliance -> member-country mapping. Wiped and rewritten whole each sweep
+-- (~133 rows total across ~12 alliances), so membership changes are reflected
+-- immediately rather than accumulating stale rows.
+CREATE TABLE IF NOT EXISTS alliance_countries (
+    alliance_id   TEXT NOT NULL,
+    alliance_name TEXT NOT NULL,
+    country_id    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    PRIMARY KEY (alliance_id, country_id)
+);
+CREATE INDEX IF NOT EXISTS idx_alliance_countries_country ON alliance_countries(country_id);
+
+-- Current health/hunger per citizen. Kept separate from citizen_levels (rather
+-- than adding columns there) because it's rewritten wholesale every sweep and
+-- has different callers than the profile fields in citizen_levels.
+CREATE TABLE IF NOT EXISTS citizen_combat_state (
+    user_id     TEXT PRIMARY KEY,
+    country_id  TEXT NOT NULL,
+    health_cur  REAL,
+    health_max  REAL,
+    hunger_cur  REAL,
+    hunger_max  REAL,
+    updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_citizen_combat_state_country ON citizen_combat_state(country_id);

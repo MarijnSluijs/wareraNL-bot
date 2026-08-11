@@ -21,6 +21,7 @@ import logging
 import os
 import random
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -53,6 +54,64 @@ DUTCH_ROLE_ID           = 1495692245519699978
 VERIFIED_ROLE_ID        = 1521895797757575168   # given to everyone on approval
 
 STAFF_ROLE_IDS = [1495692303367540767, 1495692272728150016, 1495692461375357009, 1495847731963494400]
+
+# Channels where the forbidden-word GIF reactions stay silent (e.g. #gheim).
+NO_REACTION_CHANNEL_IDS = {1523076659648008362}
+
+# ── @Roger business-proposal easter egg ───────────────────────────────────────
+# Tagging the bot makes it ask "Interested in a business proposal?".  Saying
+# yes shortly afterwards gets one of the punchlines below.
+#
+# How long a proposal stays open for an answer.  Without a window a stray "ja"
+# hours later would land the punchline into an unrelated conversation — "ja" is
+# far too common a Dutch word to accept indefinitely.
+BUSINESS_PROPOSAL_WINDOW_SECONDS = 300
+
+# Anything here counts as saying yes. Matched per whitespace token with
+# surrounding punctuation stripped, so "Ja!" and "yes." both land.
+BUSINESS_PROPOSAL_YES_WORDS = frozenset({
+    "ja", "jazeker", "jawel", "yes", "yeah", "yep", "sure",
+})
+
+BUSINESS_PROPOSAL_REPLIES: tuple[str, ...] = (
+    "Excellent! I am Prince Roger of Nigeria. I require only your bank details, "
+    "your mother's maiden name, and a small processing fee of 500 CC. "
+    "Your $4,500,000 USD will arrive within 3-5 business days. 🤝",
+    "Wonderful choice! Simply transfer 250 CC to unlock your inheritance of "
+    "$12,000,000 USD from a distant uncle you have never heard of. "
+    "This is 100% legitimate. I am a certified prince. 👑",
+    "Fantastic! Step 1: send me 1000 CC. Step 2: there is no step 2. "
+    "Congratulations on your new fortune! 🎉",
+    "Splendid! Your funds are held at the Central Bank of Lagos and require "
+    "only a modest clearance fee. Please do not tell your government, "
+    "your bank, or anyone with common sense. 🤫",
+    "Great! I have transferred $9,000,000 USD to your account. It has bounced "
+    "17 times. Please send 750 CC to fix the pipes. 🚰",
+    "Perfect! You are now Regional Vice-Director of my import/export company. "
+    "Your first task: forward this message to 10 friends. Your second task: "
+    "pay the onboarding fee. 📈",
+    "Marvellous! I only need a photo of your ID, your bank card (both sides), "
+    "and the little number on the back. Standard procedure, nothing suspicious. 📸",
+    "Superb! The paperwork is complete. There is only the notary fee, the "
+    "transfer fee, the anti-fraud fee, and the fee-processing fee. "
+    "Then you are rich! 💰",
+)
+
+_PUNCT_EDGES = re.compile(r"^\W+|\W+$", re.UNICODE)
+
+
+def _says_yes(content: str) -> bool:
+    """True when *content* contains a bare yes/ja token.
+
+    Punctuation is stripped from each token's edges so "Ja!" and "yes." count,
+    while the whole-token rule still keeps it from firing inside longer words
+    such as "januari" or "jaloers".
+    """
+    return any(
+        _PUNCT_EDGES.sub("", token) in BUSINESS_PROPOSAL_YES_WORDS
+        for token in content.lower().split()
+    )
+
 
 # Word groups that trigger the "not allowed" GIF reply. Plain page URLs
 # (tenor.com/view/..., giphy.com/gifs/...) — Discord auto-unfurls these into
@@ -103,7 +162,14 @@ FORBIDDEN_WORD_GROUPS: tuple[tuple[tuple[str, ...], tuple[str, ...], bool], ...]
         True,
     ),
     (
-        ("gelijkwaardigheid", "emancipatie", "stemmen", "vrijheid", "loonsverhoging", "referendum"),
+        (
+            "gelijkwaardigheid",
+            "emancipatie",
+            "stemmen",
+            "vrijheid",
+            "loonsverhoging",
+            "referendum",
+        ),
         (
             "https://giphy.com/gifs/FlexxedTV-wow-whats-that-XPrN8DrbFIqjbBo8rK",
             # TODO: one gif here was a malformed/truncated URL ("tS0dsIv2h4o2E4tc")
@@ -111,6 +177,15 @@ FORBIDDEN_WORD_GROUPS: tuple[tuple[tuple[str, ...], tuple[str, ...], bool], ...]
             "https://giphy.com/gifs/cbc-funny-comedy-l1J9DlCFh2h90HrnW",
             "https://giphy.com/gifs/iiTXaJVjiSHew",
             "https://giphy.com/gifs/HelpUsDefend-fish-scam-scammer-YQ2IS26vDsr2gDSCHZ",
+        ),
+        True,
+    ),
+    (
+        ("debat",),
+        (
+            # klipy.com rather than tenor/giphy — checked that it serves the
+            # same og:image / og:video metadata Discord needs to unfurl it.
+            "https://klipy.com/gifs/dojo-dummy",
         ),
         True,
     ),
@@ -313,6 +388,25 @@ def _is_staff(member: discord.Member) -> bool:
 def _ticket_is_english(ticket_type: str) -> bool:
     """Nigerian and embassy tickets use English; Dutch/Dutch-Nigerian stay Dutch."""
     return ticket_type in ("nigerian", "embassy")
+
+
+def _mentions_bot_in_text(content: str, bot_user) -> bool:
+    """True only when the author literally typed ``@Roger`` in the message.
+
+    Deliberately inspects the raw message text rather than
+    ``message.mentions``: Discord adds the bot to ``mentions`` when someone
+    merely *replies* to one of its messages, which would otherwise make the
+    bot answer itself into every thread it touched.  A reply's ping never puts
+    the ``<@id>`` token in the content, so checking the text is the difference
+    between "was addressed" and "was referenced".
+
+    Role mentions (``<@&id>``), @everyone and @here are all a different shape
+    and so never match here either.  Reactions don't produce a message at all,
+    so they can't reach this code path.
+    """
+    if bot_user is None:
+        return False
+    return f"<@{bot_user.id}>" in content or f"<@!{bot_user.id}>" in content
 
 
 async def _get_or_create_ticket_category(guild: discord.Guild) -> discord.CategoryChannel:
@@ -964,6 +1058,10 @@ class VerificationCog(commands.Cog, name="verification"):
     def __init__(self, bot: commands.Bot, db: aiosqlite.Connection) -> None:
         self.bot = bot
         self._db = db
+        # {channel_id: monotonic timestamp of the last unanswered proposal}.
+        # In-memory on purpose: a restart simply forgets any open proposal,
+        # which for an easter egg is better than persisting it.
+        self._open_proposals: dict[int, float] = {}
         self.nick_sync.start()
 
     def cog_unload(self) -> None:
@@ -975,7 +1073,49 @@ class VerificationCog(commands.Cog, name="verification"):
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:
             return
-        content_lower = (message.content or "").lower()
+        # Some channels are opted out of the GIF reactions entirely.
+        if message.channel.id in NO_REACTION_CHANNEL_IDS:
+            return
+        # Threads inherit their parent channel's opt-out.
+        parent_id = getattr(message.channel, "parent_id", None)
+        if parent_id in NO_REACTION_CHANNEL_IDS:
+            return
+
+        content = message.content or ""
+
+        # Easter egg: someone actually typed @Roger.
+        if _mentions_bot_in_text(content, self.bot.user):
+            try:
+                await message.channel.send("Interested in a business proposal?")
+            except discord.HTTPException as e:
+                logger.error(f"Failed to send mention easter egg for {message.id}: {e}")
+            else:
+                # Only arm the punchline once the question actually went out.
+                self._open_proposals[message.channel.id] = time.monotonic()
+            return
+
+        # Punchline: anyone saying yes shortly after that question gets the
+        # sales pitch. Answering is open to the whole channel rather than just
+        # whoever tagged the bot — it reads as a conversation, not a form.
+        offered_at = self._open_proposals.get(message.channel.id)
+        if offered_at is not None:
+            if time.monotonic() - offered_at > BUSINESS_PROPOSAL_WINDOW_SECONDS:
+                self._open_proposals.pop(message.channel.id, None)
+            elif _says_yes(content):
+                # Drop the entry before awaiting, so a second "ja" arriving
+                # while this send is in flight can't fire a duplicate pitch.
+                self._open_proposals.pop(message.channel.id, None)
+                try:
+                    await message.channel.send(
+                        random.choice(BUSINESS_PROPOSAL_REPLIES)
+                    )
+                except discord.HTTPException as e:
+                    logger.error(
+                        f"Failed to send business-proposal reply for {message.id}: {e}"
+                    )
+                return
+
+        content_lower = content.lower()
         words = content_lower.split()
         for trigger_words, gifs, send_text in FORBIDDEN_WORD_GROUPS:
             # Multi-word triggers (e.g. "pyramid scheme") match as a substring
