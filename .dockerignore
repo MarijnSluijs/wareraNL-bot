@@ -1,8 +1,37 @@
 .git/
 .github/
-database/
-venv/
 .env*
 CODE_OF_CONDUCT.md
 CONTRIBUTING.md
 UPDATES.md
+
+# Local virtualenv — 8.6 GB and by far the largest thing in the tree.
+# NOTE: the pattern must be ".venv/", not "venv/". Docker matches the leading
+# dot literally, so a bare "venv/" silently fails to exclude ".venv/" and the
+# whole environment ends up in the build context and the image.
+.venv/
+venv/
+
+# Bind-mounted at runtime by every compose file — copying them into the image
+# only bloats it, and the copy is shadowed by the mount anyway.
+database/
+logs/
+
+# Caches and build artifacts
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+
+# Large dev-only dumps, not read by any code at runtime
+api_dump.json
+output.txt
+posts.json
+
+# openapi.json is NOT dev-only — rijksoverheid_web/app/services/api_explorer.py
+# reads it at runtime to serve the API explorer page and power /api/proxy/*,
+# which the player/builder pages also depend on for live WarEra data. It was
+# wrongly excluded here once already, silently breaking all of that in every
+# fresh container until someone noticed. Keep it out of this file.

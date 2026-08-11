@@ -149,6 +149,12 @@ class DatabaseBase:
             # specialization_top — last-notified record (only updated on notification, never by poll)
             ("specialization_top", "last_notified_country TEXT"),
             ("specialization_top", "last_notified_bonus REAL"),
+            # company census — count of companies with at least one worker,
+            # added after the tables shipped. Rows written before this default
+            # to 0, so a 7-day delta on staffed counts is only meaningful once
+            # a full week of sweeps has run with the column present.
+            ("company_census", "staffed_count INTEGER NOT NULL DEFAULT 0"),
+            ("company_owners", "staffed_count INTEGER NOT NULL DEFAULT 0"),
         ]
         for table, column_def in migrations:
             try:

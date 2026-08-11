@@ -716,26 +716,54 @@ class Welcome(commands.Cog, name="welcome"):
                 remaining,
             )
 
-    @staticmethod
     async def _delete_channel_after(
+        self,
         channel: discord.TextChannel,
         delay: float,
         reason: str,
         *,
         db=None,
     ) -> None:
-        """Sleep for *delay* seconds then delete *channel*."""
+        """Sleep for *delay* seconds then delete *channel*.
+
+        Failures are logged rather than swallowed: a missing Manage Channels
+        permission on one ticket category (embassy tickets live in a different
+        category from verification tickets) otherwise looks exactly like the
+        deletion never having been scheduled, with nothing in the logs to tell
+        the two apart.
+        """
         if delay > 0:
             await asyncio.sleep(delay)
         try:
             await channel.delete(reason=reason)
-        except (discord.NotFound, discord.Forbidden):
-            pass
+            self.bot.logger.info(
+                "Welcome: deleted ticket channel %s (%s) — %s",
+                channel.name, channel.id, reason,
+            )
+        except discord.NotFound:
+            self.bot.logger.info(
+                "Welcome: ticket channel %s already gone, nothing to delete",
+                channel.id,
+            )
+        except discord.Forbidden:
+            self.bot.logger.error(
+                "Welcome: NOT allowed to delete ticket channel %s (%s) — "
+                "the bot is missing Manage Channels on that category",
+                channel.name, channel.id,
+            )
+        except discord.HTTPException as exc:
+            self.bot.logger.error(
+                "Welcome: failed to delete ticket channel %s (%s): %s",
+                channel.name, channel.id, exc,
+            )
         if db is not None:
             try:
                 await db.remove_pending_ticket_deletion(str(channel.id))
             except Exception:
-                pass
+                self.bot.logger.warning(
+                    "Welcome: could not clear pending deletion row for %s",
+                    channel.id, exc_info=True,
+                )
 
     @property
     def _client(self):
@@ -2053,6 +2081,11 @@ class Welcome(commands.Cog, name="welcome"):
                 response_text += (
                     "\n⚠️ Identity mapping could not be saved to the database."
                 )
+            # Same notice /approve and /deny give, so a moderator can see the
+            # 8-hour deletion was actually scheduled. The confirmation embed is
+            # deliberately not used for this — it goes to the embassy channel,
+            # which is not the channel being deleted.
+            response_text += "\nDit ticketkanaal wordt over 8 uur verwijderd."
             await reply(response_text)
 
             # Log to the government log channel
