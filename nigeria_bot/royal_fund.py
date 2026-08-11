@@ -29,6 +29,7 @@ always described as such below.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import math
 import random
@@ -2190,9 +2191,14 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
                 await self._schedule_next(risk)
                 return
 
+            before_total = total
             result = await apply_event(
                 self.conn, event, state, self._guild()
             )
+            # The Big Short settles here and nowhere else: this is the only
+            # path a *natural* event takes.  Anything a /special card does to
+            # the fund deliberately does not count as Roger's decision.
+            short_lines = await self._settle_big_shorts(before_total)
             await start_cooldown(self.conn, event["id"], event["cooldown"])
             await self._remember(event, result)
             await set_state(
@@ -2247,6 +2253,7 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
                     if old != new else ""
                 )
                 + note
+                + ("\n\n" + "\n".join(short_lines) if short_lines else "")
                 + "\n\n" + exposure_footer(new, next_at)
             ),
             colour=result.colour or RISK_COLOUR[new],
@@ -2260,6 +2267,42 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
         await self._announce(embed)
         if hit_ceiling:
             await self._announce_pressure()
+
+    async def _settle_big_shorts(self, before_total: int) -> list[str]:
+        """Pay out every open Big Short against this event's direction.
+
+        "Negative" means the fund is worth less after the event than before —
+        measured on the total, because that is the thing a bet on Roger's
+        judgement is actually about.
+        """
+        from nigeria_bot import special_effects as fx
+
+        async with self.conn.execute(
+            "SELECT id, owner_id FROM special_effects"
+            " WHERE kind = 'big_short' AND status = 'active'"
+        ) as cur:
+            bets = [(int(r[0]), str(r[1])) async for r in cur]
+        if not bets:
+            return []
+        after = await fund_total(self.conn)
+        fell = after < before_total
+        lines = []
+        for effect_id, owner in bets:
+            await fx.consume_effect(self.conn, effect_id)
+            if fell:
+                await fx.give_cash(self.conn, owner, 7_500,
+                                   reason="special_gain", detail="The Big Short")
+                lines.append(
+                    f"📉 **THE BIG SHORT PAYS** — the fund fell, and <@{owner}> "
+                    f"collects **{money(7_500)}**."
+                )
+            else:
+                lines.append(
+                    f"📈 **THE BIG SHORT FAILS** — <@{owner}>'s "
+                    f"{money(3_000)} position expires worthless."
+                )
+        await self.conn.commit()
+        return lines
 
     # ── quick scam hook ───────────────────────────────────────────────
 
@@ -2378,6 +2421,29 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
             return
         uid = str(interaction.user.id)
 
+        if action in ("deposit", "withdraw"):
+            from nigeria_bot import special_effects as fx
+            frozen = await fx.fund_frozen(self.conn, uid)
+            if frozen:
+                until = _parse(frozen["expires_at"])
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        title="🔒 YOUR ASSETS ARE FROZEN",
+                        description=(
+                            "Somebody has persuaded the authorities to take an "
+                            "interest in your account.\n\n"
+                            "**Deposits:** BLOCKED\n**Withdrawals:** BLOCKED\n"
+                            f"**Thawing:** <t:{int(until.timestamp())}:R>\n\n"
+                            "_Your position is still fully exposed to whatever "
+                            "Roger does in the meantime. That is the cruel "
+                            "part._"
+                        ),
+                        colour=_EMBED_RED,
+                    ),
+                    ephemeral=True,
+                )
+                return
+
         if action == "withdraw":
             await self._withdraw(interaction, uid, amount)
             return
@@ -2397,6 +2463,8 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
 
                 # §19: money arriving into a dead fund starts a new lifecycle.
                 reborn = await fund_total(self.conn) <= 0
+                from nigeria_bot.special_game import touch
+                await touch(self.conn, uid)
                 await adjust_balance(self.conn, uid, -amount, "fund_deposit")
                 await _add_position(self.conn, uid, amount)
 
@@ -2603,9 +2671,22 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
                 return
             tax = int(round(take * ANTI_PANIC_TAX.get(risk, 0.0)))
             await _add_position(self.conn, uid, -take)
+            from nigeria_bot.special_game import touch
+            await touch(self.conn, uid)
             # The tax is destroyed, not banked: the position falls by the gross
             # amount and only the net reaches the player.
-            await adjust_balance(self.conn, uid, take - tax, "fund_withdraw")
+            audit = 0
+            auditor = None
+            if take > 1_000:
+                from nigeria_bot import special_effects as fx
+                trap = await fx.take_trap(self.conn, "tax_audit", uid)
+                if trap:
+                    # The full amount still leaves the fund; the penalty is
+                    # taken out of what reaches the player, and destroyed.
+                    audit = min(int(take * 0.20), 2_000)
+                    auditor = trap["owner_id"]
+            await adjust_balance(self.conn, uid, take - tax - audit,
+                                 "fund_withdraw")
             await record_flow(self.conn, uid, -take, "normal")
             await self.conn.commit()
             player = await get_player(self.conn, uid)
@@ -2622,6 +2703,11 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
                 f"**{money(take - tax)}**. The tax is gone; it does not stay "
                 "in the fund."
             )
+        if audit:
+            note += (
+                f"\n\n🧾 **EMERGENCY TAX AUDIT: −{money(audit)}** — the "
+                "paperwork was unusually legible."
+            )
         embeds = await self._status_embeds(
             interaction, uid, player, state, holders, note
         )
@@ -2634,6 +2720,26 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
         await self._announce_flow(
             interaction, uid, take, state, holders, deposit=False
         )
+        if audit:
+            # An audit is public: it names the filer, which is the entire
+            # social point of the card.
+            channel = self.bot.get_channel(GAME_CHANNEL_ID)
+            if channel is not None:
+                with contextlib.suppress(discord.HTTPException):
+                    await channel.send(embed=discord.Embed(
+                        title="🧾 EMERGENCY TAX AUDIT",
+                        description=(
+                            f"<@{uid}> attempted to withdraw **{money(take)}** "
+                            "from the Royal Investment Fund.\n"
+                            "Unfortunately, the paperwork was unusually "
+                            "legible.\n\n"
+                            f"🔥 **{money(audit)}** confiscated and destroyed.\n"
+                            f"💰 Net withdrawal: **{money(take - tax - audit)}**"
+                            f"\n\nAuthorities confirm <@{auditor}> filed the "
+                            "suspicious activity report."
+                        ),
+                        colour=_EMBED_RED,
+                    ))
 
     # ── status card (§17) ─────────────────────────────────────────────
 

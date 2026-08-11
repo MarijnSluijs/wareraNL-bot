@@ -36,14 +36,19 @@ from discord.ext import commands, tasks
 from nigeria_bot.scam_game import (
     GAME_CHANNEL_ID,
     GAME_CHANNEL_URL,
+    INTEL_MAX_CHARGES,
+    INTEL_PER_DAY,
+    INTEL_RECHARGE_HOURS,
     TARGET_ATTEMPT_COOLDOWN,
     _EMBED_GOLD,
     _EMBED_GREEN,
     _EMBED_GREY,
     _EMBED_RED,
+    _ack,
     _iso,
     _now,
     _parse,
+    _reply,
     _require_channel,
     adjust_balance,
     require_free,
@@ -55,6 +60,13 @@ from nigeria_bot.scam_game import (
     record_play,
     money,
 )
+from nigeria_bot import special_effects as fx
+
+
+async def _touch(conn, user_id: str) -> None:
+    """Mark this player as recently active for the /special targeting windows."""
+    from nigeria_bot.special_game import touch
+    await touch(conn, user_id)
 
 logger = logging.getLogger("nigeria_bot.scam_targets")
 
@@ -120,12 +132,20 @@ PROTECTED_WEALTH = 1_000
 
 # ── Intel ─────────────────────────────────────────────────────────────────────
 # Intel is a limited resource rather than a cooldown.  Charges regenerate
-# serially, so spending all three costs six hours of scouting rather than one.
-INTEL_MAX_CHARGES     = 3
-INTEL_RECHARGE_HOURS  = 2.0
-# Blocks *target* actions only — quick scams, the fund and everything else
-# stay open, so scouting never benches you from the rest of the game.
-INTEL_LOCK_SECONDS    = 120
+# serially, so spending all three costs a full recharge cycle each.
+#
+# The cap stays at the number of board slots: scouting the whole board once is
+# a legitimate opening move, and holding more than there are marks to spend it
+# on would only mean hoarding.  The *rate* is what rations Intel — at one
+# charge every four hours a player gets six a day rather than twelve.
+#
+# There used to be a two-minute lock on target actions after each mission as
+# well.  It was removed: two minutes never changed a decision, it just made
+# people sit and wait, and being told "your investigators are still returning"
+# right after paying for intel reads as a punishment for using the feature.
+# The daily budget carries the whole cost now.
+# INTEL_MAX_CHARGES, INTEL_RECHARGE_HOURS and INTEL_PER_DAY are imported from
+# scam_game: /scamrules quotes them and that module cannot import this one.
 # A mark may only be scouted twice, ever, and only once per player.  Without
 # this a group could buy identity checks until a fake was guaranteed exposed.
 INTEL_MISSIONS_PER_TARGET = 2
@@ -2191,7 +2211,8 @@ async def setup_schema(conn: aiosqlite.Connection) -> None:
     """)
     for column in (
         "intel_charges INTEGER", "intel_next_charge_at TEXT",
-        "intel_lock_until TEXT",
+        # intel_lock_until (the old two-minute post-Intel lock) is gone; see
+        # the note in scam_game's migration list.
         # Roas blocks the whole board, not just herself.
         "target_lock_until TEXT",
         # Babu's decree, enforced in the game channel only.
@@ -2488,20 +2509,20 @@ async def knows_target_is_fake(
 # ── Intel: charges, cost, odds ────────────────────────────────────────────────
 
 async def intel_state(conn: aiosqlite.Connection, user_id: str) -> dict:
-    """Charges, recharge timer and action lock for one player.
+    """Charges and recharge timer for one player.
 
     Regeneration is *serial* and computed lazily from a single timestamp: how
     many whole recharge periods have elapsed since ``intel_next_charge_at``.
     No background task, and a restart cannot lose or duplicate a charge.
     """
     async with conn.execute(
-        "SELECT intel_charges, intel_next_charge_at, intel_lock_until"
+        "SELECT intel_charges, intel_next_charge_at"
         " FROM scam_players WHERE discord_user_id = ?",
         (str(user_id),),
     ) as cur:
         row = await cur.fetchone()
     if not row:
-        return {"charges": INTEL_MAX_CHARGES, "next_at": None, "locked_until": None}
+        return {"charges": INTEL_MAX_CHARGES, "next_at": None}
 
     charges = INTEL_MAX_CHARGES if row[0] is None else int(row[0])
     next_at = _parse(row[1]) if row[1] else None
@@ -2524,10 +2545,18 @@ async def intel_state(conn: aiosqlite.Connection, user_id: str) -> dict:
             await conn.commit()
             next_at = None if charges >= INTEL_MAX_CHARGES else next_at
 
-    lock = _parse(row[2]) if row[2] else None
-    if lock and lock <= now:
-        lock = None
-    return {"charges": charges, "next_at": next_at, "locked_until": lock}
+    return {"charges": charges, "next_at": next_at}
+
+
+def _full_charges_at(state: dict) -> datetime:
+    """When the player is back to a full hand.
+
+    Recharging is serial, so this is the next charge plus one whole period for
+    each one still missing behind it.  Worth showing: at four hours a charge,
+    "next charge in 3h" understates the wait back to three by eight hours.
+    """
+    missing = max(0, INTEL_MAX_CHARGES - state["charges"] - 1)
+    return state["next_at"] + timedelta(hours=INTEL_RECHARGE_HOURS) * missing
 
 
 async def spend_intel_charge(conn: aiosqlite.Connection, user_id: str) -> None:
@@ -2543,14 +2572,6 @@ async def spend_intel_charge(conn: aiosqlite.Connection, user_id: str) -> None:
         (charges, _iso(next_at), str(user_id)),
     )
 
-
-async def start_intel_lock(conn: aiosqlite.Connection, user_id: str) -> datetime:
-    until = _now() + timedelta(seconds=INTEL_LOCK_SECONDS)
-    await conn.execute(
-        "UPDATE scam_players SET intel_lock_until = ? WHERE discord_user_id = ?",
-        (_iso(until), str(user_id)),
-    )
-    return until
 
 
 def intel_cost(tier: str) -> int:
@@ -2704,7 +2725,8 @@ def approach_preview(t: dict) -> str:
     for key in ("careful", "normal", "greedy"):
         chance, mult, _emoji = approach_spec(t, key)
         label = APPROACHES[key][2].lower()
-        parts.append(f"{label} {chance * 100:.0f}% (×{mult:g} payout)")
+        shown = FOG_MASK if _FOG else f"{chance * 100:.0f}%"
+        parts.append(f"{label} {shown} (×{mult:g} payout)")
     return " · ".join(parts)
 
 
@@ -2824,8 +2846,19 @@ def target_card(t: dict, index: int) -> discord.Embed:
     return embed
 
 
+# Fog of War is a *renderer* switch and nothing else.  The flag is set
+# immediately before a synchronous render and cleared immediately after, so no
+# other coroutine can observe it, and no target's stored odds ever move — which
+# is what the spec insists on: mask the display or cut the card, never touch
+# the maths.
+_FOG = False
+FOG_MASK = "???"
+
+
 def _odds(chance: float) -> str:
     """Percentages that stay readable at Darkodor's end of the scale."""
+    if _FOG:
+        return FOG_MASK
     pct = chance * 100
     # Darkodor lives at 1–2%, where rounding to whole percent loses the whole
     # distinction between his approaches.
@@ -2858,12 +2891,23 @@ def board_header(targets: list[dict], slots_waiting: list[str]) -> discord.Embed
     )
 
 
-def board_embeds(targets: list[dict], slots_waiting: list[str]) -> list[discord.Embed]:
+def board_embeds(targets: list[dict], slots_waiting: list[str], *,
+                 fog: bool = False) -> list[discord.Embed]:
     """Header plus one card per mark, in slot order."""
-    out = [board_header(targets, slots_waiting)]
-    for i, t in enumerate(targets, 1):
-        out.append(target_card(t, i))
-    return out
+    global _FOG
+    _FOG = fog
+    try:
+        out = [board_header(targets, slots_waiting)]
+        for i, t in enumerate(targets, 1):
+            out.append(target_card(t, i))
+        if fog:
+            out[0].description += (
+                "\n\n🌫️ **FOG OF WAR** — every chance on this board is "
+                "hidden. The real odds have not changed."
+            )
+        return out
+    finally:
+        _FOG = False
 
 
 
@@ -2878,13 +2922,24 @@ def _mmss(delta: timedelta) -> str:
     return f"{total // 60}:{total % 60:02d}"
 
 
+def _hhmm(delta: timedelta) -> str:
+    """Recharge waits run to hours now, and "213m" is not a readable wait."""
+    total = max(0, int(delta.total_seconds()))
+    hours, minutes = total // 3600, (total % 3600) // 60
+    if hours and minutes:
+        return f"{hours}h {minutes}m"
+    if hours:
+        return f"{hours}h"
+    return f"{minutes}m"
+
+
 def _intel_report_embed(
     t: dict, tier: str, cost: int, report_class: str,
     reliability: Optional[float], claim: str,
     base: float, broke: bool, extra: float, gained: float,
     total_bonus: float, cap: float,
     takedown: float, overall: float, stake: int,
-    lock_until: datetime, charges: dict,
+    charges: dict,
 ) -> discord.Embed:
     """The private report. Everything a decision needs, nothing public."""
     if report_class == "verified":
@@ -2963,50 +3018,69 @@ def _intel_report_embed(
     embed.set_footer(
         text=(
             f"Intel cost {cost} Naira · charges {charges['charges']}/"
-            f"{INTEL_MAX_CHARGES} · target actions locked for "
-            f"{INTEL_LOCK_SECONDS // 60}:00"
+            f"{INTEL_MAX_CHARGES}"
             + ("" if charges["charges"] >= INTEL_MAX_CHARGES or not nxt
-               else f" · next charge in {int((nxt - _now()).total_seconds() // 60)}m")
+               else f" · next charge in {_hhmm(nxt - _now())}")
         )
     )
     return embed
 
 
-class CounterScamView(discord.ui.View):
+class CounterScamButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"counterscam:(?P<report_id>[0-9]+)",
+):
     """The private Counter-Scam offer attached to a FAKE report.
 
-    Bound to one report, one target and one investigator, and not persistent:
-    a report that outlives the bot would let somebody act on odds that no
-    longer describe the board.
+    Dynamic rather than plain, because the report id has to live *in* the
+    custom_id.  A normal view is held in memory and dies with the process: the
+    old one also expired after 30 minutes, while a report stays valid as long
+    as its mark is on the board — which for a whale is hours.  Either way the
+    button went quietly dead and the next click drew "Roger did not respond in
+    time" instead of an explanation.
+
+    Everything that decides whether the button may fire — who owns the report,
+    whether it has been used, whether the mark is still there — is read from
+    the database at click time, so a reconstructed button is exactly as
+    trustworthy as the original.
     """
 
-    def __init__(
-        self, report_id: int, target_id: int, owner_id: str,
-        overall: float, stake: int,
-    ) -> None:
-        super().__init__(timeout=1800)
+    def __init__(self, report_id: int, label: str = "🎭 Counter-Scam") -> None:
         self.report_id = report_id
-        self.target_id = target_id
-        self.owner_id = owner_id
-        button = discord.ui.Button(
-            label=f"🎭 Counter-Scam · {overall * 100:.0f}% · {stake} Naira",
-            style=discord.ButtonStyle.danger,
+        super().__init__(
+            discord.ui.Button(
+                label=label[:80],
+                style=discord.ButtonStyle.danger,
+                custom_id=f"counterscam:{report_id}",
+            )
         )
-        button.callback = self._go
-        self.add_item(button)
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return str(interaction.user.id) == self.owner_id
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(int(match["report_id"]))
 
-    async def _go(self, interaction: discord.Interaction) -> None:
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if not await _ack(interaction):
+            return
         cog = interaction.client.get_cog("scam_targets")
         if cog is None:
-            await interaction.response.send_message(
-                "❌ The game is not available right now.", ephemeral=True
+            await _reply(
+                interaction,
+                content="❌ The game is not available right now.",
+                ephemeral=True,
             )
             return
-        self.stop()
         await cog.run_counter_scam(interaction, self.report_id)
+
+
+def counter_scam_view(report_id: int, overall: float, stake: int) -> discord.ui.View:
+    """A one-button view holding the offer for ``report_id``."""
+    view = discord.ui.View(timeout=None)
+    view.add_item(CounterScamButton(
+        report_id,
+        label=f"🎭 Counter-Scam · {overall * 100:.0f}% · {stake} Naira",
+    ))
+    return view
 
 
 # ── Board buttons ─────────────────────────────────────────────────────────────
@@ -3122,18 +3196,23 @@ class TargetBoardView(discord.ui.View):
             "scam_targets: board button %s pressed by %s (%s)",
             custom_id, interaction.user, interaction.user.id,
         )
+        # Before anything else — every branch below queues on the game lock.
+        if not await _ack(interaction):
+            return
         cog = interaction.client.get_cog("scam_targets")
         if cog is None:
-            await interaction.response.send_message(
-                "❌ The game is not available right now.", ephemeral=True
+            await _reply(
+                interaction,
+                content="❌ The game is not available right now.",
+                ephemeral=True,
             )
             return
         if slot_s == "global":
             if action == "pose":
                 await cog.pose_as_target(interaction)
             else:
-                await interaction.response.send_message(
-                    embed=target_help_embed(), ephemeral=True
+                await _reply(
+                    interaction, embed=target_help_embed(), ephemeral=True
                 )
             return
         slot = int(slot_s)
@@ -3161,7 +3240,11 @@ def target_help_embed() -> discord.Embed:
             "identical odds on all three. Read the card.\n\n"
             "🔎 **Intel** — spend an Intel Charge plus Naira to improve a "
             "mark's public odds *for everybody*, and receive a private report "
-            "on whether the identity is genuine.\n\n"
+            "on whether the identity is genuine. You hold "
+            f"**{INTEL_MAX_CHARGES} charges**, regaining one every "
+            f"**{INTEL_RECHARGE_HOURS:g} hours** — roughly "
+            f"**{INTEL_PER_DAY:g} a day**. Investigating costs no time, so you "
+            "may scout a mark and work it immediately.\n\n"
             "💰 **Pot** — every failed attempt feeds the mark's pot. Whoever "
             "eventually succeeds collects it on top of their payout, and the "
             "pot is **never** multiplied by the approach.\n\n"
@@ -3568,7 +3651,8 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
             # A mark appearing well before its announced time could only be a
             # player in disguise.
             waiting.append("A new mark should turn up before long.")
-        return board_embeds(targets, waiting), TargetBoardView(targets)
+        fog = await fx.odds_hidden(self.conn)
+        return board_embeds(targets, waiting, fog=fog), TargetBoardView(targets)
 
     async def refresh_board(self) -> None:
         """Rewrite the live board message in place.
@@ -3652,6 +3736,17 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
         escape = min(0.95, escape + bonus)
         escaped = random.random() < escape
 
+        # A Counterfeit Detector turns any fake encounter into a clean escape.
+        # It is checked before the roll matters and only ever fires on a fake,
+        # so a run of real marks never quietly burns it.
+        detector = await fx.get_effect(self.conn, "counterfeit_detector",
+                                       subject_id=uid)
+        detected = False
+        if detector:
+            escaped = True
+            detected = True
+            await fx.consume_effect(self.conn, detector["id"])
+
         await self.conn.execute(
             "UPDATE scam_players SET last_target_at = ? WHERE discord_user_id = ?",
             (_iso(_now()), uid),
@@ -3659,6 +3754,7 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
         cost = int(t["attempt_cost"])
         deposit = int(t["cover_deposit"] or 0)
         stolen = 0
+        doubled = False
 
         if escaped:
             # The attacker walks, out of pocket for the attempt; the faker
@@ -3673,12 +3769,19 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                 await adjust_balance(
                     self.conn, owner_id, deposit, "fake_refund")
             wealth = await exposed_wealth(self.conn, uid)
+            want = _pct_of(wealth, FAKE_THEFT_PCT,
+                           FAKE_THEFT_CAP.get(tier, 1_500))
+            # The Crash Course doubles what this disguise takes, once.  The
+            # faker receives the whole doubled amount; no money is created.
+            course = await fx.get_effect(self.conn, "crash_course",
+                                         subject_id=owner_id)
+            if course:
+                want *= 2
+                await fx.consume_effect(self.conn, course["id"])
             stolen = await seize_wealth(
-                self.conn, uid,
-                _pct_of(wealth, FAKE_THEFT_PCT,
-                        FAKE_THEFT_CAP.get(tier, 1_500)),
-                to=owner_id, detail=t["name"],
+                self.conn, uid, want, to=owner_id, detail=t["name"],
             )
+            doubled = bool(course)
         await self._end_fake(owner_id)
         await self._retire_target(t, "taken")
         await self.conn.commit()
@@ -3694,15 +3797,22 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
         label = APPROACHES.get(approach, APPROACHES["normal"])[2]
 
         if escaped:
+            how = (
+                "🛡️ Their **Counterfeit Detector** caught the fraud before a "
+                "single Naira changed hands. The detector has been consumed."
+                if detected else
+                "Something felt wrong and they aborted the operation before "
+                "transferring serious money."
+            )
             embed = discord.Embed(
                 title="⚠️ FAKE TARGET FLUSHED OUT",
                 description=(
                     f"{interaction.user.mention} approached **{t['name']}** "
                     f"using {icon} **{label}**.\n\n"
-                    "Something felt wrong and they aborted the operation before "
-                    "transferring serious money.\n\n"
-                    f"Escape chance: **{escape * 100:.0f}%**\n"
-                    f"Attempt cost lost: **{money(cost)}**\n\n"
+                    f"{how}\n\n"
+                    + ("" if detected else
+                       f"Escape chance: **{escape * 100:.0f}%**\n")
+                    + f"Attempt cost lost: **{money(cost)}**\n\n"
                     f"The mark was actually {owner_name} in disguise, and they "
                     f"lost their **{money(deposit)}** cover deposit."
                 ),
@@ -3719,12 +3829,19 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                     f"Escape chance: **{escape * 100:.0f}%** — they did not get "
                     "away in time.\n\n"
                     f"Operational funds lost: **{money(cost)}**\n"
-                    f"Additional wealth stolen: **{money(stolen)}**\n\n"
-                    f"{owner_name} escaped with the money."
+                    f"Additional wealth stolen: **{money(stolen)}**\n"
+                    + ("🎓 **Practical exam: passed** — the Crash Course "
+                       "doubled that.\n" if doubled else "")
+                    + f"\n{owner_name} escaped with the money."
                 ),
                 colour=_EMBED_RED,
             )
-        await interaction.response.send_message(embed=embed)
+        if not escaped and stolen:
+            extra = await fx.on_loss(self.conn, uid, stolen, detail=t["name"])
+            if extra:
+                embed.description += "\n\n" + "\n".join(extra)
+                await self.conn.commit()
+        await _reply(interaction, embed=embed)
 
     # ── /targets ──────────────────────────────────────────────────────
 
@@ -3737,7 +3854,7 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
         async with self._lock:
             await self._retire_old_board()
             embeds, view = await self._build_board()
-        await interaction.response.send_message(embeds=embeds, view=view)
+        await _reply(interaction, embeds=embeds, view=view)
         try:
             message = await interaction.original_response()
             await self._remember_board(str(interaction.channel_id), str(message.id))
@@ -3753,8 +3870,9 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
     async def targethelp(self, interaction: discord.Interaction) -> None:
         # Private on purpose: the board stays clean for people who already
         # know, and nobody has to scroll past a rules dump to reach the marks.
-        await interaction.response.send_message(
-            embed=target_help_embed(), ephemeral=True
+        await _reply(
+            interaction,
+            embed=target_help_embed(), ephemeral=True,
         )
 
     # ── Fake targets: queue, activation, cancellation ─────────────────
@@ -3919,31 +4037,37 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
         async with self._lock:
             existing = await self._fake_row(uid)
             if existing:
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=_plain("🎭 DISGUISE ALREADY IN PROGRESS",
                                  "You already have a disguise queued or "
                                  "active.\n\nNo additional deposit was taken."),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
 
             player = await get_player(self.conn, uid)
             last = player.get("fake_target_until")
             if last and _parse(last) > _now():
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=_plain("🎭 DISGUISE NETWORK ON COOLDOWN",
                                  "You cannot pose as another mark yet.\n\n"
                                  f"**Ready** <t:{int(_parse(last).timestamp())}:R>\n\n"
                                  "No deposit taken."),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
             if player["balance"] < FAKE_COVER_DEPOSIT:
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=_plain("💸 NOT ENOUGH CASH FOR A DISGUISE",
                                  f"Cover deposit required: "
                                  f"**{money(FAKE_COVER_DEPOSIT)}**\n"
                                  f"Your cash: **{money(player['balance'])}**\n\n"
                                  "No request was created."),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
 
             await adjust_balance(self.conn, uid, -FAKE_COVER_DEPOSIT, "fake_deposit")
@@ -3958,7 +4082,8 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
 
         # Deliberately never says whether a slot is free or how many fakes are
         # live — the response itself would leak the board's composition.
-        await interaction.response.send_message(
+        await _reply(
+            interaction,
             embed=discord.Embed(
                 title="🎭 DISGUISE REQUEST ACCEPTED",
                 description=(
@@ -3985,10 +4110,12 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
         async with self._lock:
             row = await self._fake_row(uid)
             if not row:
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=_plain("🎭 NO DISGUISE",
                                  "You have no disguise queued or active."),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
 
             if row["state"] == "queued":
@@ -3996,19 +4123,23 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                 await adjust_balance(self.conn, uid, row["deposit"])
                 await self._end_fake(uid)
                 await self.conn.commit()
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=_plain("🎭 REQUEST WITHDRAWN",
                                  f"Your **{money(row['deposit'])}** deposit has "
                                  "been returned.\n\nNo cooldown was started."),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
 
             if row["state"] == "cancelling":
                 left = _parse(row["cancel_at"]) - _now()
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=_plain("🎭 SHUTDOWN ALREADY IN PROGRESS",
                                  f"**Time remaining:** {_mmss(left)}"),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
 
             done_at = _now() + timedelta(minutes=FAKE_CANCEL_WINDUP_MIN)
@@ -4018,7 +4149,8 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
             )
             await self.conn.commit()
 
-        await interaction.response.send_message(
+        await _reply(
+            interaction,
             embed=discord.Embed(
                 title="🎭 DISGUISE SHUTDOWN STARTED",
                 description=(
@@ -4038,26 +4170,6 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
 
     # ── Intel ─────────────────────────────────────────────────────────
 
-    async def require_unlocked(self, interaction: discord.Interaction) -> bool:
-        """Refuse a target action while the player's Intel team is in the field."""
-        state = await intel_state(self.conn, str(interaction.user.id))
-        if not state["locked_until"]:
-            return True
-        left = state["locked_until"] - _now()
-        await interaction.response.send_message(
-            embed=discord.Embed(
-                title="🔒 STILL RETURNING FROM INTEL MISSION",
-                description=(
-                    "You cannot take another target action yet.\n\n"
-                    f"**Time remaining:** {_mmss(left)}\n\n"
-                    "_Quick scams, the fund and everything else stay open._"
-                ),
-                colour=_EMBED_GREY,
-            ),
-            ephemeral=True,
-        )
-        return False
-
     async def investigate_slot(
         self, interaction: discord.Interaction, slot: int
     ) -> None:
@@ -4067,8 +4179,9 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
             row = await cur.fetchone()
         target_id = int(row[0]) if row and row[0] is not None else None
         if target_id is None:
-            await interaction.response.send_message(
-                "❌ That pitch is empty right now — check `/targets`.",
+            await _reply(
+                interaction,
+                content="❌ That pitch is empty right now — check `/targets`.",
                 ephemeral=True,
             )
             return
@@ -4091,35 +4204,38 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
         async with self._lock:
             t = await get_target(self.conn, target_id)
             if not t or t["status"] != "active":
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=_plain("🎯 TARGET NO LONGER AVAILABLE",
                                  "This mark has already left the board.\n\n"
                                  "No charge spent. No Naira spent."),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
 
             arch = archetype_for(t)
             tier = tier_of(t)
             if arch and arch["intel_immune"]:
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=_plain("🦄 THE UNICORN CANNOT BE INVESTIGATED",
                                  "Your intelligence network has found no "
                                  "reliable evidence that Darkodor currently "
                                  "exists.\n\n🔎 Charge spent: 0\n💸 Naira spent: 0"),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
 
             state = await intel_state(self.conn, uid)
-            if state["locked_until"]:
-                await self.require_unlocked(interaction)
-                return
 
             if str(t["fake_owner_id"] or "") == uid:
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=_plain("🎭 YOU CANNOT INVESTIGATE YOUR OWN DISGUISE",
                                  "That would be impressively inefficient.\n\n"
                                  "No charge spent. No Naira spent."),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
 
             async with self.conn.execute(
@@ -4128,57 +4244,74 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
             ) as cur:
                 already = await cur.fetchone()
             if already:
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=_plain("🔎 YOU ALREADY INVESTIGATED THIS TARGET",
                                  "Your network has already worked this case.\n\n"
                                  "You cannot spend another Intel Charge on the "
                                  "same mark."),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
 
             if int(t.get("intel_missions") or 0) >= INTEL_MISSIONS_PER_TARGET:
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=_plain("🔒 NO MORE INTEL AVAILABLE",
                                  "Two intelligence missions have already been "
                                  "completed against this mark. Further digging "
                                  "would attract too much attention.\n\n"
                                  "No charge spent. No Naira spent."),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
 
             if state["charges"] <= 0:
                 nxt = state["next_at"]
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=_plain("🔎 NO INTEL AVAILABLE",
-                                 "Your intelligence network is currently busy.\n\n"
+                                 "Your investigators are all out in the field, "
+                                 "and there is nobody left to send.\n\n"
                                  f"**Charges:** 0/{INTEL_MAX_CHARGES}\n"
                                  + (f"**Next charge:** <t:{int(nxt.timestamp())}:R>\n"
+                                    f"**Back to {INTEL_MAX_CHARGES}/"
+                                    f"{INTEL_MAX_CHARGES}:** "
+                                    f"<t:{int(_full_charges_at(state).timestamp())}:R>\n"
                                     if nxt else "")
-                                 + "\nNo Naira was spent."),
-                    ephemeral=True)
+                                 + f"\n_One charge every "
+                                 f"{INTEL_RECHARGE_HOURS:g} hours. Nothing else "
+                                 "is blocked — you can still work the board._\n\n"
+                                 "No Naira was spent."),
+                    ephemeral=True,
+                )
                 return
 
             cost = intel_cost(tier)
             player = await get_player(self.conn, uid)
             if player["balance"] < cost:
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=_plain("💸 NOT ENOUGH CASH",
                                  f"Intel on this mark costs **{money(cost)}**.\n"
                                  f"Your cash: **{money(player['balance'])}**\n\n"
                                  "No Intel Charge was spent."),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
 
             if t["expires_at"]:
                 left = (_parse(t["expires_at"]) - _now()).total_seconds()
                 if left < INTEL_MIN_REMAINING_SECONDS:
-                    await interaction.response.send_message(
+                    await _reply(
+                        interaction,
                         embed=_plain("⏳ TOO LATE FOR INTEL",
                                      "This mark will leave before your "
                                      "investigators could return.\n\n"
                                      f"**Time remaining:** {int(max(0, left))}s\n\n"
                                      "No charge spent. No Naira spent."),
-                        ephemeral=True)
+                        ephemeral=True,
+                    )
                     return
 
             # ── everything validated: spend, then roll ──
@@ -4229,7 +4362,7 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
             await record_investigation(
                 self.conn, target_id, uid, claim, report_class == "verified"
             )
-            lock_until = await start_intel_lock(self.conn, uid)
+            await _touch(self.conn, uid)
             await self.conn.commit()
             fresh = await intel_state(self.conn, uid)
 
@@ -4238,7 +4371,7 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
         embed = _intel_report_embed(
             t, tier, cost, report_class, reliability, claim,
             base, broke, extra, gained, after, cap,
-            takedown, overall, stake, lock_until, fresh,
+            takedown, overall, stake, fresh,
         )
         view = None
         if claim == "fake":
@@ -4253,33 +4386,38 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                     inline=False,
                 )
             else:
-                view = CounterScamView(report_id, target_id, uid, overall, stake)
-        await interaction.response.send_message(
-            embed=embed, view=view, ephemeral=True
+                view = counter_scam_view(report_id, overall, stake)
+        await _reply(
+            interaction,
+            embed=embed, view=view, ephemeral=True,
         )
 
     # ── /intelstatus ──────────────────────────────────────────────────
 
     @app_commands.command(
         name="intelstatus",
-        description="Your intelligence network: charges and action lock.",
+        description="Your intelligence network: charges and recharge timer.",
     )
     async def intelstatus(self, interaction: discord.Interaction) -> None:
         state = await intel_state(self.conn, str(interaction.user.id))
-        lock = state["locked_until"]
+        full = state["charges"] >= INTEL_MAX_CHARGES
         embed = discord.Embed(
             title="🔎 INTELLIGENCE NETWORK",
             description=(
                 f"**Charges:** {state['charges']}/{INTEL_MAX_CHARGES}\n"
                 + (
-                    "**Next charge:** FULL\n" if state["charges"] >= INTEL_MAX_CHARGES
+                    "**Next charge:** FULL\n" if full
                     else f"**Next charge:** <t:{int(state['next_at'].timestamp())}:R>\n"
                     if state["next_at"] else ""
                 )
-                + "**Target action lock:** "
-                + (f"🔒 {_mmss(lock - _now())}" if lock else "Ready")
-                + f"\n\n_One charge every {INTEL_RECHARGE_HOURS:g} hours, up to "
-                f"{INTEL_MAX_CHARGES}. Intel costs "
+                + (
+                    "" if full or not state["next_at"] else
+                    f"**Back to {INTEL_MAX_CHARGES}/{INTEL_MAX_CHARGES}:** "
+                    + f"<t:{int(_full_charges_at(state).timestamp())}:R>\n"
+                )
+                + f"\n_One charge every {INTEL_RECHARGE_HOURS:g} hours, up to "
+                f"{INTEL_MAX_CHARGES} — about **{INTEL_PER_DAY:g} missions a "
+                "day**. Intel costs "
                 + " · ".join(
                     f"{TIER_EMOJI[k]} {money(v)}"
                     for k, v in INTEL_COST.items() if v
@@ -4288,7 +4426,7 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
             ),
             colour=_EMBED_GOLD,
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await _reply(interaction, embed=embed, ephemeral=True)
 
     # ── Counter-scam ──────────────────────────────────────────────────
 
@@ -4300,49 +4438,66 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
         async with self._lock:
             async with self.conn.execute(
                 "SELECT target_id, report_class, claim, takedown, overall, stake,"
-                " consumed FROM scam_intel_reports WHERE id = ? AND user_id = ?",
-                (report_id, uid),
+                " consumed, user_id FROM scam_intel_reports WHERE id = ?",
+                (report_id,),
             ) as cur:
                 rep = await cur.fetchone()
-            if not rep or int(rep[6]):
-                await interaction.response.send_message(
-                    embed=_plain("🎯 REPORT NO LONGER VALID",
-                                 "That intel has already been acted on.\n\n"
+            # Each of these used to read "REPORT NO LONGER VALID"; a button that
+            # refuses should say which of the three reasons it is refusing for.
+            if not rep:
+                await _reply(
+                    interaction,
+                    embed=_plain("🎯 REPORT GONE",
+                                 "That intel report no longer exists.\n\n"
                                  "No operational funds were spent."),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
+                return
+            if str(rep[7]) != uid:
+                await _reply(
+                    interaction,
+                    embed=_plain("🎯 NOT YOUR REPORT",
+                                 "That intel belongs to another investigator.\n\n"
+                                 "No operational funds were spent."),
+                    ephemeral=True,
+                )
+                return
+            if int(rep[6]):
+                await _reply(
+                    interaction,
+                    embed=_plain("🎯 ALREADY ACTED ON",
+                                 "You have already used this report — a "
+                                 "counter-scam fires once.\n\n"
+                                 "No operational funds were spent.\n\n"
+                                 "_Old buttons stay on screen; the report "
+                                 "behind them does not._"),
+                    ephemeral=True,
+                )
                 return
             target_id, report_class, _claim, takedown, overall, stake = (
                 int(rep[0]), rep[1], rep[2], float(rep[3]), float(rep[4]), int(rep[5])
             )
 
-            state = await intel_state(self.conn, uid)
-            if state["locked_until"]:
-                left = state["locked_until"] - _now()
-                await interaction.response.send_message(
-                    embed=_plain("🔒 COUNTER-SCAM TEAM NOT READY",
-                                 "Your investigators are still returning from "
-                                 "the intel mission.\n\n"
-                                 f"**Available in:** {_mmss(left)}\n\n"
-                                 "Your report stays valid while the mark does."),
-                    ephemeral=True)
-                return
-
             t = await get_target(self.conn, target_id)
             if not t or t["status"] != "active":
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=_plain("🎯 TARGET NO LONGER AVAILABLE",
                                  "This mark has already disappeared.\n\n"
                                  "No operational funds were spent."),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
 
             player = await get_player(self.conn, uid)
             if player["balance"] < stake:
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=_plain("💸 NOT ENOUGH CASH",
                                  f"The operational stake is **{money(stake)}** "
                                  f"and you have {money(player['balance'])}."),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
 
             await self.conn.execute(
@@ -4392,15 +4547,19 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                 await self._retire_target(t, "taken")
             await self.conn.commit()
 
-        await self.fill_target_slot()
-        await self.refresh_board()
-        await interaction.response.send_message(
+        # Tell the clicker first.  Refilling the slot and rebuilding the board
+        # are several Discord round-trips, and the player who pressed the
+        # button should not be the one waiting on them.
+        await _reply(
+            interaction,
             embed=_plain(
                 "🎭 COUNTER-SCAM RESOLVED",
                 "The result has been posted publicly.",
             ),
             ephemeral=True,
         )
+        await self.fill_target_slot()
+        await self.refresh_board()
         await self._announce_counter(
             interaction, t, tier, outcome, report_class,
             overall, stake, deposit, moved, owner_id,
@@ -4475,8 +4634,9 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
             row = await cur.fetchone()
         target_id = int(row[0]) if row and row[0] is not None else None
         if target_id is None:
-            await interaction.response.send_message(
-                "❌ That pitch is empty right now — check `/targets`.",
+            await _reply(
+                interaction,
+                content="❌ That pitch is empty right now — check `/targets`.",
                 ephemeral=True,
             )
             return
@@ -4522,23 +4682,23 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
     ) -> None:
         if not await require_free(interaction, self.conn, "work a mark"):
             return
-        if not await self.require_unlocked(interaction):
-            return
         uid = str(interaction.user.id)
         approach_label = APPROACHES.get(approach, APPROACHES["normal"])[2]
 
         async with self._lock:
             t = await get_target(self.conn, target_id)
             if not t or t["status"] != "active":
-                await interaction.response.send_message(
-                    "❌ That mark is no longer available. Check `/targets`.",
+                await _reply(
+                    interaction,
+                    content="❌ That mark is no longer available. Check `/targets`.",
                     ephemeral=True,
                 )
                 return
 
             if await impersonating(self.conn, uid):
-                await interaction.response.send_message(
-                    "❌ You are currently posing as a mark. Working the board "
+                await _reply(
+                    interaction,
+                    content="❌ You are currently posing as a mark. Working the board "
                     "while impersonating one of its targets is a step too far, "
                     "even here.",
                     ephemeral=True,
@@ -4563,7 +4723,8 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                 lock_row = await cur.fetchone()
             if lock_row and lock_row[0] and _parse(lock_row[0]) > _now():
                 until = _parse(lock_row[0])
-                await interaction.response.send_message(
+                await _reply(
+                    interaction,
                     embed=discord.Embed(
                         title="🚫 THE ROAD IS BLOCKED",
                         description=(
@@ -4594,8 +4755,9 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                         ),
                         colour=_EMBED_GREY,
                     )
-                    await interaction.response.send_message(
-                        embed=embed, ephemeral=True
+                    await _reply(
+                        interaction,
+                        embed=embed, ephemeral=True,
                     )
                     return
 
@@ -4623,8 +4785,9 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                     ),
                     colour=_EMBED_RED,
                 )
-                await interaction.response.send_message(
-                    embed=embed, ephemeral=True
+                await _reply(
+                    interaction,
+                    embed=embed, ephemeral=True,
                 )
                 return
 
@@ -4633,6 +4796,7 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                 await self._resolve_fake(interaction, t, uid, player)
                 return
 
+            special_lines: list[str] = []
             arch = archetype_for(t)
             carrot = False
             collateral_gain = 0
@@ -4650,11 +4814,26 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                 - (1 - chance) * t["attempt_cost"]
             )
             success = random.random() < chance
+            # Professional Guarantee overrides the roll on real, non-legendary
+            # marks only.  It is checked after the roll rather than instead of
+            # it so the recorded expected value still reflects the real odds.
+            if not success and tier_of(t) != "legendary":
+                guarantee = await fx.get_effect(
+                    self.conn, "professional_guarantee", subject_id=uid
+                )
+                if guarantee:
+                    success = True
+                    await fx.consume_effect(self.conn, guarantee["id"])
+                    special_lines.append(
+                        "🎯 **Professional Guarantee applied** — success was "
+                        "contractually guaranteed."
+                    )
 
             await self.conn.execute(
                 "UPDATE scam_players SET last_target_at = ? WHERE discord_user_id = ?",
                 (_iso(_now()), uid),
             )
+            await _touch(self.conn, uid)
             await self.conn.execute(
                 "INSERT INTO scam_target_attempts (target_id, discord_user_id, attempts, lost)"
                 " VALUES (?, ?, 1, 0)"
@@ -4720,6 +4899,12 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                         f"👑 Shadow treasury: **{money(treasury)}**"
                     )
 
+                # Everything the /special system can do to an earning happens
+                # here, on the gross, before it lands.
+                total, modifiers = await fx.on_reward(
+                    self.conn, uid, total, kind="target", detail=t["name"]
+                )
+                special_lines.extend(modifiers)
                 await adjust_balance(self.conn, uid, total, "target_payout", t["name"])
                 await self._retire_target(t, "taken")
                 await record_play(
@@ -4854,7 +5039,30 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                             "🚔 **YOU HAVE BEEN ARRESTED** — bribe "
                             f"{money(jail['bribe'])}, released "
                             f"<t:{int(jail['until'].timestamp())}:R>"
+                            if not jail.get("released") else
+                            "🚔 **YOU HAVE BEEN ARRESTED** — and immediately "
+                            "released, on presentation of a suspiciously "
+                            "official card."
                         )
+
+                # Somebody may have been waiting for exactly this failure.
+                # The mark's own consequences resolve first (spec §H); the
+                # informant's tip-off lands on top of whatever is left.
+                informant = await fx.take_trap(self.conn, "police_informant", uid)
+                if informant and not await get_jail(self.conn, uid):
+                    fresh = await get_player(self.conn, uid)
+                    jail = await arrest_player(
+                        self.conn, uid, EXTREME_FAILURE_MIN_BRIBE,
+                        fresh["balance"] + fresh["invested"],
+                    )
+                    special_lines.append(
+                        f"🚔 **POLICE INFORMANT** — the authorities were "
+                        f"already waiting. <@{informant['owner_id']}> provided "
+                        "the tip-off, and remained anonymous for approximately "
+                        "four seconds."
+                        + ("\n🎫 You walked straight back out."
+                           if jail.get("released") else "")
+                    )
 
                 # Most marks bank exactly what was lost on them. Gerard banks
                 # more, which is the whole reason anyone endures Gerard.
@@ -4922,6 +5130,8 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                 desc += f"\nPot collected: **+{money(total - payout)}**"
             if extras:
                 desc += "\n\n" + "\n".join(extras)
+            if special_lines:
+                desc += "\n\n" + "\n".join(special_lines)
             desc += (
                 f"\n\n**Total: +{money(total)}**\n\n"
                 f"{t['name']} is off the board. A new mark will turn up shortly."
@@ -4931,7 +5141,8 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                 description=desc,
                 colour=_EMBED_GREEN,
             )
-            await interaction.response.send_message(
+            await _reply(
+                interaction,
                 content=f"🎉 {interaction.user.mention} took down **{t['name']}**!",
                 embed=embed,
             )
@@ -4946,6 +5157,8 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
         )
         if extras:
             desc += "\n\n" + "\n".join(extras)
+        if special_lines:
+            desc += "\n\n" + "\n".join(special_lines)
         if counter:
             desc += (
                 f"\n\n👑 **{t['name']} counter-scammed you** and lifted a "
@@ -4998,7 +5211,8 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                 ),
                 colour=_EMBED_RED,
             )
-        await interaction.response.send_message(
+        await _reply(
+            interaction,
             content=f"💸 {interaction.user.mention} failed on **{t['name']}**.",
             embed=embed,
         )

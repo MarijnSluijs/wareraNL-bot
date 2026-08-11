@@ -54,6 +54,10 @@ class NigeriaBot(commands.Bot):
         # The fund owns /invest and its own risk-level scheduler.
         import nigeria_bot.royal_fund as royal_fund
         self.royal_fund = await royal_fund.setup(self, self.nigeria_db)
+        # /special sits on top of all of the above: its cards reach into the
+        # scam, target, fund and jail systems, so it loads last.
+        import nigeria_bot.special_game as special_game
+        self.special_game = await special_game.setup(self, self.nigeria_db)
 
         # /fabrieken — reads the hourly company census written by the
         # data-fetcher container into database/external.db.
@@ -75,10 +79,21 @@ class NigeriaBot(commands.Bot):
         # free seat posted before the restart would go dead.
         self.add_view(OperationView(free_entry=True))
         self.add_view(BegView())
-        from nigeria_bot.scam_targets import TargetBoardView
+        from nigeria_bot.scam_targets import CounterScamButton, TargetBoardView
         self.add_view(TargetBoardView())
+        # The Counter-Scam offer carries its report id in the custom_id, so it
+        # cannot be a fixed persistent view — register the template instead, or
+        # every offer issued before a restart answers with nothing at all.
+        self.add_dynamic_items(CounterScamButton)
         from nigeria_bot.scam_jail import AppealView
         self.add_view(AppealView())
+        from nigeria_bot.special_game import RogerView, SpecialEventButton
+        self.add_view(RogerView())
+        # Public /special events carry their id in the custom_id, so the
+        # template is registered rather than a fixed view — otherwise a
+        # three-minute bait posted before a redeploy would go dead and look
+        # exactly like a bait nobody fell for.
+        self.add_dynamic_items(SpecialEventButton)
 
         # Sync slash commands to the guild
         from nigeria_bot.cog import GUILD_ID
