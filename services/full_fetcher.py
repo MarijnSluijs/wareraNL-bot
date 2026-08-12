@@ -23,6 +23,11 @@ What is fetched, in order, every hour:
        the Nigeria bot's /damage-projection command. Health/hunger for that
        same command is captured as a side effect of step 2's citizen sweep
        (see ``citizen_combat_state`` in services/citizen_cache.py).
+    6. Company owners missing from step 2 → backfilled by ID. Step 2 only
+       learns citizen IDs via ``user.getUsersByCountry``, which silently
+       omits inactive players (``isActive: false``) — see
+       ``fetch_missing_owner_citizenships`` for how this was found and why a
+       direct-by-ID fetch is the only way to close the gap.
 
 Each sweep step records progress through
 :meth:`services.db.Database.mark_started` / :meth:`mark_finished` under
@@ -773,6 +778,53 @@ async def fetch_company_census(client: APIClient, db: Database) -> int:
         return 0
 
 
+async def fetch_missing_owner_citizenships(
+    cache: CitizenCache, db: Database
+) -> int:
+    """Backfill ``citizen_levels`` for company owners the citizen sweep missed.
+
+    ``user.getUsersByCountry`` — the endpoint the regular citizen sweep
+    (:func:`fetch_all_citizen_levels`) uses to enumerate each country's
+    citizens — was confirmed live to silently omit inactive players
+    (``isActive: false``). Their profile is still fully live and fetchable by
+    ID; a country-by-country sweep just never learns those IDs exist. Since
+    ``company_owners`` (just written by :func:`fetch_company_census`) already
+    has the *exact* set of owner IDs that matter, any of them missing from
+    ``citizen_levels`` is fetched directly by ID here — no discovery needed,
+    no dependence on the broken listing endpoint.
+
+    This is what makes ``/productie`` on the Nigeria bot able to attribute a
+    company to its owner's nationality even when the owner is inactive.
+    """
+    dataset = "all_countries.owner_citizenships"
+    await db.mark_started(dataset, source="full_fetcher")
+    started = time.monotonic()
+    try:
+        async with db._conn.execute(
+            "SELECT DISTINCT co.owner_id FROM company_owners co "
+            "LEFT JOIN citizen_levels cl ON cl.user_id = co.owner_id "
+            "WHERE cl.user_id IS NULL"
+        ) as cur:
+            missing = [str(r[0]) for r in await cur.fetchall()]
+
+        recorded = await cache.refresh_specific_users(missing)
+
+        duration_ms = int((time.monotonic() - started) * 1000)
+        await db.mark_finished(dataset, status="ok", duration_ms=duration_ms)
+        logger.info(
+            "owner_citizenships: %d owners missing, %d recorded (%.1fs)",
+            len(missing), recorded, duration_ms / 1000,
+        )
+        return recorded
+    except Exception as exc:  # noqa: BLE001
+        duration_ms = int((time.monotonic() - started) * 1000)
+        await db.mark_finished(
+            dataset, status="error", error=str(exc)[:500], duration_ms=duration_ms
+        )
+        logger.exception("owner_citizenships backfill failed")
+        return 0
+
+
 async def fetch_wage_taxes(
     client: APIClient, db: Database, countries: list[dict]
 ) -> int:
@@ -982,6 +1034,7 @@ async def run_once(client: APIClient, db: Database, *, country_limit: int = 0) -
       - mu_memberships      FULL_FETCH_ENABLE_MU_MEMBERSHIPS (default 0 — slow)
       - company_census      FULL_FETCH_ENABLE_COMPANY_CENSUS (default 1)
       - wage_taxes          FULL_FETCH_ENABLE_WAGE_TAXES (default 1; needs census)
+      - owner_citizenships  FULL_FETCH_ENABLE_OWNER_CITIZENSHIPS (default 1; needs census)
       - alliances           FULL_FETCH_ENABLE_ALLIANCES (default 1)
     """
     _written, countries = await fetch_country_snapshots(client, db)
@@ -1002,10 +1055,12 @@ async def run_once(client: APIClient, db: Database, *, country_limit: int = 0) -
         await fetch_mu_memberships(cache, db)
     if _env_int("FULL_FETCH_ENABLE_COMPANY_CENSUS", 1) == 1:
         await fetch_company_census(client, db)
-        # Must run after the census: it depends on the worker→company map the
-        # census refreshes.
+        # Both must run after the census: one depends on the worker→company
+        # map it refreshes, the other on the owner IDs in company_owners.
         if _env_int("FULL_FETCH_ENABLE_WAGE_TAXES", 1) == 1:
             await fetch_wage_taxes(client, db, countries)
+        if _env_int("FULL_FETCH_ENABLE_OWNER_CITIZENSHIPS", 1) == 1:
+            await fetch_missing_owner_citizenships(cache, db)
 
 
 async def main() -> None:

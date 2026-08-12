@@ -2521,9 +2521,13 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
             interaction, uid, player, state, holders, note
         )
         await interaction.response.send_message(embeds=embeds, ephemeral=True)
-        await self._announce_flow(
-            interaction, uid, amount, state, holders, deposit=True
-        )
+        # Only an actual deposit gets announced.  `/invest status` reaches here
+        # too, with no amount at all — announcing that as a deposit crashed the
+        # command outright.
+        if action == "deposit" and amount:
+            await self._announce_flow(
+                interaction, uid, amount, state, holders, deposit=True
+            )
 
     async def _announce_flow(
         self, interaction: discord.Interaction, uid: str, amount: int,

@@ -129,6 +129,10 @@ COUNTER_LOSS_THEFT  = (0.20, 0.30)
 COUNTER_LOSS_CAP    = 3_000
 # PvP never takes a player below this in cash + fund combined.
 PROTECTED_WEALTH = 1_000
+# What a caught impersonator owes to get back out.  Pitched at the cover
+# deposit: being unmasked should cost about what the disguise cost to set up,
+# on top of losing the deposit itself.
+FAKE_ARREST_BRIBE = 500
 
 # ── Intel ─────────────────────────────────────────────────────────────────────
 # Intel is a limited resource rather than a cooldown.  Charges regenerate
@@ -209,7 +213,7 @@ TIER_EMOJI = {
 }
 TIER_WEIGHTS = [
     ("ordinary", 45), ("great_catch", 30), ("rare", 15),
-    ("whale", 8), ("legendary", 2),
+    ("whale", 8), ("legendary", 4),
 ]
 _TIER_COLOUR = {
     "ordinary":    discord.Colour(0x2ECC71),
@@ -341,6 +345,16 @@ _ARCH_DEFAULTS = {
     "silence_minutes": 0,
     # (other arch_id, bonus) — extra odds while that mark is also on the board.
     "rival": None,
+    # Relative likelihood of being picked *within its own tier*.  Everything
+    # defaults to 1.0, which reproduces the old uniform draw exactly; only a
+    # mark that should be conspicuously more or less common than its tier-mates
+    # needs to say so.
+    "spawn_weight": 1.0,
+    # Success clears the player's own action cooldowns (Marijn's mod powers).
+    # Deliberately narrow: punishments and shared timers are never touched.
+    "reset_cooldowns": False,
+    # A successful takedown puts the whole board on Heat for this long.
+    "board_heat_minutes": 0,
     # {approach: (chance, payout multiplier, flavour emoji)}.  How `chance` is
     # read depends on `approach_mode`:
     #   "absolute" — it *is* the success chance
@@ -1548,6 +1562,9 @@ _ARCHETYPES: list[dict] = [
         chance=0.015, payout_min=15_000, payout_max=30_000,
         attempt_cost=50, max_failures=1, decays=False, one_shot=True,
         intel_immune=True, fake_eligible=False,
+        # Explicitly below every other legendary: the expansion asks for
+        # Darkodor to stay the single rarest, not merely tie for it.
+        spawn_weight=0.7,
         approaches={
             "careful": (0.020, 0.70, "🛡️"),
             "normal":  (0.015, 1.00, "🎯"),
@@ -1576,6 +1593,105 @@ _ARCHETYPES: list[dict] = [
             "Darkodor reads your message.\n\nHe does not reply. He does not "
             "block you. He simply returns to whatever a former president does "
             "for the rest of eternity."
+        ),
+    ),
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # MARIJN EXPANSION
+    # Two real NPC marks: a legendary who pays in time rather than money, and
+    # a rare one who is a policeman.
+    # ══════════════════════════════════════════════════════════════════════════
+
+    _arch(
+        emoji="👁️", name="Prins Marijn de Echte",
+        full_name="Prins Marijn de Echte",
+        age=0, location="Nederland", tier="legendary", flag="🇳🇱",
+        short_name="Marijn", trait="👁️ The All-Knowing Discord Admin",
+        description=(
+            "The all-knowing Discord admin. Surprisingly chill for a Discord "
+            "mod. Unfortunately, he can see everything."
+        ),
+        status="Already read the logs",
+        # No cash at all: the reward is time, and time is not a payout.
+        chance=0.75, payout_min=0, payout_max=0,
+        attempt_cost=200, max_failures=2, decays=False,
+        fake_eligible=False, no_pot=True,
+        # ~2.9x Darkodor's weight, at the top of the band the expansion asks
+        # for.  It is expressed relative to a Darkodor who was himself nudged
+        # down to stay the single rarest legendary, so the two constraints
+        # ("2-3x Darkodor" and "Darkodor strictly rarest") both hold.
+        spawn_weight=2.0,
+        # There is no clever approach against somebody who can read the logs.
+        approaches={
+            "careful": (0.75, 1.00, "🛡️"),
+            "normal":  (0.75, 1.00, "📋"),
+            "greedy":  (0.75, 1.00, "💰"),
+        },
+        reset_cooldowns=True, intel_refill=True, always_arrest=True,
+        special_rules=(
+            "🦄 Legendary, but far less shy than Darkodor.",
+            "**All three approaches are exactly 75%.** There is no clever "
+            "angle against a man who can read the logs.",
+            "💰 **No cash reward whatsoever.** Success pays in time instead: "
+            "every one of your personal cooldowns is cleared and Intel is "
+            "restored to 3/3.",
+            "🔨 **Mod ban hammer** — every failed attempt is an immediate "
+            "arrest.",
+            "Jail, bribes and shared timers are never reset. Mod powers have "
+            "limits.",
+        ),
+        success_text=(
+            "**Prins Marijn de Echte has reviewed the logs and decided to "
+            "allow it.**\n\nHe does not transfer any money. He does "
+            "something considerably more useful."
+        ),
+        failure_text=(
+            "**Marijn reviewed the logs.**\n\nBehaviour: POOR. He supplies "
+            "the timestamp, the message ID, the full transcript and several "
+            "screenshots.\n\n_\u201cPlease familiarize yourself with the "
+            "server rules.\u201d_"
+        ),
+    ),
+    _arch(
+        emoji="🕶️", name="Undercover Cop", full_name="Undercover Cop",
+        age=0, location="United States", tier="rare", flag="🇺🇸",
+        short_name="the cop", trait="🚔 On the Job",
+        description=(
+            "Claims to be an ordinary American businessman. Keeps asking "
+            "whether you have committed any crimes recently."
+        ),
+        status="Sunglasses indoors, third hour",
+        chance=0.50, payout_min=1_500, payout_max=1_500,
+        attempt_cost=100, max_failures=3, decays=False,
+        fake_eligible=False, always_arrest=True, board_heat_minutes=30,
+        approaches={
+            "careful": (0.75, 1.00, "🛡️"),
+            "normal":  (0.50, 1.00, "📋"),
+            "greedy":  (0.30, 1.00, "💰"),
+        },
+        # Flat sums rather than multipliers: the greedy line is the evidence
+        # locker, not a bigger slice of the same envelope.
+        approach_payouts={
+            "careful": (600, 600),
+            "normal":  (1_500, 1_500),
+            "greedy":  (3_000, 3_000),
+        },
+        special_rules=(
+            "🚔 **On the job** — every failed attempt is an immediate arrest. "
+            "There is no bribe negotiation with a man wearing a wire.",
+            "🔥 **Taking him down puts the board on Heat for 30 minutes.** The "
+            "next player to fail against a *real* mark gets one 50% chance of "
+            "being arrested for it.",
+            "🎭 Fake targets neither trigger Heat nor suffer it.",
+        ),
+        success_text=(
+            "**The ordinary American businessman was not an ordinary American "
+            "businessman.**\n\nHe was, however, carrying the operation's "
+            "cash. Every nearby police radio has suddenly become very loud."
+        ),
+        failure_text=(
+            "**He has produced a badge.**\n\nIn hindsight, the wire taped to "
+            "his chest was somewhat suspicious."
         ),
     ),
 
@@ -2327,14 +2443,21 @@ def _pick_archetype(
         tier = random.choices(tiers, weights=weights, k=1)[0]
         pool = pool_for(tier)
         if pool:
-            return random.choice(pool)
+            # Weighted *within* the tier, not uniform: Marijn should be the
+            # legendary you actually meet, while Darkodor stays the one people
+            # talk about having seen once.
+            return random.choices(
+                pool, weights=[a["spawn_weight"] for a in pool], k=1
+            )[0]
     # Every tier we rolled was empty (tiny roster, or everything excluded);
     # fall back to anything legal rather than failing to fill the slot.
     everything = [
         a for a in _ARCHETYPES
         if a["name"] not in exclude and (a["fake_eligible"] or not fake_only)
-    ]
-    return random.choice(everything or _ARCHETYPES)
+    ] or _ARCHETYPES
+    return random.choices(
+        everything, weights=[a["spawn_weight"] for a in everything], k=1
+    )[0]
 
 
 async def spawn_target(
@@ -2892,7 +3015,8 @@ def board_header(targets: list[dict], slots_waiting: list[str]) -> discord.Embed
 
 
 def board_embeds(targets: list[dict], slots_waiting: list[str], *,
-                 fog: bool = False) -> list[discord.Embed]:
+                 fog: bool = False, heat_until: Optional[datetime] = None
+                 ) -> list[discord.Embed]:
     """Header plus one card per mark, in slot order."""
     global _FOG
     _FOG = fog
@@ -2900,6 +3024,14 @@ def board_embeds(targets: list[dict], slots_waiting: list[str], *,
         out = [board_header(targets, slots_waiting)]
         for i, t in enumerate(targets, 1):
             out.append(target_card(t, i))
+        if heat_until:
+            # Display only: no mark's odds move because of Heat.
+            out[0].description += (
+                f"\n\n🔥 **TARGET BOARD HEAT — "
+                f"{_mmss(heat_until - _now())} REMAINING**\n"
+                "The next player to fail against a real mark carries a **50%** "
+                "chance of arrest. 🎭 Fake targets are unaffected."
+            )
         if fog:
             out[0].description += (
                 "\n\n🌫️ **FOG OF WAR** — every chance on this board is "
@@ -2940,6 +3072,8 @@ def _intel_report_embed(
     total_bonus: float, cap: float,
     takedown: float, overall: float, stake: int,
     charges: dict,
+    odds_before: Optional[dict] = None,
+    odds_after: Optional[dict] = None,
 ) -> discord.Embed:
     """The private report. Everything a decision needs, nothing public."""
     if report_class == "verified":
@@ -2997,6 +3131,13 @@ def _intel_report_embed(
         f"+{cap * 100:.0f}pp maximum**\n"
         "_Everybody now sees the improved odds. They do not know who paid._"
     )
+    if odds_before and odds_after:
+        moved = [
+            f"{APPROACHES[k][2]}: {before_v * 100:.0f}% → "
+            f"**{odds_after[k] * 100:.0f}%**"
+            for k, before_v in odds_before.items()
+        ]
+        body.append("**The board now reads:**\n" + "\n".join(moved))
 
     body.append("")
     if claim == "fake":
@@ -3250,7 +3391,13 @@ def target_help_embed() -> discord.Embed:
             "pot is **never** multiplied by the approach.\n\n"
             "🐋 **Whales** — very valuable, and they leave the board one hour "
             "after appearing whatever happens.\n\n"
-            "🦄 **Legendary** — may ignore the normal rules entirely.\n\n"
+            "🦄 **Legendary** — may ignore the normal rules entirely. They "
+            "are rare, but not as rare as they used to be.\n\n"
+            "🔥 **Board Heat** — taking down the 🕶️ Undercover Cop leaves the "
+            "police watching for **30 minutes**. The next player to fail "
+            "against a real mark carries one **50%** arrest roll. It resolves "
+            "after everything else, never fires on somebody already in a cell, "
+            "and is spent on the first eligible failure either way.\n\n"
             "🎭 **Fake targets** — some marks are other players in disguise. "
             "Blindly attacking one gives you a chance to walk away, but "
             "failing can cost part of your cash *and* your fund position.\n\n"
@@ -3344,6 +3491,17 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                 except discord.HTTPException:
                     logger.warning("scam_targets: could not post the board")
             return
+
+        # Heat that ran its course without catching anybody is worth saying
+        # out loud: players changed their behaviour for it.
+        try:
+            cooled = await self._expire_heat()
+            if cooled:
+                channel = self.bot.get_channel(GAME_CHANNEL_ID)
+                if channel is not None:
+                    await channel.send(cooled)
+        except Exception:
+            logger.exception("scam_targets: heat expiry failed")
 
         # Nothing changed — but the board may have been buried by chatter.
         try:
@@ -3628,6 +3786,102 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
         await self.conn.commit()
         self._messages_since_board = 0
 
+    # ── target board heat ─────────────────────────────────────────────
+    # Stored as an ordinary global timed effect, so it survives a restart on
+    # its absolute expiry and needs no table of its own.  Heat is a *single*
+    # pending arrest roll with a deadline — not a debuff that keeps firing.
+
+    HEAT_ARREST_CHANCE = 0.50
+
+    async def heat(self) -> Optional[dict]:
+        return await fx.global_effect(self.conn, "board_heat")
+
+    async def _raise_heat(self, source_id: str, minutes: int,
+                          target_id: int) -> bool:
+        """Start or refresh Heat.  Returns True if it was a refresh.
+
+        Heat never stacks: a second takedown while it is already running
+        pushes the deadline out rather than creating a second roll.
+        """
+        live = await self.heat()
+        if live:
+            await self.conn.execute(
+                "UPDATE special_effects SET expires_at = ?, created_at = ?"
+                " WHERE id = ?",
+                (_iso(_now() + timedelta(minutes=minutes)), _iso(_now()),
+                 live["id"]),
+            )
+            return True
+        await fx.add_effect(
+            self.conn, "board_heat", owner_id=str(source_id), minutes=minutes,
+            source_target=target_id,
+        )
+        return False
+
+    async def _resolve_heat(self, uid: str) -> Optional[str]:
+        """The Heat roll for one failed attempt on a real mark.
+
+        Called last of all the failure effects, and only after every other
+        mechanic has had its say — a player already arrested by Utopia, the
+        informant or the mark itself neither rolls nor consumes the Heat, so
+        it stays up for whoever fails next.
+        """
+        live = await self.heat()
+        if live is None:
+            return None
+        if await get_jail(self.conn, uid) is not None:
+            return None
+        await fx.consume_effect(self.conn, live["id"])
+        if random.random() >= self.HEAT_ARREST_CHANCE:
+            return (
+                "🏃 **CLOSE CALL** — you failed while the police were "
+                "watching.\n🎲 Detection roll: **FAILED**. Somehow you got "
+                "away.\n🔥 The board's Heat has ended."
+            )
+        player = await get_player(self.conn, uid)
+        jail = await arrest_player(
+            self.conn, uid, EXTREME_FAILURE_MIN_BRIBE,
+            player["balance"] + player["invested"],
+            reason="Caught working a mark while the board was on Heat",
+        )
+        return (
+            "🔥 **THE POLICE WERE WATCHING** — you failed while the board was "
+            "on Heat.\n🎲 Detection roll: **SUCCESS**\n"
+            + ("🎫 You were arrested and immediately released."
+               if jail.get("released") else
+               f"🚔 **You have been arrested** — bribe "
+               f"{money(jail['bribe'])}, released "
+               f"<t:{int(jail['until'].timestamp())}:R>")
+            + "\n🔥 The board's Heat has ended."
+        )
+
+    async def _expire_heat(self) -> Optional[str]:
+        """Announce Heat that ran its full 30 minutes without catching anybody."""
+        async with self.conn.execute(
+            "SELECT id FROM special_effects WHERE kind = 'board_heat'"
+            " AND status = 'active' AND expires_at IS NOT NULL"
+            " AND expires_at <= ?", (_iso(_now()),),
+        ) as cur:
+            rows = [int(r[0]) async for r in cur]
+        if not rows:
+            return None
+        for effect_id in rows:
+            await self.conn.execute(
+                "UPDATE special_effects SET status = 'expired' WHERE id = ?",
+                (effect_id,),
+            )
+        await self.conn.commit()
+        return random.choice([
+            "🧊 **THE HEAT HAS DIED DOWN** — police interest in the board has "
+            "faded. Apparently they discovered other crimes.\n"
+            "✅ Failed scams no longer carry the extra arrest risk.",
+            "🌬️ **THE STREETS ARE QUIET AGAIN** — thirty minutes passed "
+            "without another Prince being caught.\n"
+            "The authorities have apparently misplaced the case file.",
+            "📻 **POLICE RADIO SILENCE** — the manhunt has been called off.\n"
+            "The Princes may return to their regularly scheduled fraud.",
+        ])
+
     async def _mark_board_activity(self) -> None:
         await self.conn.execute(
             "UPDATE scam_target_board SET last_attempt_at = ? WHERE id = 1",
@@ -3652,7 +3906,12 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
             # player in disguise.
             waiting.append("A new mark should turn up before long.")
         fog = await fx.odds_hidden(self.conn)
-        return board_embeds(targets, waiting, fog=fog), TargetBoardView(targets)
+        live_heat = await self.heat()
+        heat_until = _parse(live_heat["expires_at"]) if live_heat else None
+        return (
+            board_embeds(targets, waiting, fog=fog, heat_until=heat_until),
+            TargetBoardView(targets),
+        )
 
     async def refresh_board(self) -> None:
         """Rewrite the live board message in place.
@@ -3782,6 +4041,28 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                 self.conn, uid, want, to=owner_id, detail=t["name"],
             )
             doubled = bool(course)
+        # An escape means the attacker smelled a rat and named it publicly —
+        # the faker is exposed just as surely as by a counter-scam, so it
+        # carries the same consequence.
+        fake_jailed = ""
+        if escaped:
+            if await get_jail(self.conn, owner_id) is None:
+                caught = await arrest_player(
+                    self.conn, owner_id, FAKE_ARREST_BRIBE,
+                    await exposed_wealth(self.conn, owner_id),
+                    reason=f"Impersonating {t['name']} on the target board",
+                )
+                fake_jailed = (
+                    f"\n🚔 **They have been arrested** — bribe "
+                    f"{money(caught['bribe'])}, released "
+                    f"<t:{int(caught['until'].timestamp())}:R>"
+                    if not caught.get("released") else
+                    "\n🎫 They were arrested and immediately released, on "
+                    "presentation of a suspiciously official card."
+                )
+            else:
+                fake_jailed = "\n🚔 They were already in a cell."
+
         await self._end_fake(owner_id)
         await self._retire_target(t, "taken")
         await self.conn.commit()
@@ -3815,6 +4096,7 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                     + f"Attempt cost lost: **{money(cost)}**\n\n"
                     f"The mark was actually {owner_name} in disguise, and they "
                     f"lost their **{money(deposit)}** cover deposit."
+                    + fake_jailed
                 ),
                 colour=_EMBED_GOLD,
             )
@@ -4327,6 +4609,14 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
             before = float(t["investigation_bonus"] or 0.0)
             after = min(cap, before + base + extra)
             gained = max(0.0, after - before)
+            # Snapshot the three approach chances either side of the mission,
+            # so the report can show the actual movement rather than a
+            # percentage-point figure the player has to apply themselves.
+            odds_before = {k: approach_spec(t, k)[0]
+                           for k in ("careful", "normal", "greedy")}
+            t_after = dict(t, investigation_bonus=after)
+            odds_after = {k: approach_spec(t_after, k)[0]
+                          for k in ("careful", "normal", "greedy")}
             await self.conn.execute(
                 "UPDATE scam_targets SET investigation_bonus = ? WHERE id = ?",
                 (after, target_id),
@@ -4372,6 +4662,7 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
             t, tier, cost, report_class, reliability, claim,
             base, broke, extra, gained, after, cap,
             takedown, overall, stake, fresh,
+            odds_before, odds_after,
         )
         view = None
         if claim == "fake":
@@ -4542,6 +4833,30 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                 )
             # a false accusation simply destroys the stake
 
+            # Being taken down *is* being exposed: the disguise is destroyed
+            # and the room is told exactly who was behind it.  Losing the
+            # deposit was the only consequence; the cell is the rest of it.
+            fake_jailed = ""
+            if outcome == "win" and owner_id:
+                if await get_jail(self.conn, owner_id) is None:
+                    caught = await arrest_player(
+                        self.conn, owner_id, FAKE_ARREST_BRIBE,
+                        await exposed_wealth(self.conn, owner_id),
+                        reason=f"Impersonating {t['name']} on the target board",
+                    )
+                    fake_jailed = (
+                        f"\n🚔 **<@{owner_id}> has been arrested** — bribe "
+                        f"{money(caught['bribe'])}, released "
+                        f"<t:{int(caught['until'].timestamp())}:R>"
+                        if not caught.get("released") else
+                        f"\n🎫 <@{owner_id}> was arrested and immediately "
+                        "released, on presentation of a suspiciously official "
+                        "card."
+                    )
+                else:
+                    fake_jailed = (f"\n🚔 <@{owner_id}> was already in a cell "
+                                   "when the raid arrived.")
+
             if really_fake:
                 await self._end_fake(owner_id)
                 await self._retire_target(t, "taken")
@@ -4562,12 +4877,12 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
         await self.refresh_board()
         await self._announce_counter(
             interaction, t, tier, outcome, report_class,
-            overall, stake, deposit, moved, owner_id,
+            overall, stake, deposit, moved, owner_id, fake_jailed,
         )
 
     async def _announce_counter(
         self, interaction, t, tier, outcome, report_class,
-        overall, stake, deposit, moved, owner_id,
+        overall, stake, deposit, moved, owner_id, fake_jailed: str = "",
     ) -> None:
         who = interaction.user.mention
         faker = f"<@{owner_id}>" if owner_id else "somebody"
@@ -4583,7 +4898,7 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                     f"Cover deposit seized: **{money(deposit)}**\n"
                     f"Additional wealth seized: **{money(moved)}**\n\n"
                     f"💰 **Total reward: {money(deposit + moved)}**\n\n"
-                    "The disguise has been destroyed."
+                    "The disguise has been destroyed." + fake_jailed
                 ),
                 colour=_EMBED_GOLD,
             )
@@ -4920,6 +5235,39 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                         f"🔎 **Intel fully recharged — {INTEL_MAX_CHARGES}/"
                         f"{INTEL_MAX_CHARGES}**"
                     )
+                if arch and arch["reset_cooldowns"]:
+                    # Player-owned action cooldowns only.  Jail, bribes,
+                    # punishments and every shared timer (the quick scam
+                    # window, the board's own clocks, Roger, the fund) are
+                    # deliberately untouched: mod powers, not time travel.
+                    await self.conn.execute(
+                        "UPDATE scam_players SET last_scam_at = NULL,"
+                        " last_quickscam_at = NULL, last_beg_at = NULL,"
+                        " last_target_at = NULL, fake_target_until = NULL,"
+                        " target_lock_until = NULL,"
+                        " special_cooldown_until = NULL"
+                        " WHERE discord_user_id = ?", (uid,),
+                    )
+                    extras.append(
+                        "⚡ **ALL personal cooldowns reset** — `/scam`, "
+                        "`/quickscam`, `/beg`, `/special`, the board and your "
+                        "disguise are all ready right now.\n"
+                        "_Jail, bribes and shared timers are untouched._"
+                    )
+                if arch and arch["board_heat_minutes"]:
+                    refreshed = await self._raise_heat(
+                        uid, arch["board_heat_minutes"], t["id"]
+                    )
+                    extras.append(
+                        ("🚨 **THE HEAT INTENSIFIES** — police attention was "
+                         "already high. It is now extremely personal.\n"
+                         if refreshed else
+                         "🔥 **THE TARGET BOARD IS NOW ON HEAT**\n")
+                        + f"For **{arch['board_heat_minutes']} minutes**, the "
+                        "next player to fail against a real mark carries a "
+                        "**50%** chance of arrest.\n"
+                        "🎭 Fake targets are unaffected. Heat does not stack."
+                    )
                 if arch and arch["silence_minutes"]:
                     until = _now() + timedelta(minutes=arch["silence_minutes"])
                     await self.conn.execute(
@@ -5034,6 +5382,7 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                             self.conn, uid,
                             max(EXTREME_FAILURE_MIN_BRIBE, t["attempt_cost"]),
                             wealth,
+                            reason=f"A failed attempt on {t['name']}",
                         )
                         extras.append(
                             "🚔 **YOU HAVE BEEN ARRESTED** — bribe "
@@ -5054,6 +5403,8 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                     jail = await arrest_player(
                         self.conn, uid, EXTREME_FAILURE_MIN_BRIBE,
                         fresh["balance"] + fresh["invested"],
+                        reason=f"Reported to the police after failing on "
+                               f"{t['name']}",
                     )
                     special_lines.append(
                         f"🚔 **POLICE INFORMANT** — the authorities were "
@@ -5063,6 +5414,13 @@ class ScamTargetsCog(commands.Cog, name="scam_targets"):
                         + ("\n🎫 You walked straight back out."
                            if jail.get("released") else "")
                     )
+
+                # Heat is deliberately dead last (spec §4.7): it only rolls
+                # for a player who is still free after everything above, and
+                # a player who is already inside neither rolls nor burns it.
+                heat_line = await self._resolve_heat(uid)
+                if heat_line:
+                    special_lines.append(heat_line)
 
                 # Most marks bank exactly what was lost on them. Gerard banks
                 # more, which is the whole reason anyone endures Gerard.

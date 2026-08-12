@@ -5,7 +5,7 @@ Shape of the thing
 ``/special`` shows one Budget, one Premium and one Platinum card.  The three
 are generated once and *persisted*: reopening the menu shows the same three
 until one is activated, so there is no reroll fishing.  Activating pays the
-cost, runs the card and starts a two-hour cooldown; merely looking costs
+cost, runs the card and starts a one-hour cooldown; merely looking costs
 nothing.
 
 Everything a card can do lives in a resolver registered in ``RESOLVERS``.  A
@@ -49,6 +49,7 @@ from nigeria_bot.special_effects import (
 from nigeria_bot.scam_game import (
     GAME_CHANNEL_ID,
     GAME_CHANNEL_URL,
+    button_emoji,
     _EMBED_GOLD,
     _EMBED_GREEN,
     _EMBED_GREY,
@@ -478,7 +479,9 @@ def _weighted_pick(table: list[tuple[int, float]]) -> int:
 SPECIAL_ARREST_BRIBE = 500
 
 
-async def jail_player(conn, user_id: str, *, bribe: int = SPECIAL_ARREST_BRIBE) -> str:
+async def jail_player(conn, user_id: str, *,
+                      bribe: int = SPECIAL_ARREST_BRIBE,
+                      reason: str = "Named in a Special operation") -> str:
     """Arrest through the normal pipeline and describe what happened.
 
     Get Out of Jail Free is spent inside ``arrest_player`` itself, so every
@@ -487,7 +490,7 @@ async def jail_player(conn, user_id: str, *, bribe: int = SPECIAL_ARREST_BRIBE) 
     gone and report a release that had in fact happened.
     """
     wealth = await total_wealth(conn, user_id)
-    jail = await arrest_player(conn, user_id, bribe, wealth)
+    jail = await arrest_player(conn, user_id, bribe, wealth, reason=reason)
     if jail.get("released"):
         return (f"🎫 <@{user_id}> was arrested, presented a suspiciously "
                 "official card and walked straight back out.")
@@ -1392,7 +1395,8 @@ async def _fog(ctx: Ctx) -> Result:
 @resolver("special_snitch")
 async def _snitch(ctx: Ctx) -> Result:
     victim = ctx.choice
-    line = await jail_player(ctx.conn, victim)
+    line = await jail_player(ctx.conn, victim,
+                             reason="An anonymous tip-off")
     return Result(
         title="🐀 SNITCH",
         public=(f"{line}\n\nAuthorities have confirmed the anonymous source "
@@ -1406,7 +1410,9 @@ async def _snitch(ctx: Ctx) -> Result:
 async def _mass_arrest(ctx: Ctx) -> Result:
     pool = await free_actives(ctx.conn, sc.ACTIVE_WINDOW_HOURS, exclude=ctx.actor)
     victims = random.sample(pool, min(3, len(pool)))
-    lines = [await jail_player(ctx.conn, uid) for uid in victims]
+    lines = [await jail_player(ctx.conn, uid,
+                               reason="Swept up in a mass arrest")
+             for uid in victims]
     return Result(
         title="🚔 MASS ARREST",
         public=("Nigeria has completed a highly targeted operation against "
@@ -1432,7 +1438,10 @@ async def _panama(ctx: Ctx) -> Result:
                     "money worth hiding.\n\nRoger is relieved."),
             colour=_EMBED_GREY,
         )
-    lines = [await jail_player(ctx.conn, uid) for uid in named]
+    lines = [await jail_player(ctx.conn, uid,
+                               reason="Named in the Panama Papers, "
+                                      "holding over 10.000 in cash")
+             for uid in named]
     return Result(
         title="🧳 THE PANAMA PAPERS",
         public=("A confidential collection of Nigerian financial documents has "
@@ -1613,7 +1622,10 @@ async def _clean_board(ctx: Ctx) -> Result:
         await cog._retire_target(t, "raided")
     await give_cash(ctx.conn, ctx.actor, deposits, reason="special_gain",
                     detail="Seized cover deposits")
-    arrests = [await jail_player(ctx.conn, o) for o in owners]
+    arrests = [await jail_player(ctx.conn, o,
+                                 reason="Running a fake target during a "
+                                        "board raid")
+               for o in owners]
     return Result(
         title="🧹 OPERATION CLEAN BOARD",
         public=("Nigerian authorities conducted a coordinated raid on the "
@@ -1890,18 +1902,30 @@ async def _bait_click(cog, conn, event: dict, uid: str) -> Optional[str]:
 
     elif kind == "dropped_wallet":
         if random.random() < 0.25:
-            line = await jail_player(conn, uid)
+            line = await jail_player(
+                conn, uid,
+                reason="Picking up a wallet that turned out to be "
+                       "police evidence",
+            )
             body = ("🚔 **POLICE STING**\n"
                     f"{cog.who(uid)} picked up the wallet.\n"
                     f"Unfortunately, the wallet was evidence.\n{line}")
         else:
-            await join_event(conn, event["id"], uid, 500)
+            # The choice needs an event row of its own.  Hanging it off this
+            # one does not work: claiming the wallet already moved this row to
+            # 'claimed', and every later click is refused as closed — which is
+            # exactly what happened, twice, while nobody was paid.
+            choice_id = await cog.open_event(
+                conn, "wallet_choice", event["actor"],
+                minutes=sc.PUBLIC_EVENT_MINUTES, finder=uid,
+            )
+            await close_event(conn, event["id"])
             await conn.commit()
             await cog.post(
                 f"👛 **WALLET FOUND**\n{cog.who(uid)} found **{money(500)}**.\n"
                 "_They have three minutes to decide whether anybody needs to "
-                "know._",
-                view=event_view(event["id"], "wallet_choice"),
+                "know. Saying nothing counts as keeping it._",
+                view=event_view(choice_id, "wallet_choice"),
             )
             return None      # resolved by the follow-up choice
     else:
@@ -1948,18 +1972,10 @@ del _kind, _label, _style
 
 # ── Public event: the wallet's keep-or-return choice ──────────────────────────
 
-async def _wallet_choice_click(cog, conn, event: dict, uid: str) -> Optional[str]:
-    finder = [u for u, _a in await entries_of(conn, event["id"])]
-    if not finder or uid != finder[0]:
-        return "❌ That is not your wallet to decide about."
-    return None      # the action is read by handle_event_click
-
-
 async def _wallet_settle(cog, conn, event: dict, keep: bool) -> None:
-    entries = await entries_of(conn, event["id"])
-    if not entries or event["status"] != "open":
+    finder = str(event["payload"].get("finder") or "")
+    if not finder or event["status"] != "open":
         return
-    finder = entries[0][0]
     actor = event["actor"]
     await close_event(conn, event["id"])
     if keep:
@@ -1988,7 +2004,7 @@ async def _wallet_expire(cog, conn, event: dict) -> None:
 event_handler(
     "wallet_choice",
     buttons=[("keep", "💰 KEEP IT", "green"), ("give", "🤝 RETURN IT", "grey")],
-    on_click=_wallet_choice_click, on_expire=_wallet_expire,
+    on_click=None, on_expire=_wallet_expire,
 )
 
 
@@ -2139,6 +2155,49 @@ async def _duel_pay(cog, conn, winner: str, loser: str, *, wager: int = 0,
     return f"🏆 {cog.who(winner)} takes the **{money(wager * 2)}** pot."
 
 
+def duel_players(event: dict) -> tuple[str, str]:
+    """(challenger, opponent) for either kind of duel."""
+    payload = event["payload"]
+    return event["actor"], str(payload.get("victim") or payload.get("opponent"))
+
+
+async def duel_moves(conn, event_id: int) -> dict[str, str]:
+    """Whose weapon is already in.  Absent means still deciding."""
+    async with conn.execute(
+        "SELECT user_id, payload FROM special_event_entries WHERE event_id = ?",
+        (event_id,),
+    ) as cur:
+        return {str(r[0]): json.loads(r[1] or "{}").get("move")
+                async for r in cur}
+
+
+async def _duel_move(cog, conn, event: dict, uid: str,
+                     move: str) -> Optional[str]:
+    """Record one player's weapon, and resolve once both are in.
+
+    Both duellists choose for themselves — including the one who started it.
+    Picking their weapon for them and then announcing they had "already
+    chosen" was both a lie and half the decision missing.
+    """
+    challenger, opponent = duel_players(event)
+    if uid not in (challenger, opponent):
+        return "❌ You are not in this duel. Spectating is free."
+    if not await join_event(conn, event["id"], uid, 0, move=move):
+        return "❌ You have already chosen your weapon. No takebacks."
+    await conn.commit()
+
+    moves = await duel_moves(conn, event["id"])
+    if moves.get(challenger) and moves.get(opponent):
+        await _resolve_duel(cog, conn, event,
+                            moves[challenger], opponent, moves[opponent])
+        return None
+    waiting = opponent if uid == challenger else challenger
+    emoji, name = sc.DUEL_MOVES[move]
+    await cog.post(f"⚔️ {cog.who(uid)} has chosen their weapon. Waiting on "
+                   f"{cog.who(waiting)}.")
+    return f"{emoji} You chose **{name}**. It stays secret until both are in."
+
+
 async def _resolve_duel(cog, conn, event: dict, actor_move: str,
                         other: str, other_move: str) -> None:
     actor = event["actor"]
@@ -2166,20 +2225,23 @@ async def _resolve_duel(cog, conn, event: dict, actor_move: str,
     await cog.post(head + f"\n🏆 {cog.who(winner)} wins.\n" + line)
 
 
-async def _forced_duel_click(cog, conn, event: dict, uid: str) -> Optional[str]:
-    if uid != event["payload"].get("victim"):
-        return "❌ You were not the one challenged."
-    return None      # move is read from the action in handle_event_click
+async def _duel_expire(cog, conn, event: dict) -> None:
+    """Anyone who did not choose gets a weapon chosen for them.
 
-
-async def _forced_duel_expire(cog, conn, event: dict) -> None:
-    # No answer is a random answer, so refusing to click is not a defence.
-    victim = event["payload"]["victim"]
-    move = random.choice(list(sc.DUEL_MOVES))
-    await cog.post(f"⌛ {cog.who(victim)} did not respond. A weapon has been "
-                   "chosen on their behalf.")
-    await _resolve_duel(cog, conn, event, event["payload"]["actor_move"],
-                        victim, move)
+    Applies to the challenger as well: starting a duel and then refusing to
+    pick is not a way to avoid one.
+    """
+    challenger, opponent = duel_players(event)
+    moves = await duel_moves(conn, event["id"])
+    silent = [u for u in (challenger, opponent) if not moves.get(u)]
+    for uid in silent:
+        moves[uid] = random.choice(list(sc.DUEL_MOVES))
+    if silent:
+        names = " and ".join(cog.who(u) for u in silent)
+        await cog.post(f"⌛ {names} did not respond. A weapon has been chosen "
+                       "on their behalf.")
+    await _resolve_duel(cog, conn, event, moves[challenger], opponent,
+                        moves[opponent])
 
 
 async def _open_duel_click(cog, conn, event: dict, uid: str) -> Optional[str]:
@@ -2211,11 +2273,11 @@ async def _open_duel_expire(cog, conn, event: dict) -> None:
 
 _MOVE_BUTTONS = [(k, f"{e} {n}", "blue") for k, (e, n) in sc.DUEL_MOVES.items()]
 event_handler("forced_duel", buttons=_MOVE_BUTTONS,
-              on_click=_forced_duel_click, on_expire=_forced_duel_expire)
+              on_click=None, on_expire=_duel_expire)
 event_handler("open_duel", buttons=[("accept", "🤺 ACCEPT CHALLENGE", "red")],
               on_click=_open_duel_click, on_expire=_open_duel_expire)
 event_handler("open_duel_move", buttons=_MOVE_BUTTONS,
-              on_click=None, on_expire=None)
+              on_click=None, on_expire=_duel_expire)
 
 
 # ── Public event: special operations ──────────────────────────────────────────
@@ -2332,7 +2394,8 @@ async def _operation_expire(cog, conn, event: dict) -> None:
             lines.append(f"💸 {cog.who(uid)}: stake lost")
     if arrest:
         for uid, _staked in entries:
-            lines.append(await jail_player(conn, uid))
+            lines.append(await jail_player(
+                conn, uid, reason=f"Taking part in {spec['title']}"))
     await conn.commit()
     await cog.post("\n".join(lines))
 
@@ -2487,22 +2550,23 @@ del _op_card, _op_kind, _spec
 @resolver("special_forced_scam_duel")
 async def _forced_duel(ctx: Ctx) -> Result:
     victim = ctx.choice
-    actor_move = random.choice(list(sc.DUEL_MOVES))
     event_id = await ctx.cog.open_event(
         ctx.conn, "forced_duel", ctx.actor, minutes=sc.DUEL_RESPONSE_MINUTES,
-        victim=victim, actor_move=actor_move,
+        victim=victim,
     )
     return Result(
         title="⚔️ FORCED SCAM DUEL",
         public=(f"{ctx.who(ctx.actor)} has challenged {ctx.who(victim)}.\n\n"
-                "Choose your weapon:\n"
                 "🧾 **Paperwork** beats 💻 **Phishing** beats 👑 **Prince** "
                 "beats 🧾 **Paperwork**\n\n"
-                f"{ctx.who(victim)} has **5 minutes**. No response means a "
-                "weapon is chosen for them.\n\n"
+                f"**Both** {ctx.who(ctx.actor)} and {ctx.who(victim)} choose a "
+                "weapon from the buttons below. Choices stay secret until both "
+                "are in.\n\n"
+                "**5 minutes.** Anyone who does not choose has a weapon chosen "
+                "for them — including the challenger.\n\n"
                 "The winner takes **25%** of the loser's wealth, up to 5.000. "
-                f"{ctx.who(ctx.actor)} has already chosen and is just as "
-                "exposed."),
+                f"{ctx.who(ctx.actor)} is just as exposed as "
+                f"{ctx.who(victim)}."),
         view=event_view(event_id, "forced_duel"), store_message=True,
     )
 
@@ -2512,10 +2576,9 @@ async def _open_duel(ctx: Ctx) -> Result:
     wager = ctx.amount or 1_000
     await adjust_balance(ctx.conn, ctx.actor, -wager, "special_stake",
                          "Open Duel wager")
-    actor_move = random.choice(list(sc.DUEL_MOVES))
     event_id = await ctx.cog.open_event(
         ctx.conn, "open_duel", ctx.actor, minutes=sc.DUEL_RESPONSE_MINUTES,
-        wager=wager, actor_move=actor_move,
+        wager=wager,
     )
     return Result(
         title="🤺 OPEN SCAM DUEL",
@@ -2551,7 +2614,7 @@ async def _muggers(ctx: Ctx) -> Result:
 
 # ── Choosing a target / an amount ─────────────────────────────────────────────
 # Options are built when the player opens the card, never at offer-generation
-# time (spec §2.6): a list of victims chosen two hours ago would be a list of
+# time (spec §2.6): a list of victims chosen an hour ago would be a list of
 # people who have since gone to bed.
 
 async def _pick_fund(ctx: Ctx, minimum: int) -> list[tuple[str, str]]:
@@ -2647,9 +2710,18 @@ class SpecialView(discord.ui.View):
         return True
 
     def _choose(self, tier: str, card: dict) -> discord.ui.Button:
+        # The emoji is filtered rather than trusted: Discord rejects a
+        # component whose emoji is not a real Unicode emoji and answers with a
+        # 400 that aborts the whole command.  A symbol that does not qualify
+        # (☭ is a glyph, not an emoji) still renders perfectly well as text,
+        # so it moves into the label rather than being lost.
+        icon = button_emoji(card["emoji"])
+        name = f"{sc.TIER_LABEL[tier].split()[1].title()}: {card['name']}"
+        if icon is None and card["emoji"]:
+            name = f"{card['emoji']} {name}"
         button = discord.ui.Button(
-            label=f"{sc.TIER_LABEL[tier].split()[1].title()}: {card['name']}"[:80],
-            emoji=card["emoji"],
+            label=name[:80],
+            emoji=icon,
             style=discord.ButtonStyle.primary,
         )
 
@@ -2827,38 +2899,30 @@ class SpecialCog(commands.Cog, name="special_game"):
 
             await touch(self.conn, uid)
 
-            # Duels resolve straight off the button that was pressed.
-            if event["kind"] == "forced_duel" and action in sc.DUEL_MOVES:
-                if uid != event["payload"].get("victim"):
-                    await _reply(interaction,
-                                 content="❌ You were not the one challenged.",
-                                 ephemeral=True)
-                    return
-                await _resolve_duel(self, self.conn, event,
-                                    event["payload"]["actor_move"], uid, action)
-                await _reply(interaction, content="Weapon chosen.",
-                             ephemeral=True)
-                return
-            if event["kind"] == "open_duel_move" and action in sc.DUEL_MOVES:
-                if uid != event["payload"].get("opponent"):
-                    await _reply(interaction, content="❌ Not your duel.",
-                                 ephemeral=True)
-                    return
-                await _resolve_duel(self, self.conn, event,
-                                    event["payload"]["actor_move"], uid, action)
-                await _reply(interaction, content="Weapon chosen.",
-                             ephemeral=True)
+            # Both duellists pick from the same public row of buttons.
+            if (event["kind"] in ("forced_duel", "open_duel_move")
+                    and action in sc.DUEL_MOVES):
+                note = await _duel_move(self, self.conn, event, uid, action)
+                await _reply(
+                    interaction,
+                    content=note or "⚔️ Both weapons are in. Resolving.",
+                    ephemeral=True,
+                )
                 return
             if event["kind"] == "wallet_choice":
-                entries = await entries_of(self.conn, event_id)
-                if not entries or uid != entries[0][0]:
+                if uid != str(event["payload"].get("finder")):
                     await _reply(interaction,
-                                 content="❌ That is not your wallet.",
-                                 ephemeral=True)
+                                 content="❌ You are not the one holding the "
+                                         "wallet.", ephemeral=True)
                     return
-                await _wallet_settle(self, self.conn, event, keep=action == "keep")
-                await _reply(interaction, content="Decision made.",
-                             ephemeral=True)
+                await _wallet_settle(self, self.conn, event,
+                                     keep=action == "keep")
+                await _reply(
+                    interaction,
+                    content=("💰 Kept." if action == "keep" else
+                             "🤝 Returned. Half of it came back."),
+                    ephemeral=True,
+                )
                 return
 
             handler = EVENT_HANDLERS.get(event["kind"], {}).get("on_click")
@@ -2892,15 +2956,17 @@ class SpecialCog(commands.Cog, name="special_game"):
         await self.conn.commit()
         await self.post(
             f"🤺 {self.who(opponent)} accepted {self.who(event['actor'])}'s "
-            f"**{money(int(payload['wager']))}** duel.\n"
-            f"{self.who(opponent)}, choose your weapon — 5 minutes.",
+            f"**{money(int(payload['wager']))}** duel.\n\n"
+            f"**Both** {self.who(event['actor'])} and {self.who(opponent)} now "
+            "choose a weapon — **5 minutes**. Anyone who does not choose gets "
+            "one chosen for them.",
             view=event_view(move_id, "open_duel_move"),
         )
 
     # ── /special ──────────────────────────────────────────────────────
     @app_commands.command(
         name="special",
-        description="Three one-off opportunities. One choice. Two-hour cooldown.",
+        description="Three one-off opportunities. One choice. One-hour cooldown.",
     )
     async def special(self, interaction: discord.Interaction) -> None:
         if not await _require_channel(interaction, GAME_CHANNEL_ID,
@@ -2923,7 +2989,7 @@ class SpecialCog(commands.Cog, name="special_game"):
                                 "Your contacts need time to arrange the next "
                                 "round of opportunities.\n\n"
                                 f"**Ready:** <t:{int(when.timestamp())}:R>\n\n"
-                                "_A Special every 2 hours. Roger occasionally "
+                                "_A Special every hour. Roger occasionally "
                                 "resets it for people who ask nicely._"
                             ),
                             colour=_EMBED_GREY,
@@ -2946,7 +3012,7 @@ class SpecialCog(commands.Cog, name="special_game"):
         await _reply(
             interaction,
             content=("**Pick one.** The other two are gone the moment you do, "
-                     "and the two-hour clock starts on activation — not on "
+                     "and the one-hour clock starts on activation — not on "
                      "looking."),
             embeds=embeds,
             view=SpecialView(self, uid, offer),

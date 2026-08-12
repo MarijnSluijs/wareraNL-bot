@@ -69,6 +69,16 @@ class NigeriaBot(commands.Bot):
         import nigeria_bot.damage_projection as damage_projection
         await damage_projection.setup(self)
 
+        # /productie — same company_census data as /fabrieken, grouped by item
+        # for a country, alliance, or the whole game.
+        import nigeria_bot.productie as productie
+        await productie.setup(self)
+
+        # /oliegebruik — live API calls (bunker status isn't in the hourly
+        # sweep), scoped to Nigeria-controlled regions.
+        import nigeria_bot.oliegebruik as oliegebruik
+        await oliegebruik.setup(self)
+
         # Register persistent views so buttons survive restarts
         from nigeria_bot.cog import VerificationView, TicketActionView
         self.add_view(VerificationView())

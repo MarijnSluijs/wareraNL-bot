@@ -58,7 +58,7 @@ RARITY_BUCKETS = {
 
 # ── Durations (spec §6), in minutes unless named otherwise ────────────────────
 
-SPECIAL_COOLDOWN_HOURS   = 2
+SPECIAL_COOLDOWN_HOURS   = 1
 PUBLIC_EVENT_MINUTES     = 3     # clickable bait / micro-event signup
 TIP_JAR_MINUTES          = 2     # Royal Tip Jar overrides the default
 DUEL_RESPONSE_MINUTES    = 5     # direct challenge response
@@ -688,7 +688,7 @@ ROGER_QUOTES = {
         "If an opportunity was worth taking once, regulations probably allow you to take it twice.",
         "Diversification means committing two unrelated scams before lunch.",
         "The market rewards speed. Especially before anyone notices.",
-        "The best time to use a Special was two hours ago. The second-best time is immediately.",
+        "The best time to use a Special was an hour ago. The second-best time is immediately.",
     ],
     "fake": [
         "Reputation is temporary. A new moustache is forever.",

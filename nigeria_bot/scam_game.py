@@ -253,6 +253,9 @@ async def setup_schema(conn: aiosqlite.Connection) -> None:
         "jailed_at TEXT",
         "bribe_remaining INTEGER NOT NULL DEFAULT 0",
         "jail_sentence TEXT",
+        # Why they are inside.  The sentence is a joke; this is the fact, and
+        # a cell with no stated charge is just confusing.
+        "jail_reason TEXT",
         "times_jailed INTEGER NOT NULL DEFAULT 0",
         "last_quickscam_at TEXT",
         "scam_help_seen INTEGER NOT NULL DEFAULT 0",
@@ -635,8 +638,8 @@ async def get_jail(conn: aiosqlite.Connection, user_id: str) -> Optional[dict]:
     the release announcement timely.
     """
     async with conn.execute(
-        "SELECT jail_until, jailed_at, bribe_remaining, jail_sentence"
-        " FROM scam_players WHERE discord_user_id = ?",
+        "SELECT jail_until, jailed_at, bribe_remaining, jail_sentence,"
+        " jail_reason FROM scam_players WHERE discord_user_id = ?",
         (user_id,),
     ) as cur:
         row = await cur.fetchone()
@@ -651,6 +654,9 @@ async def get_jail(conn: aiosqlite.Connection, user_id: str) -> Optional[dict]:
         "jailed_at": row[1],
         "bribe": int(row[2] or 0),
         "sentence": row[3] or "17 years",
+        # Older rows predate the column; they simply say nothing rather than
+        # inventing a charge.
+        "reason": row[4] or "Unspecified financial irregularities",
     }
 
 
@@ -666,7 +672,8 @@ def is_indigent(wealth: int, bribe: int) -> bool:
 
 
 async def arrest_player(
-    conn: aiosqlite.Connection, user_id: str, bribe: int, wealth: int
+    conn: aiosqlite.Connection, user_id: str, bribe: int, wealth: int,
+    *, reason: str = "Unspecified financial irregularities",
 ) -> dict:
     """Jail a player with an outstanding bribe. Returns the jail record.
 
@@ -683,9 +690,9 @@ async def arrest_player(
     sentence = random.choice(_SENTENCES)
     await conn.execute(
         "UPDATE scam_players SET jail_until = ?, jailed_at = ?,"
-        " bribe_remaining = ?, jail_sentence = ?,"
+        " bribe_remaining = ?, jail_sentence = ?, jail_reason = ?,"
         " times_jailed = times_jailed + 1 WHERE discord_user_id = ?",
-        (_iso(until), _iso(_now()), bribe, sentence, user_id),
+        (_iso(until), _iso(_now()), bribe, sentence, reason, user_id),
     )
     await conn.commit()
 
@@ -696,7 +703,8 @@ async def arrest_player(
     except Exception:
         logger.exception("arrest: could not check for a jail card")
     return {"until": until, "bribe": bribe, "sentence": sentence,
-            "minutes": minutes, "indigent": indigent, "released": released}
+            "reason": reason, "minutes": minutes, "indigent": indigent,
+            "released": released}
 
 
 JAIL_CARD_LINE = (
@@ -714,7 +722,8 @@ async def release_player(conn: aiosqlite.Connection, user_id: str) -> None:
     """Free a player and clear any outstanding bribe."""
     await conn.execute(
         "UPDATE scam_players SET jail_until = NULL, jailed_at = NULL,"
-        " bribe_remaining = 0, jail_sentence = NULL WHERE discord_user_id = ?",
+        " bribe_remaining = 0, jail_sentence = NULL, jail_reason = NULL"
+        " WHERE discord_user_id = ?",
         (user_id,),
     )
     await conn.commit()
@@ -726,6 +735,7 @@ async def jail_block_embed(jail: dict, action: str) -> discord.Embed:
         title="🚔 You are in a cell",
         description=(
             f"You cannot {action} from custody.\n\n"
+            f"**Charge:** {jail['reason']}\n"
             f"**Outstanding bribe:** {money(jail['bribe'])}\n"
             f"**Sentence:** {jail['sentence']}\n"
             f"**Released** <t:{int(jail['until'].timestamp())}:R>\n\n"
@@ -1020,6 +1030,43 @@ async def _require_channel(
 
 # ── Answering an interaction ──────────────────────────────────────────────────
 
+# Codepoints Unicode grants *default emoji presentation* in the BMP.  Every
+# other BMP glyph needs U+FE0F to count as an emoji, and some — ☭ among them —
+# are not emoji at all however they render in your font.
+_DEFAULT_EMOJI_BMP = frozenset(
+    list(range(0x231A, 0x231C)) + list(range(0x23E9, 0x23ED)) + [0x23F0, 0x23F3]
+    + list(range(0x25FD, 0x25FF)) + [0x2614, 0x2615]
+    + list(range(0x2648, 0x2654)) + [0x267F, 0x2693, 0x26A1]
+    + [0x26AA, 0x26AB, 0x26BD, 0x26BE, 0x26C4, 0x26C5, 0x26CE, 0x26D4]
+    + [0x26EA, 0x26F2, 0x26F3, 0x26F5, 0x26FA, 0x26FD, 0x2705]
+    + [0x270A, 0x270B, 0x2728, 0x274C, 0x274E]
+    + list(range(0x2753, 0x2756)) + [0x2757]
+    + list(range(0x2795, 0x2798)) + [0x27B0, 0x27BF]
+    + [0x2B1B, 0x2B1C, 0x2B50, 0x2B55]
+)
+
+
+def button_emoji(glyph: Optional[str]) -> Optional[str]:
+    """The glyph if Discord will accept it on a button, otherwise None.
+
+    Discord validates the *emoji* field of a component and answers a bad one
+    with a 400 that aborts the whole interaction — one unlucky card took
+    `/special` down entirely with "the application did not respond".  A
+    decorative symbol is not worth losing a command over, so anything that is
+    not a real emoji is simply dropped; the label still carries the name.
+    """
+    if not glyph:
+        return None
+    first = ord(glyph[0])
+    if first >= 0x1F000 or 0x1F1E6 <= first <= 0x1F1FF:
+        return glyph                      # astral emoji, ZWJ sequence or flag
+    if "\ufe0f" in glyph:
+        return glyph                      # explicitly emoji-presented
+    if first in _DEFAULT_EMOJI_BMP:
+        return glyph
+    return None
+
+
 async def _ack(interaction: discord.Interaction) -> bool:
     """Acknowledge a click *immediately*, before doing any work.
 
@@ -1055,7 +1102,15 @@ async def _reply(interaction: discord.Interaction, **kwargs) -> None:
 
     After :func:`_ack` the response slot is spent, so everything must go out as
     a followup.  Callers should not have to know which of the two they are in.
+
+    ``view=None`` is dropped rather than forwarded: discord.py treats *absent*
+    and *None* differently on a followup and raises TypeError on the latter,
+    which silently swallowed the whole reply.  Callers naturally write
+    ``view=view`` with a view that is sometimes None, so this is handled once
+    here instead of at every call site.
     """
+    kwargs = {k: v for k, v in kwargs.items()
+              if v is not None or k not in ("view", "embed", "embeds", "content")}
     try:
         if interaction.response.is_done():
             await interaction.followup.send(**kwargs)
@@ -1563,7 +1618,9 @@ class ScamGameCog(commands.Cog, name="scam_game"):
                         # Rich on paper, broke in hand — that is exactly the
                         # dodge this is here to catch.
                         arrest_info = await arrest_player(
-                            self.conn, uid, shortfall, wealth
+                            self.conn, uid, shortfall, wealth,
+                            reason="A scam went wrong and the bribe went "
+                                   "unpaid",
                         )
                 # A bad /scam is the textbook covered loss: involuntary, and
                 # inflicted by the world rather than by another player.
@@ -1655,6 +1712,7 @@ class ScamGameCog(commands.Cog, name="scam_game"):
                     "Your latest business venture has attracted unwanted "
                     "attention from the authorities. You could not settle up in "
                     "cash, so they have taken an interest in you personally.\n\n"
+                    f"📋 **Charge:** {arrest_info['reason']}\n"
                     f"💰 **Required bribe:** {money(arrest_info['bribe'])}\n"
                     f"💵 **Cash available:** {money(fresh['balance'])}\n"
                     f"📈 **Investment fund:** {money(fresh['invested'])}\n\n"
@@ -2130,6 +2188,24 @@ class ScamGameCog(commands.Cog, name="scam_game"):
         ) as cur:
             jrow = await cur.fetchone() or (0, 0, 0, 0, 0)
         jailed, bribes, given, received, appeals = (int(x or 0) for x in jrow)
+
+        # Current whereabouts come before the career statistics: somebody
+        # sitting in a cell wants to know what for and how to get out, not how
+        # many times it has happened before.
+        cell = await get_jail(self.conn, str(target.id))
+        if cell:
+            embed.add_field(
+                name="🚔 CURRENTLY IN CUSTODY",
+                value=(
+                    f"📋 **Charge:** {cell['reason']}\n"
+                    f"💰 **Outstanding bribe:** {money(cell['bribe'])}\n"
+                    f"🚔 **Sentence:** {cell['sentence']}\n"
+                    f"**Released** <t:{int(cell['until'].timestamp())}:R>\n\n"
+                    "`/paybribe` · `/bail` · `/appeal`"
+                ),
+                inline=False,
+            )
+
         if jailed or given or received:
             bits = [f"Times arrested: **{jailed}**"]
             if bribes:
@@ -2930,7 +3006,10 @@ class ScamGameCog(commands.Cog, name="scam_game"):
             player = await get_player(self.conn, user_id)
             wealth = player["balance"] + player["invested"]
             bribe = max(EXTREME_FAILURE_MIN_BRIBE, staked)
-            jail = await arrest_player(self.conn, user_id, bribe, wealth)
+            jail = await arrest_player(
+                self.conn, user_id, bribe, wealth,
+                reason=f"Taking part in {tpl['name']}",
+            )
             out.append((user_id, jail))
         return out
 
@@ -3151,7 +3230,9 @@ def scamhelp_embed() -> discord.Embed:
             "get arrested.\n\n"
             "💸 **/scam** — your personal scam. Your odds recover over time.\n"
             "🤝 **/quickscam** — start a shared scam operation.\n"
-            "💰 **/joinquickscam** — buy into the running Quick Scam.\n\n"
+            "💰 **/joinquickscam** — buy into the running Quick Scam.\n"
+            "🎴 **/special** — three one-off opportunities, one choice, every "
+            "hour. This is where the chaos comes from.\n\n"
             "🎯 **/targets** — open the shared Target Board.\n"
             "🔎 **Intel** — the button on a target: improves its public odds "
             "and privately checks whether it may be another player.\n"
@@ -3172,6 +3253,9 @@ def scamhelp_embed() -> discord.Embed:
             "⚖️ **/appeal** — plead your case and let the room vote.\n\n"
             "🏗️ **/prestigestatus** — Nigeria's future Prestige Project.\n"
             "🏗️ **/prestigeinvest** — permanently contribute toward it.\n\n"
+            "🧓 **Roger's advice** — every half hour or so Roger offers a free "
+            "consultation in the channel. First to click gets it. He is "
+            "usually helpful.\n\n"
             "📜 **/scamrules** — the full game rules."
         ),
         colour=_EMBED_GOLD,
@@ -3256,6 +3340,11 @@ def scamrules_embeds() -> list[discord.Embed]:
                 "🟢 **Ordinary** · 🔵 **Great Catch** · 🟣 **Rare** · "
                 "🐋 **Whale** (leaves after **1 hour**) · 🦄 **Legendary** "
                 "(may use completely unique rules)\n\n"
+                "🔥 **TARGET BOARD HEAT** — scamming the 🕶️ **Undercover Cop** "
+                "puts the whole board on Heat for **30 minutes**. The next "
+                "player to fail against a *real* mark gets one **50%** chance "
+                "of being arrested for it. Fake targets neither cause Heat nor "
+                "suffer it, and it never stacks.\n\n"
                 "Use **/targethelp** for the detailed system."
             ),
             colour=_EMBED_GOLD,
@@ -3397,6 +3486,52 @@ def scamrules_embeds() -> list[discord.Embed]:
             colour=_EMBED_GREY,
         ),
         E(
+            title="🎴 /SPECIAL — THREE OFFERS, ONE CHOICE",
+            description=(
+                "Every **hour** you may run `/special`. It deals you three "
+                "cards: one 🪙 **Budget**, one 💼 **Premium**, one 💎 "
+                "**Platinum**.\n\n"
+                "**You pick exactly one.** The other two are gone.\n\n"
+                "**The offer is fixed.** Closing the menu and reopening it "
+                "shows the same three cards — there is no rerolling until you "
+                "find something you like.\n\n"
+                "**Looking is free.** The 1-hour clock starts only when a card "
+                "actually activates. Being unable to afford one costs you "
+                "nothing and keeps the offer.\n\n"
+                "Cards do almost anything: hand you cash, rob a named player, "
+                "arrest three people at random, arm a trap that catches "
+                "whoever earns next, freeze somebody out of the fund, swap two "
+                "bank balances, redistribute the fund, start a public duel or "
+                "a heist crew — and, once in a while, collapse the entire "
+                "Royal Investment Fund.\n\n"
+                "Rarer cards are not simply stronger; they are the ones that "
+                "are funnier when they happen. Anything irreversible asks you "
+                "to confirm first.\n\n"
+                "🎭 Some cards arm **hidden traps**. You are told privately "
+                "that it is armed; everybody finds out when it fires, "
+                "including who set it."
+            ),
+            colour=_EMBED_GOLD,
+        ),
+        E(
+            title="🧓 ROGER'S PERSONAL ADVICE",
+            description=(
+                "Every **30–60 minutes** (faster when the channel is busy) "
+                "Roger appears in the game channel offering a free "
+                "consultation.\n\n"
+                "**First Prince to click gets it.** The window is 5 minutes.\n\n"
+                "**75%** of the time he genuinely helps — resetting your "
+                "`/special` cooldown, clearing your fake-target cooldown, or "
+                "refilling Intel to 3/3.\n\n"
+                "**25%** of the time he charges you a consultancy fee of up to "
+                "**500 Naira** for the privilege.\n\n"
+                "He never touches your fund position, and every outcome is "
+                "announced publicly. This is not a command; you cannot "
+                "summon him."
+            ),
+            colour=_EMBED_GOLD,
+        ),
+        E(
             title="🏗️ HOW DO YOU WIN?",
             description=(
                 "A permanent end goal is being added to the game:\n\n"
@@ -3427,6 +3562,7 @@ def scamrules_embeds() -> list[discord.Embed]:
                 "`/scamhelp` · `/scamrules`\n\n"
                 "`/scam`\n\n"
                 "`/quickscam` · `/joinquickscam`\n\n"
+                "`/special`\n\n"
                 "`/targets` · `/targethelp` · `/intelstatus` · `/faketarget` · "
                 "`/cancelfake`\n\n"
                 "`/invest deposit` · `/invest withdraw` · `/invest status`\n\n"
