@@ -26,17 +26,24 @@ class CitizensMixin:
         mu_id: Optional[str] = None,
         mu_name: Optional[str] = None,
         avatar_url: Optional[str] = None,
+        is_active: bool = True,
+        is_banned: bool = False,
     ) -> None:
         """Insert or update a citizen's level and related info.
 
         mu_id / mu_name are preserved from existing row when the caller
         passes None, so a plain citizen-level refresh never wipes MU data.
+        ``is_active`` / ``is_banned`` are always overwritten (not preserved)
+        — unlike the other optional fields, every caller has a fresh value
+        straight from ``getUserLite`` for the citizen it's writing, so
+        there's nothing to fall back to.
         """
         await self._conn.execute(
             "INSERT INTO citizen_levels"
             "(user_id, country_id, level, skill_mode, last_skills_reset_at, "
-            "citizen_name, last_login_at, mu_id, mu_name, updated_at, avatar_url)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "citizen_name, last_login_at, mu_id, mu_name, updated_at, avatar_url, "
+            "is_active, is_banned)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(user_id) DO UPDATE SET"
             "  country_id           = excluded.country_id,"
             "  level                = excluded.level,"
@@ -47,6 +54,8 @@ class CitizensMixin:
             "  mu_id      = COALESCE(excluded.mu_id,      citizen_levels.mu_id),"
             "  mu_name    = COALESCE(excluded.mu_name,    citizen_levels.mu_name),"
             "  avatar_url = COALESCE(excluded.avatar_url, citizen_levels.avatar_url),"
+            "  is_active  = excluded.is_active,"
+            "  is_banned  = excluded.is_banned,"
             "  updated_at = excluded.updated_at",
             (
                 user_id,
@@ -60,6 +69,8 @@ class CitizensMixin:
                 mu_name,
                 updated_at,
                 avatar_url,
+                1 if is_active else 0,
+                1 if is_banned else 0,
             ),
         )
 
@@ -185,10 +196,24 @@ class CitizensMixin:
 
         Used after a full country refresh so citizens who left the country are
         removed while preserving MU data that was written by a concurrent task.
+
+        Only prunes ``is_active = 1`` rows. The per-country refresh this
+        follows (``user.getUsersByCountry``) never lists inactive players in
+        the first place — see ``services/citizen_cache.py`` — so a row that
+        was backfilled by ID and marked inactive would otherwise look
+        "not seen this sweep" and get deleted every single hour, only to be
+        rediscovered as "missing" and re-fetched by
+        ``full_fetcher.fetch_missing_owner_citizenships`` right after. That
+        churn was confirmed live: the exact same ~5,800 owners were reported
+        "missing" on every sweep. Excluding inactive rows from this delete
+        makes their ``is_active`` flag stick, which is what lets
+        ``fetch_company_census`` check owner activity at census time instead
+        of only after that hour's backfill has already run.
         Returns the number of rows deleted.
         """
         cursor = await self._conn.execute(
-            "DELETE FROM citizen_levels WHERE country_id = ? AND updated_at < ?",
+            "DELETE FROM citizen_levels WHERE country_id = ? AND updated_at < ? "
+            "AND is_active = 1",
             (country_id, updated_at),
         )
         await self._conn.commit()

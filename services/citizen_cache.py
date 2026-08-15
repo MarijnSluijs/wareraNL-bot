@@ -76,6 +76,8 @@ class CitizenCache:
             name = self._extract_name(obj)
             mu_id, mu_name = self._extract_mu_info(obj)
             avatar_url = self._extract_avatar_url(obj)
+            is_active = self._extract_is_active(obj)
+            is_banned = self._extract_is_banned(obj)
             if lvl is not None:
                 await self._db.upsert_citizen_level(
                     uid,
@@ -89,6 +91,8 @@ class CitizenCache:
                     mu_id=mu_id,
                     mu_name=mu_name,
                     avatar_url=avatar_url,
+                    is_active=is_active,
+                    is_banned=is_banned,
                 )
                 recorded += 1
 
@@ -160,6 +164,13 @@ class CitizenCache:
         discovery of its own and does not prune anything, since it only ever
         touches the exact rows it was asked about.
 
+        This is also the only path that ever writes ``is_active = False``:
+        the per-country sweep in :meth:`refresh_country` can't, because
+        ``user.getUsersByCountry`` never returns inactive players to begin
+        with. Once written, :meth:`Database.prune_stale_citizens` leaves
+        inactive rows alone, so — unlike active citizens — an inactive owner
+        only needs to be fetched here once, not every sweep.
+
         Returns the number of citizens successfully recorded.
         """
         if not user_ids:
@@ -195,6 +206,8 @@ class CitizenCache:
                     citizen_name=self._extract_name(obj),
                     last_login_at=self._extract_last_login_at(obj),
                     avatar_url=self._extract_avatar_url(obj),
+                    is_active=self._extract_is_active(obj),
+                    is_banned=self._extract_is_banned(obj),
                 )
                 recorded += 1
 
@@ -745,6 +758,38 @@ class CitizenCache:
         if not isinstance(obj, dict):
             return None
         return obj.get("avatarUrl") or None
+
+    @staticmethod
+    def _extract_is_active(obj: Any) -> bool:
+        """Pull ``isActive`` from a getUserLite result.
+
+        Confirmed live to always be present (boolean) on both listing-endpoint
+        and by-ID responses. Defaults to True when missing or malformed so a
+        future API change degrades to "never excluded" rather than silently
+        marking everyone inactive.
+        """
+        if not isinstance(obj, dict):
+            return True
+        val = obj.get("isActive")
+        return val if isinstance(val, bool) else True
+
+    @staticmethod
+    def _extract_is_banned(obj: Any) -> bool:
+        """Pull ``infos.isBanned`` from a getUserLite result.
+
+        Confirmed live present on both listing-endpoint and by-ID responses
+        (a banned player can also be ``isActive: false`` at the same time).
+        Defaults to False when missing or malformed — a schema change should
+        degrade to "never excluded", never to "everyone banned".
+        """
+        if not isinstance(obj, dict):
+            return False
+        infos = obj.get("infos")
+        if isinstance(infos, dict):
+            val = infos.get("isBanned")
+            if isinstance(val, bool):
+                return val
+        return False
 
     @staticmethod
     def _extract_name(obj: Any) -> str | None:

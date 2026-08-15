@@ -1168,6 +1168,11 @@ _ARCHETYPES: list[dict] = [
         ),
         flag="🇨🇲",
         short_name="Tio Men",
+        special_rules=(
+            "Careful has Tio Men's **worst** odds. That is intentional — he "
+            "interrupts anyone who slows down.",
+            "Normal is his best chance. Greedy pays double, if you dare.",
+        ),
     ),
 
     # ── 🇱🇺 Luxembourg ────────────────────────────────────────────────────
@@ -1199,6 +1204,12 @@ _ARCHETYPES: list[dict] = [
         failure_text="For once, he actually checks the numbers.",
         flag="🇱🇺",
         short_name="Banana",
+        special_rules=(
+            "Careful has Party Banana's **worst** odds — give him time and he "
+            "checks the numbers himself.",
+            "Normal is his best chance. Greedy pays 1,6× and he usually spots "
+            "it.",
+        ),
     ),
 
     # ── 🇬🇧 United Kingdom ────────────────────────────────────────────────
@@ -2176,6 +2187,45 @@ if len(_ARCH_BY_ID) != len(_ARCHETYPES):
     raise ValueError("duplicate archetype arch_id")
 
 
+def _dominated_approaches(arch: dict) -> list[str]:
+    """Approaches on this mark that are worse than another on *both* axes.
+
+    A mark whose Careful is both less likely *and* smaller-paying than its
+    Normal offers a button that is never the right click.  That is a perfectly
+    good trap — the roster deliberately breaks "careful is safest" — but only
+    if the card says so.  Undocumented, it just reads as a bug, which is
+    exactly how Tio Men's 28% Careful was first reported.
+    """
+    spec = arch.get("approaches")
+    if not spec or arch.get("approach_payouts") or not arch.get("payout_max"):
+        return []
+    keys = ("careful", "normal", "greedy")
+    dead = []
+    for k in keys:
+        for other in keys:
+            a, b = spec[k], spec[other]
+            if k != other and a[0] <= b[0] and a[1] <= b[1] and a[:2] != b[:2]:
+                dead.append(k)
+                break
+    return dead
+
+
+_UNDOCUMENTED = []
+for _a in _ARCHETYPES:
+    if not _dominated_approaches(_a):
+        continue
+    _text = " ".join(_a.get("special_rules") or ()).lower()
+    if not any(w in _text for w in
+               ("careful", "normal", "greedy", "all three approaches")):
+        _UNDOCUMENTED.append(_a["name"])
+if _UNDOCUMENTED:
+    raise ValueError(
+        "these marks invert the usual approach order without explaining it on "
+        f"the card: {_UNDOCUMENTED}. Add a special_rules line naming the "
+        "approach, or give it odds that are not strictly dominated."
+    )
+
+
 def _by_tier(tier: str) -> list[dict]:
     return [a for a in _ARCHETYPES if a["tier"] == tier]
 
@@ -2791,6 +2841,13 @@ async def seize_wealth(
     # Logged explicitly: the cash half never went through adjust_balance for
     # the victim, and the fund half never touches cash at all.
     await record_ledger(conn, victim, -take, reason, detail)
+    if from_fund:
+        # Principal, not performance: the position shrank because somebody
+        # else took the money, which is not something the fund did to them.
+        from nigeria_bot import royal_fund as rf
+        await rf.record_pnl(conn, victim, -from_fund,
+                            f"Forced liquidation — {detail or reason}",
+                            kind="withdraw")
     if to:
         await adjust_balance(conn, to, take, gain_reason, detail)
     if from_fund:

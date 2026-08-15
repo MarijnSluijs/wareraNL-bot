@@ -1704,6 +1704,27 @@ def expected_multiplier(
     return success * win + ordinary * kept          # extreme contributes zero
 
 
+def jackpot_note(tpl: dict) -> str:
+    """One line describing the rare-success upgrade, or ``""`` if there is none.
+
+    Every template carries one and none of them used to be shown, so a room
+    could read "Return on success: ×1,15–×1,35", win, and watch somebody walk
+    off with ×6,5.  The number was always correct; the card simply never
+    mentioned that a jackpot existed.
+    """
+    chance, mult = tpl["rare_chance"], tpl["rare_payout"]
+    if not chance or not mult:
+        return ""
+    pct = f"{chance * 100:g}"
+    if tpl["payout_by_order"]:
+        # The pyramid adds to each seat's tier instead of replacing it, so
+        # saying "pays ×1 instead" would be actively wrong.
+        return (f"🎉 **{pct}% of successes** add a flat "
+                f"**+×{mult:g}** to every seat on top of its normal tier.")
+    return (f"🎉 **{pct}% of successes** pay **×{mult:g}** instead — "
+            "the rare jackpot.")
+
+
 def stake_hint(tpl: dict) -> str:
     """One line describing what it costs to get in."""
     bits = [f"**{tpl['min_stake']:,}**–**{tpl['max_stake']:,}**".replace(",", ".")]

@@ -2648,6 +2648,7 @@ class ScamGameCog(commands.Cog, name="scam_game"):
         chance = qs.success_chance(tpl, len(entries), pot)
         extreme = qs.extreme_chance(tpl, len(entries), pot)
         minor, _standard, big = tpl["fail_losses"]
+        jackpot = qs.jackpot_note(tpl)
 
         lines = []
         for i, (uid, amount) in enumerate(entries):
@@ -2677,6 +2678,7 @@ class ScamGameCog(commands.Cog, name="scam_game"):
                 f"Return on success: **×{tpl['payout_min']:g}"
                 + (f"–×{tpl['payout_max']:g}" if tpl["payout_max"] != tpl["payout_min"] else "")
                 + "** _(includes your stake)_\n"
+                + (jackpot + "\n" if jackpot else "")
                 + (
                     "On an ordinary failure you lose "
                     f"**{minor * 100:.0f}–{big * 100:.0f}%** of your stake.\n"
@@ -3096,6 +3098,16 @@ class ScamGameCog(commands.Cog, name="scam_game"):
             )
 
         detail = [f"Pot: **{money(pot)}** · odds were **{chance * 100:.0f}%**"]
+        if rare:
+            # Otherwise a ×6,5 jackpot on a template advertising ×1,15–×1,35
+            # reads as the bot having miscalculated everyone's payout.
+            detail.append(
+                f"🎉 **RARE JACKPOT** — a **{tpl['rare_chance'] * 100:g}%** "
+                "chance on any success"
+                + (f", paying **×{tpl['rare_payout']:g}** instead of the usual."
+                   if not tpl["payout_by_order"] else
+                   f", adding **+×{tpl['rare_payout']:g}** to every seat.")
+            )
         if outcome == "ordinary" and severity:
             detail.append(
                 f"{severity} — everyone loses **{loss_pct * 100:.0f}%** of "
@@ -3241,9 +3253,13 @@ def scamhelp_embed() -> discord.Embed:
             "explanation.\n"
             "🎭 **/faketarget** — pose as a target and scam another Prince.\n"
             "🎭 **/cancelfake** — abandon your disguise.\n\n"
-            "🏦 **/invest deposit** — put money into Roger's Fund.\n"
-            "🏦 **/invest withdraw** — take money out.\n"
-            "🏦 **/invest status** — Fund value, risk, investors, your position.\n\n"
+            "🏦 **/invest deposit** — put money into Roger's Fund. Leave the "
+            "amount empty to deposit **everything you have**.\n"
+            "🏦 **/invest withdraw** — take money out. Leave the amount empty "
+            "to take out **everything**.\n"
+            "🏦 **/invest status** — Fund value, risk, investors, your position.\n"
+            "🎲 **/fundluck** — what the Fund has actually done to your money: "
+            "profit, loss, and exactly which events caused it.\n\n"
             "💰 **/balance** — check your Naira.\n"
             "🏆 **/leaderboard** — the richest Princes.\n"
             "🪙 **/beg** — publicly beg the Council of Princes.\n"
@@ -3443,6 +3459,9 @@ def scamrules_embeds() -> list[discord.Embed]:
             description=(
                 "**/invest deposit** · **/invest withdraw** · "
                 "**/invest status**\n\n"
+                "Both **deposit** and **withdraw** take an optional amount. "
+                "Leave it empty and you move **everything** — your whole "
+                "balance in, or your whole position out.\n\n"
                 "The Fund has **5 risk levels**. As risk rises, events happen "
                 "faster, gains and losses become more extreme, dangerous events "
                 "get more common, and collapse becomes possible.\n\n"
@@ -3452,6 +3471,14 @@ def scamrules_embeds() -> list[discord.Embed]:
                 "At high risk, withdrawals face an **Anti-Panic Tax**.\n\n"
                 "Money inside the Fund is part of your investment position, not "
                 "your cash. A **Total Collapse** wipes it.\n\n"
+                "🎲 **/fundluck** — your personal record. It shows what you put "
+                "into the fund currently running, what you took out, your "
+                "profit or loss, and **every event that caused it** — plus your "
+                "totals across every fund you have ever been in.\n\n"
+                "Deposits and withdrawals are your own money moving, so they "
+                "never count as profit. Only what Roger does to it does. A "
+                "position seized by another Prince counts as money leaving, not "
+                "as a fund loss — that one is not Roger's fault.\n\n"
                 "_Roger remains professionally optimistic._"
             ),
             colour=_EMBED_RED,

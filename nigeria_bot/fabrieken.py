@@ -400,6 +400,140 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
             row = await cur.fetchone()
         return (float(row[0] or 0), int(row[1] or 0)) if row else (0.0, 0)
 
+    async def _tax_by_owner_country(
+        self, conn, country_id: str | None, item_code: str | None,
+        since_day: str | None = None,
+    ) -> list[tuple[str | None, float, float, int]]:
+        """``(owner_country_id, tax, wage, companies)`` for the current scope.
+
+        Grouped by the *owner's* nationality rather than by day, summed over
+        all retained tax history (see ``TAX_RETENTION_DAYS`` in
+        ``services/db/company_tax.py``) unless *since_day* (``YYYY-MM-DD``)
+        narrows that to a more recent start. The attribution chain is
+        ``company_tax_revenue.company_id`` → ``company_owner_map`` →
+        ``owner_id`` → ``citizen_levels.country_id``; a ``None`` key means the
+        chain broke somewhere (company predates ``company_owner_map``, or the
+        owner has no citizenship on record) rather than being dropped silently.
+        """
+        where = []
+        params: list = []
+        if country_id:
+            where.append("ctr.country_id = ?")
+            params.append(country_id)
+        if item_code:
+            where.append("ctr.item_code = ?")
+            params.append(item_code)
+        if since_day:
+            where.append("ctr.day >= ?")
+            params.append(since_day)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        async with conn.execute(
+            f"SELECT cl.country_id, SUM(ctr.tax_total), SUM(ctr.wage_total), "
+            "COUNT(DISTINCT ctr.company_id) "
+            "FROM company_tax_revenue ctr "
+            "LEFT JOIN company_owner_map com ON com.company_id = ctr.company_id "
+            "LEFT JOIN citizen_levels cl ON cl.user_id = com.owner_id "
+            f"{clause} "
+            "GROUP BY cl.country_id ORDER BY 2 DESC",
+            params,
+        ) as cur:
+            return [
+                (str(r[0]) if r[0] is not None else None, float(r[1] or 0),
+                 float(r[2] or 0), int(r[3] or 0))
+                for r in await cur.fetchall()
+            ]
+
+    async def _tax_breakdown_embeds(
+        self, conn, country_id: str | None, item_code: str | None,
+        names: dict[str, str], scope_title: str, since_day: str | None = None,
+    ) -> list[discord.Embed]:
+        """Full embeds breaking tax revenue for this scope down by the
+        country of the companies' *owners*, instead of by day.
+
+        *since_day* (``YYYY-MM-DD``) narrows the summed period to that date
+        onward; ``None`` sums everything still retained (see
+        ``TAX_RETENTION_DAYS``, currently 90 days).
+
+        Unlike ``_tax_block`` this is not attached as a field on an existing
+        embed: the number of contributing countries isn't bounded the way a
+        7-row daily table is, so it easily blows past Discord's 1024-char
+        field limit. Rendered as its own paginated embed(s) — i.e. its own
+        message(s) — using the 4096-char *description* budget instead, the
+        same way ``_view_owners`` paginates a long owner list.
+        """
+        title = f"💰 Belasting per land van eigenaar — {scope_title}"
+        if not await self._tax_available(conn):
+            return []
+        if not await self._owner_map_available(conn):
+            return [discord.Embed(
+                title=title,
+                description=(
+                    "_Nog niet beschikbaar — deze uitsplitsing vereist een nieuwere "
+                    "versie van de bedrijvenscan. Probeer het over een uur opnieuw._"
+                ),
+                colour=discord.Colour.orange(),
+            )]
+
+        rows = await self._tax_by_owner_country(conn, country_id, item_code, since_day)
+        total_tax = sum(r[1] for r in rows)
+        if not rows or total_tax <= 0:
+            return [discord.Embed(
+                title=title,
+                description="_Nog geen belasting geïnd in deze scope._",
+                colour=discord.Colour.orange(),
+            )]
+
+        entries = [
+            f"`{(names.get(cid, cid) if cid else '❓ Onbekend'):<20}` "
+            f"{_fmt_money(tax):>12} CC · {_fmt_int(companies)} bedrijven · "
+            f"{100.0 * tax / total_tax:.0f}%"
+            for cid, tax, _wage, companies in rows
+        ]
+
+        header = f"**Totaal:** {_fmt_money(total_tax)} CC over **{len(rows)}** landen"
+        header += f", sinds {since_day}." if since_day else "."
+        started_at = await self._tax_started_at(conn)
+        if started_at:
+            try:
+                since = datetime.fromisoformat(started_at)
+                if since_day and since_day < since.strftime("%Y-%m-%d"):
+                    header += (
+                        f"\n*Let op: belasting wordt pas bijgehouden sinds "
+                        f"{since:%d-%m-%Y %H:%M} UTC — data van vóór die datum "
+                        f"bestaat niet.*"
+                    )
+                else:
+                    header += f"\n*Belasting bijgehouden sinds {since:%d-%m-%Y %H:%M} UTC.*"
+            except (ValueError, TypeError):
+                pass
+
+        pages = _paginate(entries, first_page_reserve=len(header) + 2)
+        embeds: list[discord.Embed] = []
+        for idx, page in enumerate(pages):
+            body = "\n".join(page)
+            if idx == 0:
+                body = header + "\n\n" + body
+            embeds.append(discord.Embed(
+                title=title if idx == 0 else f"{title} ({idx + 1}/{len(pages)})",
+                description=body,
+                colour=discord.Colour.gold(),
+            ))
+        return embeds
+
+    async def _owner_map_available(self, conn) -> bool:
+        async with conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name='company_owner_map'"
+        ) as cur:
+            return await cur.fetchone() is not None
+
+    async def _tax_started_at(self, conn) -> str | None:
+        async with conn.execute(
+            "SELECT value FROM poll_state WHERE key = ?", (_TAX_STARTED_KEY,)
+        ) as cur:
+            row = await cur.fetchone()
+        return str(row[0]) if row and row[0] else None
+
     async def _tax_block(
         self, conn, country_id: str | None, item_code: str | None
     ) -> tuple[str, str] | None:
@@ -419,13 +553,7 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
             conn, country_id, item_code, month_start
         )
 
-        started_at = None
-        async with conn.execute(
-            "SELECT value FROM poll_state WHERE key = ?", (_TAX_STARTED_KEY,)
-        ) as cur:
-            row = await cur.fetchone()
-            if row and row[0]:
-                started_at = str(row[0])
+        started_at = await self._tax_started_at(conn)
 
         # Always show all 7 days, including the ones with nothing in them, so a
         # quiet day is visibly zero rather than silently absent.
@@ -579,6 +707,15 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         eigenaren="Toon de grootste eigenaren in plaats van de aantallen.",
         alles="Toon álle eigenaren i.p.v. de top 25 (kan meerdere berichten opleveren).",
         met_werknemers="Tel alleen bedrijven die minstens één werknemer hebben.",
+        belasting_per_land=(
+            "Splits de belastinginkomsten uit naar het land van de bedrijfseigenaren "
+            "i.p.v. per dag."
+        ),
+        sinds=(
+            "Alleen gebruikt bij belasting_per_land: tel alleen belasting vanaf deze "
+            "datum (JJJJ-MM-DD). Laat leeg voor de volledige bewaarde geschiedenis "
+            "(~90 dagen)."
+        ),
     )
     @app_commands.autocomplete(item=_item_choices, land=_country_choices)
     async def fabrieken(
@@ -589,10 +726,36 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         eigenaren: bool = False,
         alles: bool = False,
         met_werknemers: bool = False,
+        belasting_per_land: bool = False,
+        sinds: str | None = None,
     ) -> None:
         await interaction.response.defer()
+        since_day: str | None = None
+        if sinds:
+            try:
+                since_day = datetime.strptime(sinds.strip(), "%Y-%m-%d").strftime("%Y-%m-%d")
+            except ValueError:
+                await interaction.followup.send(
+                    embed=discord.Embed(
+                        title="🏭 Fabrieken",
+                        description=f"❌ `sinds` moet het formaat JJJJ-MM-DD hebben, niet `{sinds}`.",
+                        colour=discord.Colour.red(),
+                    )
+                )
+                return
+            if not belasting_per_land:
+                await interaction.followup.send(
+                    embed=discord.Embed(
+                        title="🏭 Fabrieken",
+                        description="❌ `sinds` werkt alleen samen met `belasting_per_land:True`.",
+                        colour=discord.Colour.red(),
+                    )
+                )
+                return
         try:
-            embeds = await self._build(item, land, eigenaren, alles, met_werknemers)
+            embeds = await self._build(
+                item, land, eigenaren, alles, met_werknemers, belasting_per_land, since_day
+            )
         except Exception:
             logger.exception("fabrieken: failed to build response")
             embeds = [
@@ -637,6 +800,8 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         eigenaren: bool = False,
         alles: bool = False,
         staffed: bool = False,
+        belasting_per_land: bool = False,
+        since_day: str | None = None,
     ) -> list[discord.Embed]:
         """Dispatch to a view and render it. Only the owner view spans pages."""
         if not os.path.isfile(EXTERNAL_DB_PATH):
@@ -686,21 +851,46 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
                 embeds = [await self._view_overview(conn, at, names, staffed)]
 
             # Tax revenue is always shown, scoped to whatever filters were
-            # given, and lands on the last embed so a paginated owner listing
-            # doesn't repeat it on every page.
-            try:
-                tax_field = await self._tax_block(
-                    conn,
-                    country[0] if country else None,
-                    item_code,
-                )
-            except Exception:
-                logger.exception("fabrieken: tax block failed")
-                tax_field = None
-            if tax_field is not None:
-                embeds[-1].add_field(
-                    name=tax_field[0], value=tax_field[1], inline=False
-                )
+            # given. The per-day table lands on the last embed as a field (a
+            # paginated owner listing then doesn't repeat it on every page);
+            # the per-owner-country breakdown is unbounded in length, so it
+            # gets its own message(s) appended after the others instead.
+            if belasting_per_land:
+                if item_code and country:
+                    scope_title = f"{_item_label(item_code)} in {country[1]}"
+                elif item_code:
+                    scope_title = f"{_item_label(item_code)} wereldwijd"
+                elif country:
+                    scope_title = country[1]
+                else:
+                    scope_title = "wereldwijd"
+                try:
+                    tax_embeds = await self._tax_breakdown_embeds(
+                        conn,
+                        country[0] if country else None,
+                        item_code,
+                        names,
+                        scope_title,
+                        since_day,
+                    )
+                except Exception:
+                    logger.exception("fabrieken: tax breakdown failed")
+                    tax_embeds = []
+                embeds.extend(tax_embeds)
+            else:
+                try:
+                    tax_field = await self._tax_block(
+                        conn,
+                        country[0] if country else None,
+                        item_code,
+                    )
+                except Exception:
+                    logger.exception("fabrieken: tax block failed")
+                    tax_field = None
+                if tax_field is not None:
+                    embeds[-1].add_field(
+                        name=tax_field[0], value=tax_field[1], inline=False
+                    )
 
         footer = f"{_fmt_int(checked)} bedrijven gecontroleerd"
         if listed and listed != checked:

@@ -951,6 +951,59 @@ async def setup_schema(conn: aiosqlite.Connection) -> None:
     await conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_fund_flows_at ON fund_flows(at)"
     )
+    # Per-player attribution: who was in which fund, what they put in, and
+    # every single thing that happened to it afterwards.  Unlike ``fund_flows``
+    # this survives a collapse — a wiped fund is precisely the history a player
+    # most wants to be able to look back at.  Tagged with the lifecycle so
+    # "this fund" and "every fund" are the same query with one clause changed.
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS fund_ledger (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            lifecycle       INTEGER NOT NULL,
+            discord_user_id TEXT NOT NULL,
+            kind            TEXT NOT NULL,   -- deposit|withdraw|event|cash
+            delta           INTEGER NOT NULL,
+            label           TEXT NOT NULL,
+            at              TEXT NOT NULL
+        )
+    """)
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_fund_ledger_user"
+        " ON fund_ledger(discord_user_id, id DESC)"
+    )
+    # Tracking starts today, but positions do not: everyone already in the
+    # fund gets an opening balance so their position adds up and `/fundluck`
+    # does not greet a 20.000-Naira investor with "you have never invested".
+    # Guarded on the table being empty, so it can only ever happen once.
+    async with conn.execute("SELECT EXISTS (SELECT 1 FROM fund_ledger)") as cur:
+        seeded = bool((await cur.fetchone())[0])
+    try:
+        if not seeded:
+            async with conn.execute(
+                "SELECT lifecycle FROM fund_state WHERE id = 1"
+            ) as cur:
+                row = await cur.fetchone()
+            life = int(row[0]) if row else 1
+            async with conn.execute(
+                "SELECT discord_user_id, invested FROM scam_players"
+                " WHERE invested > 0"
+            ) as cur:
+                carried = [(str(r[0]), int(r[1])) async for r in cur]
+            for user_id, held in carried:
+                await conn.execute(
+                    "INSERT INTO fund_ledger"
+                    " (lifecycle, discord_user_id, kind, delta, label, at)"
+                    " VALUES (?, ?, 'deposit', ?, ?, ?)",
+                    (life, user_id, held,
+                     "Position carried over — tracking started here",
+                     _iso(_now())),
+                )
+            if carried:
+                logger.info("royal_fund: opened the ledger with %d position(s)",
+                            len(carried))
+    except aiosqlite.Error:
+        # Never let bookkeeping stop the bot from booting.
+        logger.exception("royal_fund: could not seed the fund ledger")
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS fund_cooldowns (
             event_id TEXT PRIMARY KEY,
@@ -1039,34 +1092,105 @@ async def fund_total(conn: aiosqlite.Connection) -> int:
     return int(row[0])
 
 
-async def _set_position(
-    conn: aiosqlite.Connection, user_id: str, value: int
+async def _lifecycle(conn: aiosqlite.Connection) -> int:
+    async with conn.execute(
+        "SELECT lifecycle FROM fund_state WHERE id = 1"
+    ) as cur:
+        row = await cur.fetchone()
+    return int(row[0]) if row else 1
+
+
+async def record_pnl(
+    conn: aiosqlite.Connection, user_id: str, delta: int, label: str, *,
+    kind: str = "event", lifecycle: Optional[int] = None,
 ) -> None:
+    """Attribute one movement of one player's fund money to a cause.
+
+    ``kind`` separates *principal* from *performance*, which is the whole point
+    of the table: ``deposit``/``withdraw`` are money the player chose to move,
+    ``event``/``cash`` are things that happened to them.  Only the latter two
+    are profit or loss — otherwise depositing 10.000 would read as a 10.000
+    gain.
+    """
+    if not delta:
+        return
+    await conn.execute(
+        "INSERT INTO fund_ledger"
+        " (lifecycle, discord_user_id, kind, delta, label, at)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            int(lifecycle if lifecycle is not None else await _lifecycle(conn)),
+            str(user_id), kind, int(delta), label, _iso(_now()),
+        ),
+    )
+
+
+async def _position_of(conn: aiosqlite.Connection, user_id: str) -> int:
+    async with conn.execute(
+        "SELECT invested FROM scam_players WHERE discord_user_id = ?",
+        (str(user_id),),
+    ) as cur:
+        row = await cur.fetchone()
+    return int(row[0]) if row else 0
+
+
+async def _set_position(
+    conn: aiosqlite.Connection, user_id: str, value: int, *,
+    label: str = "Unattributed fund movement", kind: str = "event",
+    was: Optional[int] = None, lifecycle: Optional[int] = None,
+) -> None:
+    before = await _position_of(conn, user_id) if was is None else int(was)
+    after = max(0, int(value))
     await conn.execute(
         "UPDATE scam_players SET invested = ? WHERE discord_user_id = ?",
-        (max(0, int(value)), str(user_id)),
+        (after, str(user_id)),
     )
+    await record_pnl(conn, user_id, after - before, label,
+                     kind=kind, lifecycle=lifecycle)
 
 
 async def _add_position(
-    conn: aiosqlite.Connection, user_id: str, delta: int
+    conn: aiosqlite.Connection, user_id: str, delta: int, *,
+    label: str = "Unattributed fund movement", kind: str = "event",
+    lifecycle: Optional[int] = None,
 ) -> None:
+    """Move one position and record *why* it moved.
+
+    The ledger row is written from the before/after positions rather than from
+    ``delta``, because the floor at zero means a request to take 5.000 off a
+    3.000 position only ever removes 3.000 — and a ledger that recorded the
+    request instead of the movement would slowly drift away from the position
+    it claims to explain.
+
+    ``label`` has a deliberately conspicuous default: every position in the
+    game moves through this function, so a caller that forgets to say what it
+    is doing shows up in `/fundluck` as an unexplained line rather than
+    silently vanishing from a player's profit and loss.
+    """
+    before = await _position_of(conn, user_id)
+    after = max(0, before + int(delta))
     await conn.execute(
-        "UPDATE scam_players SET invested = MAX(0, invested + ?)"
-        " WHERE discord_user_id = ?",
-        (int(delta), str(user_id)),
+        "UPDATE scam_players SET invested = ? WHERE discord_user_id = ?",
+        (after, str(user_id)),
     )
+    await record_pnl(conn, user_id, after - before, label,
+                     kind=kind, lifecycle=lifecycle)
 
 
-async def scale_fund(conn: aiosqlite.Connection, factor: float) -> int:
+async def scale_fund(
+    conn: aiosqlite.Connection, factor: float, *,
+    label: str = "Fund revaluation",
+) -> int:
     """Multiply every position by *factor*.  Returns the net change in Naira.
 
     Positions are the only stored quantity, so scaling them *is* revaluing the
     fund — there is no separate total that could drift out of step.
     """
     before = await fund_total(conn)
+    life = await _lifecycle(conn)
     for user_id, amount in await positions(conn):
-        await _set_position(conn, user_id, int(round(amount * factor)))
+        await _set_position(conn, user_id, int(round(amount * factor)),
+                            label=label, was=amount, lifecycle=life)
     after = await fund_total(conn)
     return after - before
 
@@ -1099,6 +1223,101 @@ async def record_flow(
         " VALUES (?, ?, ?, ?)",
         (str(user_id), int(amount), kind, _iso(_now())),
     )
+
+
+# ── Per-player fund history (/fundluck) ───────────────────────────────────────
+
+def _delta(amount: int) -> str:
+    """A signed amount, using a real minus sign so columns line up."""
+    return ("+" if amount >= 0 else "−") + money(abs(amount))
+
+
+def _ratio(pnl: int, deposited: int) -> str:
+    """Profit as a share of what was handed over, or nothing if that is zero."""
+    if deposited <= 0:
+        return ""
+    pct = f"{abs(pnl) / deposited * 100:.1f}"
+    return f" ({'+' if pnl >= 0 else '−'}{pct}% of what you put in)"
+
+
+async def fund_luck(conn: aiosqlite.Connection, user_id: str) -> dict:
+    """Everything `/fundluck` needs about one player, in two passes.
+
+    The whole report is derived from ``fund_ledger`` rather than from counters
+    kept alongside it: a counter can disagree with its own history after a
+    crash halfway through an event, and the one number a player will check
+    against reality is the position sitting in `/balance`.
+    """
+    uid = str(user_id)
+    life = await _lifecycle(conn)
+
+    rows: list[tuple[int, str, int, str, str]] = []
+    async with conn.execute(
+        "SELECT lifecycle, kind, delta, label, at FROM fund_ledger"
+        " WHERE discord_user_id = ? ORDER BY id",
+        (uid,),
+    ) as cur:
+        async for r in cur:
+            rows.append((int(r[0]), str(r[1]), int(r[2]), str(r[3]), str(r[4])))
+
+    def totals(subset: list) -> dict:
+        # "position" and "cash" are kept apart because they answer different
+        # questions: one is what the fund did to the money still inside it,
+        # the other is dividends, Roger's gifts and confiscations, which never
+        # show up in a position at all.
+        return {
+            "deposited": sum(d for _l, k, d, _n, _a in subset if k == "deposit"),
+            "withdrawn": -sum(d for _l, k, d, _n, _a in subset if k == "withdraw"),
+            "position_pnl": sum(d for _l, k, d, _n, _a in subset if k == "event"),
+            "cash_pnl": sum(d for _l, k, d, _n, _a in subset if k == "cash"),
+            "pnl": sum(d for _l, k, d, _n, _a in subset if k in ("event", "cash")),
+        }
+
+    current = [r for r in rows if r[0] == life]
+    causes: dict[str, list[int]] = {}
+    for _l, kind, delta, label, _at in current:
+        if kind in ("event", "cash"):
+            causes.setdefault(label, []).append(delta)
+
+    moves = [r for r in rows if r[1] in ("event", "cash")]
+    best = max(moves, key=lambda r: r[2], default=None)
+    worst = min(moves, key=lambda r: r[2], default=None)
+
+    return {
+        "lifecycle": life,
+        "position": await _position_of(conn, uid),
+        "current": totals(current),
+        "lifetime": totals(rows),
+        "funds": len({r[0] for r in rows if r[1] == "deposit"}),
+        # Grouped, because a single fund can run hundreds of events and a
+        # scrolling list of −40 Naira revaluations answers nothing.  Biggest
+        # absolute effect first: that is the question actually being asked.
+        "causes": sorted(
+            ((label, sum(v), len(v)) for label, v in causes.items()),
+            key=lambda c: -abs(c[1]),
+        ),
+        "best": (best[3], best[2], best[4]) if best and best[2] > 0 else None,
+        "worst": (worst[3], worst[2], worst[4]) if worst and worst[2] < 0 else None,
+        "any": bool(rows),
+    }
+
+
+def _verdict(pnl: int, deposited: int) -> str:
+    """One line of Roger, calibrated to how badly it has gone."""
+    if deposited <= 0:
+        return "_You have never given Roger anything. This is the single best investment decision in this server._"
+    ratio = pnl / deposited
+    if ratio >= 0.50:
+        return "> **Roger:** \"I told you. I *told* you. Nobody ever believes me until it works.\""
+    if ratio >= 0.10:
+        return "> **Roger:** \"A solid, respectable return. Please do not withdraw it.\""
+    if ratio > -0.05:
+        return "> **Roger:** \"Broadly flat. In this economy that is practically heroic.\""
+    if ratio > -0.30:
+        return "> **Roger:** \"Every portfolio has a difficult period. Yours is ongoing.\""
+    if ratio > -0.75:
+        return "> **Roger:** \"I would describe this as a learning experience for both of us.\""
+    return "> **Roger:** \"Let us never speak of this again.\""
 
 
 # ── Eligibility & selection ───────────────────────────────────────────────────
@@ -1250,6 +1469,8 @@ async def apply_event(
     kind = event["kind"]
     holders = await positions(conn)
     total = sum(a for _u, a in holders)
+    # What `/fundluck` will call this later, in the player's own history.
+    tag = f"{event['emoji']} {event['name']}"
 
     def name_of(uid: str) -> str:
         member = guild.get_member(int(uid)) if guild else None
@@ -1264,7 +1485,7 @@ async def apply_event(
             )
         else:
             pct = _pct(event["lo"], event["hi"])
-        res.delta = await scale_fund(conn, 1 + pct)
+        res.delta = await scale_fund(conn, 1 + pct, label=tag)
         res.line(
             f"Fund value **{_signed(pct)}** → {money(total + res.delta)}"
         )
@@ -1279,6 +1500,7 @@ async def apply_event(
             cut = int(round(amount * pct))
             if cut > 0:
                 await adjust_balance(conn, uid, cut, "fund_dividend", event["name"])
+                await record_pnl(conn, uid, cut, tag, kind="cash")
                 paid += cut
         res.cash = paid
         res.line(
@@ -1296,6 +1518,7 @@ async def apply_event(
                 cut = int(round(amount * event["lo"]))
                 if cut > 0:
                     await adjust_balance(conn, uid, cut, "fund_dividend", event["name"])
+                    await record_pnl(conn, uid, cut, tag, kind="cash")
                     paid += cut
             res.cash = paid
             res.line(
@@ -1304,7 +1527,7 @@ async def apply_event(
             )
             res.colour = _EMBED_GREEN
         else:
-            res.delta = await scale_fund(conn, 1 + event["lo2"])
+            res.delta = await scale_fund(conn, 1 + event["lo2"], label=tag)
             res.line(
                 f"🪙 Tails. Fund value **{_signed(event['lo2'])}** → "
                 f"{money(total + res.delta)}"
@@ -1317,7 +1540,7 @@ async def apply_event(
         uid = random.choice(pick)[0]
         pos = dict(holders)[uid]
         take = min(pos, random.randint(int(event["lo"]), int(event["hi"])))
-        await _add_position(conn, uid, -take)
+        await _add_position(conn, uid, -take, label=tag)
         await record_ledger(conn, uid, -take, "fund_position", event["name"])
         res.delta = -take
         res.line(f"**{name_of(uid)}** is down **{money(take)}** from their position.")
@@ -1328,7 +1551,7 @@ async def apply_event(
         removed = 0
         for uid, pos in picks:
             take = min(pos, random.randint(int(event["lo"]), int(event["hi"])))
-            await _add_position(conn, uid, -take)
+            await _add_position(conn, uid, -take, label=tag)
             await record_ledger(conn, uid, -take, "fund_position", event["name"])
             removed += take
             res.line(f"**{name_of(uid)}** charged **{money(take)}**.")
@@ -1345,7 +1568,7 @@ async def apply_event(
         if take <= 0:
             res.line("Roger reconsiders. Briefly.")
         else:
-            await _add_position(conn, uid, -take)
+            await _add_position(conn, uid, -take, label=tag)
             await record_ledger(conn, uid, -take, "fund_position", event["name"])
             res.delta = -take
             res.line(
@@ -1370,8 +1593,8 @@ async def apply_event(
             if move <= 0:
                 res.line("The largest investor is too small to redistribute.")
             else:
-                await _add_position(conn, big_id, -move)
-                await _add_position(conn, recipient, move)
+                await _add_position(conn, big_id, -move, label=tag)
+                await _add_position(conn, recipient, move, label=tag)
                 await record_ledger(conn, big_id, -move, "fund_position", event["name"])
                 await record_ledger(conn, recipient, move, "fund_position", event["name"])
                 res.line(
@@ -1385,8 +1608,8 @@ async def apply_event(
         a_id, b_id = random.sample([u for u, _a in holders], 2)
         pos = dict(holders)[a_id]
         move = min(pos, random.randint(int(event["lo"]), int(event["hi"])))
-        await _add_position(conn, a_id, -move)
-        await _add_position(conn, b_id, move)
+        await _add_position(conn, a_id, -move, label=tag)
+        await _add_position(conn, b_id, move, label=tag)
         await record_ledger(conn, a_id, -move, "fund_position", event["name"])
         await record_ledger(conn, b_id, move, "fund_position", event["name"])
         res.line(
@@ -1401,7 +1624,7 @@ async def apply_event(
         pick = [(u, a) for u, a in holders if a >= event["min_position"]]
         uid = _weighted_choice(pick, invert=True)
         gain = random.randint(int(event["lo"]), int(event["hi"]))
-        await _add_position(conn, uid, gain)
+        await _add_position(conn, uid, gain, label=tag)
         await record_ledger(conn, uid, gain, "fund_position", event["name"])
         res.delta = gain
         res.line(f"🎉 **{name_of(uid)}** wins **{money(gain)}** into their position.")
@@ -1412,7 +1635,7 @@ async def apply_event(
         pos = dict(holders)[uid]
         pct = _pct(event["lo"], event["hi"])
         gain = int(round(pos * pct))
-        await _add_position(conn, uid, gain)
+        await _add_position(conn, uid, gain, label=tag)
         await record_ledger(conn, uid, gain, "fund_position", event["name"])
         res.delta = gain
         res.line(
@@ -1430,7 +1653,7 @@ async def apply_event(
         pos = dict(holders)[uid]
         pct = _pct(event["lo"], event["hi"])
         loss = min(pos, int(round(pos * pct)))
-        await _add_position(conn, uid, -loss)
+        await _add_position(conn, uid, -loss, label=tag)
         await record_ledger(conn, uid, -loss, "fund_position", event["name"])
         res.delta = -loss
         res.line(
@@ -1448,9 +1671,10 @@ async def apply_event(
             res.line("There is nothing left to reassure anybody with.")
         else:
             await adjust_balance(conn, uid, payout, "fund_dividend", event["name"])
+            await record_pnl(conn, uid, payout, tag, kind="cash")
             # The cash comes out of fund assets, so every remaining position
             # shrinks proportionally — including the whale's.
-            await scale_fund(conn, max(0.0, (total - payout) / total))
+            await scale_fund(conn, max(0.0, (total - payout) / total), label=tag)
             res.cash = payout
             res.delta = await fund_total(conn) - total
             res.line(
@@ -1467,6 +1691,7 @@ async def apply_event(
     elif kind == "cash_award":
         uid = await _recent_serious_investor(conn)
         await adjust_balance(conn, uid, event["amount"], "fund_gift", event["name"])
+        await record_pnl(conn, uid, event["amount"], tag, kind="cash")
         res.cash = event["amount"]
         res.line(
             f"🏆 **{name_of(uid)}** receives **{money(event['amount'])}** in "
@@ -1477,6 +1702,7 @@ async def apply_event(
     elif kind == "personal_plea":
         uid = await _plea_candidate(conn, state)
         await adjust_balance(conn, uid, event["amount"], "fund_gift", event["name"])
+        await record_pnl(conn, uid, event["amount"], tag, kind="cash")
         await conn.execute(
             "INSERT OR IGNORE INTO fund_pleas (lifecycle, discord_user_id)"
             " VALUES (?, ?)",
@@ -1501,6 +1727,7 @@ async def apply_event(
             if take <= 0:
                 continue
             await adjust_balance(conn, uid, -take, "fund_tax_audit", event["name"])
+            await record_pnl(conn, uid, -take, tag, kind="cash")
             taken_total += take
             res.line(f"**{name_of(uid)}** loses **{money(take)}** in cash.")
         res.cash = -taken_total
@@ -1702,12 +1929,20 @@ def collapse_chance(risk: int, pressure: int) -> float:
     return base
 
 
-async def do_collapse(conn: aiosqlite.Connection) -> tuple[int, int]:
+async def do_collapse(
+    conn: aiosqlite.Connection, *, label: str = "💥 TOTAL COLLAPSE"
+) -> tuple[int, int]:
     """Wipe the fund.  Returns ``(value destroyed, investors wiped)``."""
     holders = await positions(conn)
     total = sum(a for _u, a in holders)
-    await conn.execute("UPDATE scam_players SET invested = 0 WHERE invested > 0")
     state = await get_state(conn)
+    # Booked against the fund that died, not the one that replaces it: the
+    # lifecycle counter goes up a few lines below, and a collapse filed under
+    # the *new* fund would open every survivor's next fund at a loss.
+    dying = int(state.get("lifecycle", 1))
+    for user_id, amount in holders:
+        await record_pnl(conn, user_id, -amount, label, lifecycle=dying)
+    await conn.execute("UPDATE scam_players SET invested = 0 WHERE invested > 0")
     await set_state(
         conn,
         risk=1,
@@ -2384,10 +2619,14 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
         await self._invest(interaction, "status", None)
 
     @invest_group.command(name="deposit", description="Put money into the fund.")
-    @app_commands.describe(amount=f"Amount in {CURRENCY} to deposit.")
+    @app_commands.describe(
+        amount=(
+            f"Amount in {CURRENCY} (leave empty to deposit everything you have)."
+        )
+    )
     async def invest_deposit(
         self, interaction: discord.Interaction,
-        amount: app_commands.Range[int, 1, None],
+        amount: Optional[app_commands.Range[int, 1, None]] = None,
     ) -> None:
         await self._invest(interaction, "deposit", amount)
 
@@ -2402,6 +2641,136 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
         amount: Optional[app_commands.Range[int, 1, None]] = None,
     ) -> None:
         await self._invest(interaction, "withdraw", amount)
+
+    # ── /fundluck ─────────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="fundluck",
+        description="What Roger's Fund has actually done to your money.",
+    )
+    @app_commands.describe(player="Optional: look up somebody else's luck.")
+    async def fundluck(
+        self, interaction: discord.Interaction,
+        player: Optional[discord.Member] = None,
+    ) -> None:
+        if not await _require_channel(interaction, GAME_CHANNEL_ID, GAME_CHANNEL_URL):
+            return
+        who = player or interaction.user
+        data = await fund_luck(self.conn, str(who.id))
+        await interaction.response.send_message(
+            embed=self._luck_embed(who, data), ephemeral=True
+        )
+
+    def _luck_embed(self, who: discord.abc.User, data: dict) -> discord.Embed:
+        cur, life = data["current"], data["lifetime"]
+        pnl = cur["pnl"]
+        colour = (
+            _EMBED_GREEN if pnl > 0 else _EMBED_RED if pnl < 0 else _EMBED_GREY
+        )
+
+        if not data["any"]:
+            return discord.Embed(
+                title=f"🎲 FUND LUCK — {who.display_name}",
+                description=(
+                    "You have never put a single Naira into the Royal "
+                    "Investment Fund.\n\n"
+                    "Statistically, this makes you the most successful "
+                    "investor in Nigeria.\n\n"
+                    "`/invest deposit` to ruin that record."
+                ),
+                colour=_EMBED_GREY,
+            )
+
+        embed = discord.Embed(
+            title=f"🎲 FUND LUCK — {who.display_name}",
+            description=(
+                f"_Fund #{data['lifecycle']} — the one currently running._\n\n"
+                + _verdict(pnl, cur["deposited"])
+            ),
+            colour=colour,
+        )
+
+        split = ""
+        if cur["cash_pnl"]:
+            # Worth separating: a player whose position looks fine can still be
+            # badly down because the fund kept auditing their cash.
+            split = (
+                f"Value of your position: **{_delta(cur['position_pnl'])}**\n"
+                f"Cash paid to you / taken: **{_delta(cur['cash_pnl'])}**\n"
+            )
+        embed.add_field(
+            name="📊 THIS FUND",
+            value=(
+                f"Deposited: **{money(cur['deposited'])}**\n"
+                f"Withdrawn: **{money(cur['withdrawn'])}**\n"
+                f"Position now: **{money(data['position'])}**\n"
+                f"➖➖➖\n"
+                + split
+                + f"**Profit / loss: {_delta(pnl)}**{_ratio(pnl, cur['deposited'])}"
+            ),
+            inline=False,
+        )
+
+        causes = data["causes"]
+        if causes:
+            shown = causes[:10]
+            lines = [
+                f"`{_delta(net):>16}`  {label}"
+                + (f" ×{count}" if count > 1 else "")
+                for label, net, count in shown
+            ]
+            rest = causes[len(shown):]
+            if rest:
+                lines.append(
+                    f"_…and {len(rest)} other cause(s), netting "
+                    f"{_delta(sum(n for _l, n, _c in rest))}._"
+                )
+            embed.add_field(
+                name="🎯 WHAT CAUSED IT", value="\n".join(lines), inline=False
+            )
+        elif cur["deposited"]:
+            embed.add_field(
+                name="🎯 WHAT CAUSED IT",
+                value="_Nothing has happened to your money yet. Enjoy it._",
+                inline=False,
+            )
+
+        embed.add_field(
+            name="🏛️ EVERY FUND SO FAR",
+            value=(
+                f"Funds invested in: **{data['funds']}**\n"
+                f"Total deposited: **{money(life['deposited'])}**\n"
+                f"Total withdrawn: **{money(life['withdrawn'])}**\n"
+                f"➖➖➖\n"
+                f"**Lifetime profit / loss: {_delta(life['pnl'])}**"
+                + _ratio(life["pnl"], life["deposited"])
+            ),
+            inline=False,
+        )
+
+        extremes = []
+        if data["best"]:
+            label, delta, at = data["best"]
+            extremes.append(
+                f"🍀 Best: **{_delta(delta)}** — {label} "
+                f"(<t:{int(_parse(at).timestamp())}:R>)"
+            )
+        if data["worst"]:
+            label, delta, at = data["worst"]
+            extremes.append(
+                f"💀 Worst: **{_delta(delta)}** — {label} "
+                f"(<t:{int(_parse(at).timestamp())}:R>)"
+            )
+        if extremes:
+            embed.add_field(
+                name="📈 YOUR RECORDS", value="\n".join(extremes), inline=False
+            )
+
+        embed.set_footer(
+            text="Deposits and withdrawals are your own money moving — "
+                 "only what Roger did to it counts as profit or loss."
+        )
+        return embed
 
     async def _invest(
         self, interaction: discord.Interaction, action: str,
@@ -2454,6 +2823,20 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
             player = await get_player(self.conn, uid)
 
             if action == "deposit":
+                # No amount means "all of it".  Resolved here rather than at
+                # the command, so it reads the balance inside the lock and
+                # cannot hand Roger money that was spent while the slash
+                # command was still being typed.
+                all_in = amount is None
+                if all_in:
+                    amount = player["balance"]
+                if amount <= 0:
+                    await interaction.response.send_message(
+                        "❌ You have no cash to deposit." if all_in else
+                        f"❌ You only have {money(player['balance'])}.",
+                        ephemeral=True,
+                    )
+                    return
                 if player["balance"] < amount:
                     await interaction.response.send_message(
                         f"❌ You only have {money(player['balance'])}.",
@@ -2462,11 +2845,18 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
                     return
 
                 # §19: money arriving into a dead fund starts a new lifecycle.
+                # The reset happens *before* the money lands so the deposit is
+                # booked into the fund it actually opens, and so a stale
+                # capital call left over from the dead fund cannot claim it.
                 reborn = await fund_total(self.conn) <= 0
+                if reborn:
+                    await self._restart_lifecycle()
+                    state = await get_state(self.conn)
                 from nigeria_bot.special_game import touch
                 await touch(self.conn, uid)
                 await adjust_balance(self.conn, uid, -amount, "fund_deposit")
-                await _add_position(self.conn, uid, amount)
+                await _add_position(self.conn, uid, amount,
+                                    label="Deposit", kind="deposit")
 
                 flow_kind = "normal"
                 bits = [
@@ -2502,11 +2892,21 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
                 await self.conn.commit()
 
                 if reborn:
-                    await self._restart_lifecycle()
                     bits.append(
                         "\n🏦 **The fund is open again.** Roger resets to "
                         f"{RISK_DOT[1]} **Risk 1 — {RISK_NAMES[1]}** and "
                         "promises that this time will be different."
+                    )
+                if all_in:
+                    # Said once, plainly: a fund position is not cash on hand,
+                    # so an all-in deposit is exactly how a failed scam turns
+                    # into a cell.  Worth a line, not a confirmation dialog —
+                    # they asked for a shortcut, not an argument.
+                    bits.append(
+                        "\n⚠️ **You now have no cash at all.** A bribe can only "
+                        "be paid from cash, and your fund position does not "
+                        "count — the next scam that goes wrong puts you in a "
+                        "cell. `/invest withdraw` is how you get out."
                     )
                 note = "\n".join(bits)
 
@@ -2588,7 +2988,8 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
         earned = min(cap, int(round(new_money * pct)))
         bonus = max(0, earned - matched)
         if bonus > 0:
-            await _add_position(self.conn, uid, bonus)
+            await _add_position(self.conn, uid, bonus,
+                                label="💳 Deposit Campaign match")
             await self.conn.execute(
                 "UPDATE fund_campaign_baseline SET matched = ?"
                 " WHERE discord_user_id = ?", (matched + bonus, uid),
@@ -2674,7 +3075,8 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
                     await interaction.response.send_message(msg, ephemeral=True)
                 return
             tax = int(round(take * ANTI_PANIC_TAX.get(risk, 0.0)))
-            await _add_position(self.conn, uid, -take)
+            await _add_position(self.conn, uid, -take,
+                                label="Withdrawal", kind="withdraw")
             from nigeria_bot.special_game import touch
             await touch(self.conn, uid)
             # The tax is destroyed, not banked: the position falls by the gross
@@ -2691,6 +3093,13 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
                     auditor = trap["owner_id"]
             await adjust_balance(self.conn, uid, take - tax - audit,
                                  "fund_withdraw")
+            # Neither charge ever reaches the player, so neither is visible in
+            # the principal they withdrew — but both are money the fund cost
+            # them, and `/fundluck` is where that has to show up.
+            await record_pnl(self.conn, uid, -tax, "😰 Anti-Panic Tax",
+                             kind="cash")
+            await record_pnl(self.conn, uid, -audit, "🧾 Emergency Tax Audit",
+                             kind="cash")
             await record_flow(self.conn, uid, -take, "normal")
             await self.conn.commit()
             player = await get_player(self.conn, uid)
@@ -2771,12 +3180,20 @@ class RoyalFundCog(commands.Cog, name="royal_fund"):
             ),
             colour=RISK_COLOUR[risk],
         )
+        async with self.conn.execute(
+            "SELECT COALESCE(SUM(delta), 0) FROM fund_ledger"
+            " WHERE discord_user_id = ? AND lifecycle = ?"
+            " AND kind IN ('event', 'cash')",
+            (uid, int(state.get("lifecycle", 1))),
+        ) as cur:
+            mine = int((await cur.fetchone())[0])
         main.add_field(
             name="Your Position",
             value=(
                 f"Investment: **{money(player['invested'])}**\n"
                 f"Ownership: **{share:.1f}%**\n"
-                f"Cash: {money(player['balance'])}"
+                f"Cash: {money(player['balance'])}\n"
+                f"Profit / loss this fund: **{_delta(mine)}** · `/fundluck`"
             ),
             inline=False,
         )

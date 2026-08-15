@@ -23,6 +23,7 @@ Mixin                Tables
 :mod:`.gems`            ``event_gems``
 :mod:`.tx_cache`        ``player_tx_cache``
 :mod:`.trades`          ``item_trades``
+:mod:`.item_prices`     ``item_price_history``
 ===================  ========================================
 Usage::
 
@@ -52,6 +53,7 @@ from .freshness import FreshnessMixin
 from .gems import GemsMixin
 from .giveaways_db import GiveawaysMixin
 from .identities import IdentityLinksMixin
+from .item_prices import ItemPricesMixin
 from .level5_notified import Level5NotifiedMixin
 from .luck import LuckMixin
 from .mu_subscriptions import MuSubscriptionsMixin
@@ -98,6 +100,7 @@ class Database(
     PillTrackingMixin,
     TxCacheMixin,
     TradesMixin,
+    ItemPricesMixin,
     WarGuildMixin,
     WarStatusMixin,
     WealthMixin,

@@ -40,12 +40,20 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from nigeria_bot.fabrieken import _paginate
+
 logger = logging.getLogger("nigeria_bot.damage_projection")
 
 EXTERNAL_DB_PATH = os.getenv("RW_EXTERNAL_DB_PATH", "database/external.db")
 
 _AUTOCOMPLETE_LIMIT = 25
 _DEBUFF_DURATION = 15.5 * 3600  # kept in sync with services/db/pill_tracking.py
+
+# Shown once, at the top of the first message only (see _paginate_blocks).
+_LEGEND = (
+    "💊 Buff · ❌ Debuff · ⬜ Geen buff/debuff\n"
+    "*HP en Honger tellen alleen spelers in war.*"
+)
 
 
 def _fmt_int(n: float) -> str:
@@ -77,8 +85,17 @@ def _add_stats(dst: dict, src: dict) -> None:
         dst[k] += src.get(k, 0)
 
 
-def _render_row(label: str, label_w: int, stats: dict) -> str:
-    """Two-line block: totals, then the buff/debuff/neither breakdown."""
+def _render_block(label: str, stats: dict, *, rank: int | None = None) -> str:
+    """Four short stacked lines for one alliance/country — no fixed-width padding.
+
+    Deliberately not a monospace code-block table: on a narrow (mobile) screen
+    a padded line wraps mid-row, and the wrapped continuation no longer lines
+    up with anything, which is what made the old table unreadable. Plain text
+    wraps at word boundaries instead, so it degrades gracefully regardless of
+    screen width — the trade-off is these are no longer visually aligned into
+    columns, hence one alliance/country per short block rather than one long
+    row.
+    """
     buff_avg = (
         f" (gem {_fmt_hm(stats['buff_secs_sum'] / stats['buff_count'])})"
         if stats["buff_count"] else ""
@@ -87,18 +104,15 @@ def _render_row(label: str, label_w: int, stats: dict) -> str:
         f" (gem {_fmt_hm(stats['debuff_secs_sum'] / stats['debuff_count'])})"
         if stats["debuff_count"] else ""
     )
-    line1 = (
-        f"{label[:label_w]:<{label_w}}  {_fmt_int(stats['total_players']):>5} spelers  "
-        f"{_fmt_int(stats['war_players']):>5} oorlog  "
-        f"HP {_fmt_int(stats['war_health']):>7}  "
-        f"Honger {_fmt_int(stats['war_hunger']):>5}"
+    heading = f"**{rank}. {label}**" if rank is not None else f"**{label}**"
+    return (
+        f"{heading}\n"
+        f"{_fmt_int(stats['total_players'])} spelers · {_fmt_int(stats['war_players'])} war\n"
+        f"HP {_fmt_int(stats['war_health'])} · Honger {_fmt_int(stats['war_hunger'])}\n"
+        f"💊 {stats['buff_count']}{buff_avg}  "
+        f"❌ {stats['debuff_count']}{debuff_avg}  "
+        f"⬜ {stats['neither_count']}"
     )
-    line2 = (
-        f"{'':<{label_w}}  💊 Buff: {stats['buff_count']}{buff_avg}  "
-        f"🤢 Debuff: {stats['debuff_count']}{debuff_avg}  "
-        f"⬜ Geen: {stats['neither_count']}"
-    )
-    return line1 + "\n" + line2
 
 
 class DamageProjectionCog(commands.Cog, name="damage_projection"):
@@ -222,33 +236,38 @@ class DamageProjectionCog(commands.Cog, name="damage_projection"):
     ) -> None:
         await interaction.response.defer()
         try:
-            embed = await self._build(alliantie)
+            embeds = await self._build(alliantie)
         except Exception:
             logger.exception("damage-projection: failed to build response")
-            embed = discord.Embed(
-                title="⚔️ Damage projection",
-                description=(
-                    "⚠️ Kon de database niet uitlezen. Probeer het later opnieuw."
-                ),
-                colour=discord.Colour.red(),
-            )
-        await interaction.followup.send(embed=embed)
+            embeds = [
+                discord.Embed(
+                    title="⚔️ Damage projection",
+                    description=(
+                        "⚠️ Kon de database niet uitlezen. Probeer het later opnieuw."
+                    ),
+                    colour=discord.Colour.red(),
+                )
+            ]
+        # One embed per message: a long alliance/country list can exceed the
+        # 6000-char combined limit that applies to embeds sharing a message.
+        for embed in embeds:
+            await interaction.followup.send(embed=embed)
 
-    async def _build(self, alliance_query: str | None) -> discord.Embed:
+    async def _build(self, alliance_query: str | None) -> list[discord.Embed]:
         if not os.path.isfile(EXTERNAL_DB_PATH):
-            return self._no_data_embed()
+            return [self._no_data_embed()]
 
         async with _connect_ro() as conn:
             if not await self._tables_available(conn):
-                return self._no_data_embed()
+                return [self._no_data_embed()]
 
             alliances = await self._get_alliances(conn)
             if not alliances:
-                return discord.Embed(
+                return [discord.Embed(
                     title="⚔️ Damage projection",
                     description="Geen allianties gevonden.",
                     colour=discord.Colour.orange(),
-                )
+                )]
 
             all_country_ids = sorted({cid for _, _, cids in alliances for cid in cids})
             stats_by_country = await self._get_stats_by_country(conn, all_country_ids)
@@ -263,26 +282,26 @@ class DamageProjectionCog(commands.Cog, name="damage_projection"):
                     None,
                 )
                 if match is None:
-                    return discord.Embed(
+                    return [discord.Embed(
                         title="⚔️ Damage projection",
                         description=(
                             f"❌ `{alliance_query}` is geen bekende alliantie. "
                             f"Kies er een uit de suggestielijst."
                         ),
                         colour=discord.Colour.red(),
-                    )
-                embed = self._render_alliance(match, stats_by_country, names)
+                    )]
+                embeds = self._render_alliance(match, stats_by_country, names)
             else:
-                embed = self._render_overview(alliances, stats_by_country, names)
+                embeds = self._render_overview(alliances, stats_by_country, names)
 
         if swept_at:
             try:
-                embed.set_footer(
+                embeds[-1].set_footer(
                     text=f"Laatste spelersscan: {datetime.fromisoformat(swept_at):%d-%m-%Y %H:%M} UTC"
                 )
             except (ValueError, TypeError):
                 pass
-        return embed
+        return embeds
 
     def _no_data_embed(self) -> discord.Embed:
         return discord.Embed(
@@ -294,12 +313,33 @@ class DamageProjectionCog(commands.Cog, name="damage_projection"):
             colour=discord.Colour.orange(),
         )
 
+    def _paginate_blocks(
+        self, title: str, blocks: list[str]
+    ) -> list[discord.Embed]:
+        """Split *blocks* (one multi-line string per alliance/country) across
+        as many embeds as needed, each titled distinctly once there's more than
+        one page. The emoji legend and the HP/Honger scope note only need
+        saying once, so they're prepended to the first page only.
+        """
+        pages = _paginate(blocks, first_page_reserve=len(_LEGEND) + 2)
+        embeds: list[discord.Embed] = []
+        for idx, page in enumerate(pages):
+            body = "\n\n".join(page)
+            if idx == 0:
+                body = _LEGEND + "\n\n" + body
+            embeds.append(discord.Embed(
+                title=title if idx == 0 else f"{title} ({idx + 1}/{len(pages)})",
+                description=body,
+                colour=discord.Colour.dark_red(),
+            ))
+        return embeds
+
     def _render_overview(
         self,
         alliances: list[tuple[str, str, list[str]]],
         stats_by_country: dict[str, dict],
         names: dict[str, str],
-    ) -> discord.Embed:
+    ) -> list[discord.Embed]:
         rows: list[tuple[str, dict]] = []
         for _aid, name, cids in alliances:
             totals = _empty_stats()
@@ -308,22 +348,17 @@ class DamageProjectionCog(commands.Cog, name="damage_projection"):
             rows.append((name, totals))
         rows.sort(key=lambda r: -r[1]["total_players"])
 
-        label_w = min(26, max((len(n) for n, _ in rows), default=10))
-        blocks = [_render_row(name, label_w, s) for name, s in rows]
-        description = "```\n" + "\n".join(blocks) + "\n```"
-
-        return discord.Embed(
-            title="⚔️ Damage projection — alle allianties",
-            description=description,
-            colour=discord.Colour.dark_red(),
-        )
+        blocks = [
+            _render_block(name, s, rank=i) for i, (name, s) in enumerate(rows, 1)
+        ]
+        return self._paginate_blocks("⚔️ Damage projection — alle allianties", blocks)
 
     def _render_alliance(
         self,
         alliance: tuple[str, str, list[str]],
         stats_by_country: dict[str, dict],
         names: dict[str, str],
-    ) -> discord.Embed:
+    ) -> list[discord.Embed]:
         _aid, alliance_name, cids = alliance
         rows: list[tuple[str, dict]] = []
         totals = _empty_stats()
@@ -333,16 +368,12 @@ class DamageProjectionCog(commands.Cog, name="damage_projection"):
             _add_stats(totals, s)
         rows.sort(key=lambda r: -r[1]["total_players"])
 
-        label_w = min(26, max((len(n) for n, _ in rows), default=10))
-        blocks = [_render_row(name, label_w, s) for name, s in rows]
-        blocks.append("─" * (label_w + 45))
-        blocks.append(_render_row("Totaal", label_w, totals))
-        description = "```\n" + "\n".join(blocks) + "\n```"
-
-        return discord.Embed(
-            title=f"⚔️ Damage projection — {alliance_name}",
-            description=description,
-            colour=discord.Colour.dark_red(),
+        blocks = [
+            _render_block(name, s, rank=i) for i, (name, s) in enumerate(rows, 1)
+        ]
+        blocks.append(_render_block("Totaal", totals))
+        return self._paginate_blocks(
+            f"⚔️ Damage projection — {alliance_name}", blocks
         )
 
 

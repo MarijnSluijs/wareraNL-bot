@@ -281,6 +281,14 @@ async def take_wealth(
     # Logged by hand: the cash half bypassed adjust_balance and the fund half
     # never touches cash at all, so neither would otherwise reach the ledger.
     await record_ledger(conn, victim, -take, reason, detail)
+    if from_fund:
+        # A forced sale, not a fund loss: the money left the position but the
+        # fund did not lose it — another player took it.  Booking it as
+        # principal keeps `/fundluck` from blaming Roger for a mugging.
+        from nigeria_bot import royal_fund as rf
+        await rf.record_pnl(conn, victim, -from_fund,
+                            f"Forced liquidation — {detail or reason}",
+                            kind="withdraw")
     return take
 
 

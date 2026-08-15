@@ -833,7 +833,7 @@ async def _ponzi_pitch(ctx: Ctx) -> Result:
     from nigeria_bot import royal_fund as rf
 
     victim = ctx.choice
-    await rf._add_position(ctx.conn, victim, -1_000)
+    await rf._add_position(ctx.conn, victim, -1_000, label="📈 Ponzi Pitch")
     await record_ledger(ctx.conn, victim, -1_000, "special_fund_loss", "Ponzi Pitch")
     await give_cash(ctx.conn, ctx.actor, 1_000, reason="special_gain",
                     detail="Ponzi Pitch")
@@ -855,7 +855,8 @@ async def _false_investment(ctx: Ctx) -> Result:
     from nigeria_bot import royal_fund as rf
 
     victim = ctx.choice
-    await rf._add_position(ctx.conn, victim, -2_000)
+    await rf._add_position(ctx.conn, victim, -2_000,
+                           label="🏦 False Investment Fraud")
     await record_ledger(ctx.conn, victim, -2_000, "special_fund_loss",
                         "False Investment Fraud")
     await give_cash(ctx.conn, ctx.actor, 2_000, reason="special_gain",
@@ -886,8 +887,10 @@ async def _hostile_acquisition(ctx: Ctx) -> Result:
                              "too small to bother acquiring.",
                       colour=_EMBED_GREY)
     # A position transfer: the fund total is deliberately untouched (spec §4A).
-    await rf._add_position(ctx.conn, victim, -amount)
-    await rf._add_position(ctx.conn, ctx.actor, amount)
+    await rf._add_position(ctx.conn, victim, -amount,
+                           label="🏦 Hostile Acquisition")
+    await rf._add_position(ctx.conn, ctx.actor, amount,
+                           label="🏦 Hostile Acquisition")
     await record_ledger(ctx.conn, victim, -amount, "special_fund_loss",
                         "Hostile Acquisition")
     await record_ledger(ctx.conn, ctx.actor, amount, "special_fund_gain",
@@ -923,8 +926,10 @@ async def _offshore(ctx: Ctx) -> Result:
                       colour=_EMBED_GREY)
     share = int(seized * 0.70)
     sink = seized - share
-    await rf._add_position(ctx.conn, victim, -seized)
-    await rf._add_position(ctx.conn, ctx.actor, share)
+    await rf._add_position(ctx.conn, victim, -seized,
+                           label="🏝️ Offshore seizure")
+    await rf._add_position(ctx.conn, ctx.actor, share,
+                           label="🏝️ Offshore seizure")
     await record_ledger(ctx.conn, victim, -seized, "special_fund_loss", "Offshore seizure")
     await record_ledger(ctx.conn, ctx.actor, share, "special_fund_gain", "Offshore seizure")
     extra = await ctx.cog.extra_losses(ctx.conn, victim, seized, detail="Offshore seizure")
@@ -955,8 +960,10 @@ async def _portfolio_shuffle(ctx: Ctx) -> Result:
     pairs = [(a, b) for i, a in enumerate(ids) for b in ids[i + 1:]
              if abs(amounts[a] - amounts[b]) >= 2_000]
     a, b = random.choice(pairs) if pairs else random.sample(ids, 2)
-    await rf._set_position(ctx.conn, a, amounts[b])
-    await rf._set_position(ctx.conn, b, amounts[a])
+    await rf._set_position(ctx.conn, a, amounts[b], was=amounts[a],
+                           label="🔄 Portfolio Shuffle")
+    await rf._set_position(ctx.conn, b, amounts[a], was=amounts[b],
+                           label="🔄 Portfolio Shuffle")
     await record_ledger(ctx.conn, a, amounts[b] - amounts[a], "special_fund_swap",
                         "Portfolio Shuffle")
     await record_ledger(ctx.conn, b, amounts[a] - amounts[b], "special_fund_swap",
@@ -987,7 +994,8 @@ async def _nationalisation(ctx: Ctx) -> Result:
     for uid, held in top5:
         take = max(0, min(600, held - sc.FUND_FLOOR_NATIONALISE))
         if take:
-            await rf._add_position(ctx.conn, uid, -take)
+            await rf._add_position(ctx.conn, uid, -take,
+                                   label="☭ Nationalisation")
             await record_ledger(ctx.conn, uid, -take, "special_fund_loss",
                                 "Nationalisation")
             pool += take
@@ -998,7 +1006,8 @@ async def _nationalisation(ctx: Ctx) -> Result:
     share, left = divmod(pool, len(rest))
     for i, (uid, _held) in enumerate(rest):
         got = share + (1 if i < left else 0)
-        await rf._add_position(ctx.conn, uid, got)
+        await rf._add_position(ctx.conn, uid, got,
+                               label="☭ Nationalisation")
         await record_ledger(ctx.conn, uid, got, "special_fund_gain", "Nationalisation")
     return Result(
         title="☭ NATIONALISATION",
@@ -1029,7 +1038,8 @@ async def _carl_marx(ctx: Ctx) -> Result:
     for i, uid in enumerate(cohort):
         target = share + (1 if i < left else 0)
         before = held.get(uid, 0)
-        await rf._set_position(ctx.conn, uid, target)
+        await rf._set_position(ctx.conn, uid, target, was=before,
+                               label="☭ The Return of Carl Marx")
         if target != before:
             await record_ledger(ctx.conn, uid, target - before,
                                 "special_fund_swap", "Carl Marx")
@@ -1061,7 +1071,7 @@ async def _bank_robbery(ctx: Ctx) -> Result:
         )
     # Proportional so every investor pays their share of exactly 5.000.
     factor = max(0.0, (total - 5_000) / total) if total else 0.0
-    await rf.scale_fund(ctx.conn, factor)
+    await rf.scale_fund(ctx.conn, factor, label="💰 Royal Bank Robbery")
     await give_cash(ctx.conn, ctx.actor, 5_000, reason="special_gain",
                     detail="Royal Bank Robbery")
     return Result(
@@ -1129,7 +1139,8 @@ async def _nuke(ctx: Ctx) -> Result:
 
     # Reuses the canonical collapse rather than zeroing rows by hand, so the
     # fund's own invariants, risk reset and pressure clearing all still hold.
-    destroyed, investors = await rf.do_collapse(ctx.conn)
+    destroyed, investors = await rf.do_collapse(
+        ctx.conn, label="☢️ NUCLEAR BOMB")
     return Result(
         title="☢️ THE NUCLEAR OPTION",
         public=(f"{ctx.who(ctx.actor)} pressed the button.\n"

@@ -155,6 +155,14 @@ class DatabaseBase:
             # a full week of sweeps has run with the column present.
             ("company_census", "staffed_count INTEGER NOT NULL DEFAULT 0"),
             ("company_owners", "staffed_count INTEGER NOT NULL DEFAULT 0"),
+            # citizen_levels — mirrors getUserLite's isActive, so a company's
+            # owner being inactive can be checked without an extra API call.
+            # Defaults to 1: every existing row was populated by the
+            # active-only per-country listing.
+            ("citizen_levels", "is_active INTEGER NOT NULL DEFAULT 1"),
+            # citizen_levels — mirrors getUserLite's infos.isBanned, so a
+            # company's worker being banned can likewise be checked for free.
+            ("citizen_levels", "is_banned INTEGER NOT NULL DEFAULT 0"),
         ]
         for table, column_def in migrations:
             try:
