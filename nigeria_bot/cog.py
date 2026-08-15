@@ -1469,11 +1469,13 @@ class VerificationCog(commands.Cog, name="verification"):
         user="Het Discord-lid om te verifiëren",
         type="Het type verificatie",
         warera_url="De WarEra-profiel URL (https://app.warera.io/user/…)",
+        land="Alleen bij Ambassade: het land dat deze persoon vertegenwoordigt",
     )
     @app_commands.choices(type=[
         app_commands.Choice(name="🇳🇬 Nigerian",                  value="nigerian"),
         app_commands.Choice(name="🇳🇱🇳🇬 Nederlander in Nigeria", value="dutch_nigerian"),
         app_commands.Choice(name="🇳🇱 Nederlander",               value="dutch"),
+        app_commands.Choice(name="🏛️ Ambassade",                  value="embassy"),
     ])
     @_staff_check()
     async def verifieer(
@@ -1482,8 +1484,16 @@ class VerificationCog(commands.Cog, name="verification"):
         user: discord.Member,
         type: str,
         warera_url: str,
+        land: str | None = None,
     ) -> None:
         await interaction.response.defer(ephemeral=True)
+
+        if type == "embassy" and not (land and land.strip()):
+            await interaction.followup.send(
+                "❌ Kies `land:` — verplicht bij het type Ambassade.",
+                ephemeral=True,
+            )
+            return
 
         warera_id = _extract_warera_id(warera_url)
         if not warera_id:
@@ -1525,6 +1535,14 @@ class VerificationCog(commands.Cog, name="verification"):
                     await user.add_roles(role, reason=f"Handmatig geverifieerd door {interaction.user}")
                 except discord.Forbidden:
                     errors.append(f"Geen toegang om rol **{role.name}** toe te voegen.")
+        elif type == "embassy":
+            country = land.strip()
+            try:
+                amb_role = await _get_or_create_ambassador_role(guild, country)
+                await user.add_roles(amb_role, reason=f"Handmatig geverifieerd door {interaction.user}")
+                await _ensure_embassy_channel(guild, country, amb_role)
+            except Exception as exc:
+                errors.append(f"Ambassade-fout: {exc}")
 
         # Verified role for everyone
         verified_role = guild.get_role(VERIFIED_ROLE_ID)
@@ -1551,6 +1569,8 @@ class VerificationCog(commands.Cog, name="verification"):
 
         name_str = f"**{username}**" if username else f"`{warera_id}`"
         result = f"✅ {user.mention} geverifieerd als {name_str}."
+        if type == "embassy":
+            result += f" (Ambassade — {land.strip()})"
         if errors:
             result += "\n⚠️ " + " | ".join(errors)
         await interaction.followup.send(result, ephemeral=True)

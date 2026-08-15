@@ -16,13 +16,21 @@ What is fetched, in order, every hour:
     2. For each country: every citizen's ``user.getUserLite`` →
        ``citizen_levels`` (via :class:`services.citizen_cache.CitizenCache`).
     3. A census of every company in the game → ``company_census``, bucketed by
-       the country controlling its region and by the item it produces.
+       the country controlling its region and by the item it produces. The
+       same pass also writes ``company_owner_map`` (company → owner, for
+       every company seen), which is what lets tax revenue later be traced
+       back to the owner's nationality.
     4. New wage transactions → ``company_tax_revenue``, the income tax paid to
        each country per company and item.
     5. Every alliance and its member countries → ``alliance_countries``, for
        the Nigeria bot's /damage-projection command. Health/hunger for that
        same command is captured as a side effect of step 2's citizen sweep
        (see ``citizen_combat_state`` in services/citizen_cache.py).
+    6. Company owners missing from step 2 → backfilled by ID. Step 2 only
+       learns citizen IDs via ``user.getUsersByCountry``, which silently
+       omits inactive players (``isActive: false``) — see
+       ``fetch_missing_owner_citizenships`` for how this was found and why a
+       direct-by-ID fetch is the only way to close the gap.
 
 Each sweep step records progress through
 :meth:`services.db.Database.mark_started` / :meth:`mark_finished` under
@@ -585,20 +593,73 @@ async def fetch_all_mu_names(client: APIClient, db: Database) -> int:
 async def fetch_company_census(client: APIClient, db: Database) -> int:
     """Census every company in the game, bucketed by controlling country + item.
 
-    Two phases:
+    Three phases:
       1. Paginate ``company.getCompanies`` (no filter) for every company ID.
+      1.5. Reconcile against a per-known-citizen ``company.getCompanies``
+           (filtered by ``userId``) to recover companies phase 1 misses — see
+           below for why that happens at all.
       2. Batch ``company.getById`` to read each company's region, itemCode and
          workerCount, mapping region → country via ``region.getRegionsObject``.
 
     A company belongs to the country that *currently controls* its region, so
     the mapping is re-read every sweep rather than cached.
 
+    Phase 1's unfiltered listing was confirmed live to silently omit
+    companies that unambiguously exist (via ``company.getById`` directly, and
+    via the ``userId``-filtered form of the very same endpoint, which does
+    return them). It appears to paginate by ``updatedAt``, and a periodic
+    game-engine tick stamps huge numbers of companies with the exact same
+    ``updatedAt`` down to the millisecond — precisely the condition under
+    which timestamp-keyset pagination can silently skip rows between page
+    fetches. Phase 1.5 closes that gap for any company whose owner this sweep
+    already knows about (i.e. anyone in ``citizen_levels``), at the cost of
+    one batched-per-100 request per known citizen — chosen over a cheaper
+    "only known owners" variant so a company owned by someone who has never
+    shown up as an owner before isn't missed on its first sweep either.
+
     The same responses also carry the owner ID, so a per-owner breakdown is
     written to ``company_owners`` for free — no extra requests.
 
     Companies listed in phase 1 can be sold or destroyed before phase 2 reads
     them, so ``checked`` is normally a little lower than ``listed``; both are
-    recorded.  Returns the number of census rows written.
+    recorded.
+
+    A company the owner has switched off (confirmed live via
+    ``company.getById``) keeps existing — it's still listed in phase 1 and
+    still returns a full payload in phase 2 — but carries a ``disabledAt``
+    timestamp that an active company never has. Companies owned by an
+    inactive player (confirmed live via ``user.getUserLite``'s ``isActive``)
+    are excluded the same way, on the theory the user gave for both: neither
+    is "used anymore". Both kinds are counted in ``checked`` (their details
+    were successfully fetched) but excluded from every bucket:
+    ``company_census``, ``company_owners`` and ``company_owner_map`` all only
+    ever see companies that were active, with an active owner, at scan time —
+    so ``/fabrieken`` and ``/productie`` don't inflate their totals with dead
+    companies.
+
+    A banned *worker* gets the same treatment, one level down: a company
+    counts as having a worker only if it has at least one worker who isn't
+    banned (confirmed live via ``user.getUserLite``'s ``infos.isBanned`` —
+    also confirmed to coexist with ``isActive: false`` on the same account,
+    so a banned worker is not necessarily caught by the owner check above
+    even when they are one elsewhere). This needs each staffed company's
+    worker *roster*, not just its ``workerCount``, so — unlike the
+    disabled/inactive-owner checks above, which only need the company payload
+    itself — the worker-roster fetch (``worker.getWorkers``, already made
+    below to build ``worker_company_map`` for tax attribution) now has to
+    happen *before* a company's counts are finalized, not after.
+
+    Both the owner-activity and worker-banned checks read
+    ``citizen_levels.is_active`` / ``.is_banned``, populated by the citizen
+    sweep this function's caller already ran earlier in the same
+    ``run_once()`` pass — no extra API calls. Both can only catch citizens
+    this sweep already knows about; a citizen never seen before is still
+    counted once, the same one-sweep lag ``/productie`` already documents for
+    citizenship attribution in general — closed by
+    ``fetch_missing_owner_citizenships`` / ``fetch_missing_worker_citizenships``
+    running right after this function, for the *next* sweep.
+
+    Returns the number of census rows written.
     """
     dataset = "all_countries.company_census"
     await db.mark_started(dataset, source="full_fetcher")
@@ -643,19 +704,90 @@ async def fetch_company_census(client: APIClient, db: Database) -> int:
             raise RuntimeError("getCompanies returned no companies")
         logger.info("company_census: listed %d companies", len(company_ids))
 
+        # ── phase 1.5: reconcile against per-citizen listings ───────────────
+        # Confirmed live: the unfiltered listing above silently omits some
+        # companies that unambiguously exist — verified both via
+        # company.getById directly and via this same endpoint filtered by
+        # userId, which *does* return them. The likely mechanism: this
+        # endpoint paginates by updatedAt, and huge numbers of companies share
+        # the exact same updatedAt timestamp down to the millisecond (a
+        # periodic game-engine tick appears to stamp them all at once) —
+        # exactly the condition under which timestamp-keyset pagination can
+        # silently skip rows between page fetches. Re-querying per known
+        # citizen uses a filtered, stable query instead, closing the gap for
+        # any company whose owner this sweep already knows about. A company
+        # whose owner has genuinely never been seen by any sweep is still
+        # missed — the same one-sweep-lag shape as the other citizen-lookup
+        # gaps in this file.
+        known_owner_ids: list[str] = []
+        async with db._conn.execute("SELECT user_id FROM citizen_levels") as cur:
+            async for row in cur:
+                known_owner_ids.append(str(row[0]))
+
+        company_id_set = set(company_ids)
+        reconciled_new = 0
+        truncated_owners = 0
+        for start in range(0, len(known_owner_ids), _COMPANY_CENSUS_BATCH):
+            chunk = known_owner_ids[start : start + _COMPANY_CENSUS_BATCH]
+            results = await client.batch_get(
+                "/company.getCompanies",
+                [{"userId": uid, "perPage": 100} for uid in chunk],
+                batch_size=_COMPANY_CENSUS_BATCH,
+            )
+            for raw_owned in results:
+                data = (
+                    _unwrap_trpc(raw_owned) if isinstance(raw_owned, dict) else raw_owned
+                )
+                if not isinstance(data, dict):
+                    continue
+                owned_ids = data.get("items") or []
+                if not isinstance(owned_ids, list):
+                    continue
+                # A citizen owning >100 companies would need a second page we
+                # don't chase — rare enough (individual players, not
+                # countries) that logging it is enough.
+                if data.get("nextCursor") or data.get("cursor"):
+                    truncated_owners += 1
+                for cid in owned_ids:
+                    cid = str(cid)
+                    if cid and cid not in company_id_set:
+                        company_id_set.add(cid)
+                        company_ids.append(cid)
+                        reconciled_new += 1
+
+        if reconciled_new or truncated_owners:
+            logger.info(
+                "company_census: reconciliation found %d companies the "
+                "unfiltered listing missed (%d owners truncated at 100 "
+                "companies, not chased further)",
+                reconciled_new, truncated_owners,
+            )
+
+        # {user_id: is_active} / {user_id: is_banned} for every citizen this
+        # sweep already knows about (populated by the citizen sweep that ran
+        # earlier this same run_once() pass, plus whatever inactive/banned
+        # citizens survived from past sweeps now that prune_stale_citizens
+        # leaves them alone) — read once up front so checking activity/ban
+        # status below costs no API call.
+        owner_active: dict[str, bool] = {}
+        worker_banned: dict[str, bool] = {}
+        async with db._conn.execute(
+            "SELECT user_id, is_active, is_banned FROM citizen_levels"
+        ) as cur:
+            async for row in cur:
+                uid = str(row[0])
+                owner_active[uid] = bool(row[1])
+                worker_banned[uid] = bool(row[2])
+
         # ── phase 2: details, in batches ─────────────────────────────────────
-        # (country_id, item_code) → [companies, workers, staffed]
-        # "staffed" counts companies with at least one worker, which cannot be
-        # derived from the other two afterwards.
-        counts: dict[tuple[str, str], list[int]] = {}
-        # (country_id, item_code, owner_id) → [companies, workers, staffed].
-        # Built from the same responses, so the owner breakdown and the staffed
-        # counts both cost no extra API calls.
-        owner_counts: dict[tuple[str, str, str], list[int]] = {}
-        # (company_id, country_id, item_code) for every company with >=1 worker,
-        # used below to build the worker→company map for tax attribution.
-        staffed_companies: list[tuple[str, str, str]] = []
+        # One entry per company that survives the disabled/inactive-owner
+        # checks. Counts aren't bucketed yet — a banned-worker exclusion needs
+        # each staffed company's worker roster first (see below), which the
+        # simple workerCount field on this payload can't provide.
+        active_companies: list[dict] = []
         checked = 0
+        disabled = 0
+        inactive_owner = 0
         for start in range(0, len(company_ids), _COMPANY_CENSUS_BATCH):
             chunk = company_ids[start : start + _COMPANY_CENSUS_BATCH]
             results = await client.batch_get(
@@ -672,36 +804,114 @@ async def fetch_company_census(client: APIClient, db: Database) -> int:
                 if not isinstance(company, dict):
                     continue  # deleted between phases, or a failed lookup
                 checked += 1
+                # A company the owner has switched off still exists (and is
+                # still returned by getById) but produces nothing and pays no
+                # wages — it only carries a "disabledAt" timestamp, present on
+                # no other company. Counting it would inflate every /fabrieken
+                # and /productie total with dead companies.
+                if company.get("disabledAt"):
+                    disabled += 1
+                    continue
                 country_id = region_country.get(str(company.get("region") or ""))
                 item_code = str(company.get("itemCode") or "")
                 if not country_id or not item_code:
                     continue
-                try:
-                    workers = int(company.get("workerCount") or 0)
-                except (TypeError, ValueError):
-                    workers = 0
-
-                staffed = 1 if workers > 0 else 0
-
-                bucket = counts.setdefault((country_id, item_code), [0, 0, 0])
-                bucket[0] += 1
-                bucket[1] += workers
-                bucket[2] += staffed
-
                 owner_id = str(company.get("user") or "")
-                if owner_id:
-                    obucket = owner_counts.setdefault(
-                        (country_id, item_code, owner_id), [0, 0, 0]
-                    )
-                    obucket[0] += 1
-                    obucket[1] += workers
-                    obucket[2] += staffed
+                # A company owned by an inactive player is just as "not used
+                # anymore" as a disabled one — same exclusion, same reasoning.
+                # owner_active.get(...) is False only for owners this sweep
+                # positively knows are inactive; unknown owners (None) are
+                # counted, same one-sweep-lag tradeoff as elsewhere.
+                if owner_id and owner_active.get(owner_id) is False:
+                    inactive_owner += 1
+                    continue
+                try:
+                    raw_workers = int(company.get("workerCount") or 0)
+                except (TypeError, ValueError):
+                    raw_workers = 0
 
-                # Companies with staff need a worker roster so wage
-                # transactions can be attributed back to this company.
-                if staffed:
-                    staffed_companies.append(
-                        (str(company.get("_id") or ""), country_id, item_code)
+                active_companies.append({
+                    "country_id": country_id,
+                    "item_code": item_code,
+                    "owner_id": owner_id,
+                    "company_id": str(company.get("_id") or ""),
+                    "raw_workers": raw_workers,
+                })
+
+        # Worker rosters — needed both to build worker_company_map (tax
+        # attribution) and, new here, to know which of a company's workers are
+        # banned so the census can exclude them from its counts. Only
+        # companies workerCount already says are staffed need a roster call.
+        # Batched 100 per request, so ~10k staffed companies costs ~100
+        # requests — unchanged from before this only fed tax attribution.
+        roster_candidates = [
+            c for c in active_companies if c["raw_workers"] > 0 and c["company_id"]
+        ]
+        worker_rows: list[tuple[str, str, str, str]] = []
+        # {company_id: non-banned worker count}. A company absent from this
+        # dict either had zero raw workers (falls back to raw_workers = 0
+        # below, same result) or its roster fetch failed (falls back to
+        # raw_workers too, so a transient API error under-fetches rather than
+        # silently zeroing out a real company's worker count).
+        effective_workers: dict[str, int] = {}
+        banned_worker_hits = 0
+        for start in range(0, len(roster_candidates), _COMPANY_CENSUS_BATCH):
+            chunk = roster_candidates[start : start + _COMPANY_CENSUS_BATCH]
+            results = await client.batch_get(
+                "/worker.getWorkers",
+                [{"companyId": c["company_id"]} for c in chunk],
+                batch_size=_COMPANY_CENSUS_BATCH,
+            )
+            for c, raw_workers_resp in zip(chunk, results):
+                data = (
+                    _unwrap_trpc(raw_workers_resp)
+                    if isinstance(raw_workers_resp, dict)
+                    else raw_workers_resp
+                )
+                if not isinstance(data, dict):
+                    continue
+                non_banned = 0
+                for w in data.get("workers") or []:
+                    if not isinstance(w, dict):
+                        continue
+                    worker_id = str(w.get("user") or "")
+                    if not worker_id:
+                        continue
+                    # worker_company_map keeps every worker regardless of ban
+                    # status — wage-tax attribution is unaffected by this.
+                    worker_rows.append(
+                        (worker_id, c["company_id"], c["country_id"], c["item_code"])
+                    )
+                    if worker_banned.get(worker_id) is True:
+                        banned_worker_hits += 1
+                        continue
+                    non_banned += 1
+                effective_workers[c["company_id"]] = non_banned
+
+        # ── bucket census counts, now that banned-worker-adjusted counts are
+        # known for every staffed company ─────────────────────────────────
+        counts: dict[tuple[str, str], list[int]] = {}
+        owner_counts: dict[tuple[str, str, str], list[int]] = {}
+        owner_map_rows: list[tuple[str, str, str, str]] = []
+        for c in active_companies:
+            workers = effective_workers.get(c["company_id"], c["raw_workers"])
+            staffed = 1 if workers > 0 else 0
+
+            bucket = counts.setdefault((c["country_id"], c["item_code"]), [0, 0, 0])
+            bucket[0] += 1
+            bucket[1] += workers
+            bucket[2] += staffed
+
+            if c["owner_id"]:
+                obucket = owner_counts.setdefault(
+                    (c["country_id"], c["item_code"], c["owner_id"]), [0, 0, 0]
+                )
+                obucket[0] += 1
+                obucket[1] += workers
+                obucket[2] += staffed
+                if c["company_id"]:
+                    owner_map_rows.append(
+                        (c["company_id"], c["owner_id"], c["country_id"], c["item_code"])
                     )
 
         captured_at = datetime.now(timezone.utc).isoformat()
@@ -714,32 +924,6 @@ async def fetch_company_census(client: APIClient, db: Database) -> int:
             duration_ms=duration_ms,
         )
 
-        # Worker rosters for staffed companies — the worker→company map that
-        # wage transactions are attributed through. Batched 100 per request, so
-        # ~10k staffed companies costs ~100 requests.
-        worker_rows: list[tuple[str, str, str, str]] = []
-        for start in range(0, len(staffed_companies), _COMPANY_CENSUS_BATCH):
-            chunk = staffed_companies[start : start + _COMPANY_CENSUS_BATCH]
-            results = await client.batch_get(
-                "/worker.getWorkers",
-                [{"companyId": cid} for cid, _, _ in chunk],
-                batch_size=_COMPANY_CENSUS_BATCH,
-            )
-            for (cid, country_id, item_code), raw_workers in zip(chunk, results):
-                data = (
-                    _unwrap_trpc(raw_workers)
-                    if isinstance(raw_workers, dict)
-                    else raw_workers
-                )
-                if not isinstance(data, dict):
-                    continue
-                for w in data.get("workers") or []:
-                    if not isinstance(w, dict):
-                        continue
-                    worker_id = str(w.get("user") or "")
-                    if worker_id:
-                        worker_rows.append((worker_id, cid, country_id, item_code))
-
         mapped = await db.save_worker_company_map(worker_rows, captured_at)
         worker_cutoff = (
             datetime.now(timezone.utc) - timedelta(days=WORKER_MAP_RETENTION_DAYS)
@@ -751,6 +935,12 @@ async def fetch_company_census(client: APIClient, db: Database) -> int:
             [(c, i, o, v[0], v[1], v[2]) for (c, i, o), v in owner_counts.items()],
         )
 
+        owner_map_written = await db.save_company_owner_map(owner_map_rows, captured_at)
+        owner_map_cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=TAX_RETENTION_DAYS)
+        ).isoformat()
+        pruned_owner_map = await db.prune_company_owner_map(owner_map_cutoff)
+
         cutoff = (
             datetime.now(timezone.utc) - timedelta(days=CENSUS_RETENTION_DAYS)
         ).isoformat()
@@ -758,10 +948,12 @@ async def fetch_company_census(client: APIClient, db: Database) -> int:
 
         await db.mark_finished(dataset, status="ok", duration_ms=duration_ms)
         logger.info(
-            "company_census: listed=%d checked=%d rows=%d owners=%d workers=%d "
-            "pruned=%d (%.1fs)",
-            len(company_ids), checked, written, owner_rows, mapped, pruned,
-            duration_ms / 1000,
+            "company_census: listed=%d reconciled=%d checked=%d disabled=%d "
+            "inactive_owner=%d banned_worker_hits=%d rows=%d owners=%d "
+            "workers=%d owner_map=%d pruned=%d pruned_owner_map=%d (%.1fs)",
+            len(company_ids), reconciled_new, checked, disabled, inactive_owner,
+            banned_worker_hits, written, owner_rows, mapped, owner_map_written,
+            pruned, pruned_owner_map, duration_ms / 1000,
         )
         return written
     except Exception as exc:  # noqa: BLE001
@@ -770,6 +962,100 @@ async def fetch_company_census(client: APIClient, db: Database) -> int:
             dataset, status="error", error=str(exc)[:500], duration_ms=duration_ms
         )
         logger.exception("company_census sweep failed")
+        return 0
+
+
+async def fetch_missing_owner_citizenships(
+    cache: CitizenCache, db: Database
+) -> int:
+    """Backfill ``citizen_levels`` for company owners the citizen sweep missed.
+
+    ``user.getUsersByCountry`` — the endpoint the regular citizen sweep
+    (:func:`fetch_all_citizen_levels`) uses to enumerate each country's
+    citizens — was confirmed live to silently omit inactive players
+    (``isActive: false``). Their profile is still fully live and fetchable by
+    ID; a country-by-country sweep just never learns those IDs exist. Since
+    ``company_owners`` (just written by :func:`fetch_company_census`) already
+    has the *exact* set of owner IDs that matter, any of them missing from
+    ``citizen_levels`` is fetched directly by ID here — no discovery needed,
+    no dependence on the broken listing endpoint.
+
+    This is what makes ``/productie`` on the Nigeria bot able to attribute a
+    company to its owner's nationality even when the owner is inactive.
+    """
+    dataset = "all_countries.owner_citizenships"
+    await db.mark_started(dataset, source="full_fetcher")
+    started = time.monotonic()
+    try:
+        async with db._conn.execute(
+            "SELECT DISTINCT co.owner_id FROM company_owners co "
+            "LEFT JOIN citizen_levels cl ON cl.user_id = co.owner_id "
+            "WHERE cl.user_id IS NULL"
+        ) as cur:
+            missing = [str(r[0]) for r in await cur.fetchall()]
+
+        recorded = await cache.refresh_specific_users(missing)
+
+        duration_ms = int((time.monotonic() - started) * 1000)
+        await db.mark_finished(dataset, status="ok", duration_ms=duration_ms)
+        logger.info(
+            "owner_citizenships: %d owners missing, %d recorded (%.1fs)",
+            len(missing), recorded, duration_ms / 1000,
+        )
+        return recorded
+    except Exception as exc:  # noqa: BLE001
+        duration_ms = int((time.monotonic() - started) * 1000)
+        await db.mark_finished(
+            dataset, status="error", error=str(exc)[:500], duration_ms=duration_ms
+        )
+        logger.exception("owner_citizenships backfill failed")
+        return 0
+
+
+async def fetch_missing_worker_citizenships(
+    cache: CitizenCache, db: Database
+) -> int:
+    """Backfill ``citizen_levels`` for company workers the citizen sweep missed.
+
+    Mirrors :func:`fetch_missing_owner_citizenships` exactly, one hop further
+    down the chain: ``worker_company_map`` (just refreshed by
+    :func:`fetch_company_census`) has the exact set of worker IDs that
+    matter, and any of them missing from ``citizen_levels`` is fetched
+    directly by ID — the same gap (inactive players excluded from
+    ``user.getUsersByCountry``) applies to workers as much as owners.
+
+    This is what makes the banned-worker exclusion in
+    :func:`fetch_company_census` able to see workers who are inactive *and*
+    banned at once (confirmed live to coexist) — such a worker is otherwise
+    never discovered by anything else that touches ``citizen_levels``, since
+    they aren't necessarily a company owner too.
+    """
+    dataset = "all_countries.worker_citizenships"
+    await db.mark_started(dataset, source="full_fetcher")
+    started = time.monotonic()
+    try:
+        async with db._conn.execute(
+            "SELECT DISTINCT wm.worker_id FROM worker_company_map wm "
+            "LEFT JOIN citizen_levels cl ON cl.user_id = wm.worker_id "
+            "WHERE cl.user_id IS NULL"
+        ) as cur:
+            missing = [str(r[0]) for r in await cur.fetchall()]
+
+        recorded = await cache.refresh_specific_users(missing)
+
+        duration_ms = int((time.monotonic() - started) * 1000)
+        await db.mark_finished(dataset, status="ok", duration_ms=duration_ms)
+        logger.info(
+            "worker_citizenships: %d workers missing, %d recorded (%.1fs)",
+            len(missing), recorded, duration_ms / 1000,
+        )
+        return recorded
+    except Exception as exc:  # noqa: BLE001
+        duration_ms = int((time.monotonic() - started) * 1000)
+        await db.mark_finished(
+            dataset, status="error", error=str(exc)[:500], duration_ms=duration_ms
+        )
+        logger.exception("worker_citizenships backfill failed")
         return 0
 
 
@@ -982,6 +1268,8 @@ async def run_once(client: APIClient, db: Database, *, country_limit: int = 0) -
       - mu_memberships      FULL_FETCH_ENABLE_MU_MEMBERSHIPS (default 0 — slow)
       - company_census      FULL_FETCH_ENABLE_COMPANY_CENSUS (default 1)
       - wage_taxes          FULL_FETCH_ENABLE_WAGE_TAXES (default 1; needs census)
+      - owner_citizenships  FULL_FETCH_ENABLE_OWNER_CITIZENSHIPS (default 1; needs census)
+      - worker_citizenships FULL_FETCH_ENABLE_WORKER_CITIZENSHIPS (default 1; needs census)
       - alliances           FULL_FETCH_ENABLE_ALLIANCES (default 1)
     """
     _written, countries = await fetch_country_snapshots(client, db)
@@ -1002,10 +1290,14 @@ async def run_once(client: APIClient, db: Database, *, country_limit: int = 0) -
         await fetch_mu_memberships(cache, db)
     if _env_int("FULL_FETCH_ENABLE_COMPANY_CENSUS", 1) == 1:
         await fetch_company_census(client, db)
-        # Must run after the census: it depends on the worker→company map the
-        # census refreshes.
+        # Both must run after the census: one depends on the worker→company
+        # map it refreshes, the other on the owner IDs in company_owners.
         if _env_int("FULL_FETCH_ENABLE_WAGE_TAXES", 1) == 1:
             await fetch_wage_taxes(client, db, countries)
+        if _env_int("FULL_FETCH_ENABLE_OWNER_CITIZENSHIPS", 1) == 1:
+            await fetch_missing_owner_citizenships(cache, db)
+        if _env_int("FULL_FETCH_ENABLE_WORKER_CITIZENSHIPS", 1) == 1:
+            await fetch_missing_worker_citizenships(cache, db)
 
 
 async def main() -> None:

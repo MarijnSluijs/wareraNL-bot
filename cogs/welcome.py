@@ -1560,10 +1560,35 @@ class Welcome(commands.Cog, name="welcome"):
                 parts.append(f" en claim je rollen in <#{roles_ch}>")
             if support_ch:
                 parts.append(f". Voor vragen kun terecht in <#{support_ch}>")
+            parts.append(".\n\nHier een paar kleine tips om je op weg te helpen:\n")
+            tips = [
+                (
+                    "Wij werken met ping-rollen in deze server, jij kan kiezen waarvoor je "
+                    "een ping (mededeling) wilt ontvangen. Die kan je kiezen in "
+                    + (f"<#{roles_ch}>." if roles_ch else "de rollenkanaal.")
+                ),
+                (
+                    "We hebben redelijk wat kanalen in deze server, via 'Browse Channels' "
+                    "bovenin de kanalenlijst kan je selectief kanalen aan-/uitzetten."
+                ),
+                (
+                    "In het kanaal " + (f"<#{handleiding_ch}>" if handleiding_ch else "beginner-handleiding")
+                    + " staat een link naar onze wikipedia, hier kan je ook een "
+                    "beginnershandleiding vinden."
+                ),
+                (
+                    "We hebben een hele behulpzame community: kom je ergens niet uit, of "
+                    "heb je vragen? Stel ze in "
+                    + (f"<#{support_ch}>" if support_ch else "vragen-en-antwoorden")
+                    + " of in de in-game chat."
+                ),
+            ]
+            parts.append("\n".join(f"{i}. {tip}" for i, tip in enumerate(tips, 1)))
             parts.append(
-                f".\n\nAls laatste: je kan op je profiel bij `Settings > Referrals` een referrer "
-                f"opgeven, vul hier het liefst een **Nederlander** in (bijvoorbeeld "
-                f"*{refferer_name}*), dan krijgen jij en de referrer muntjes."
+                f"\n\nAls laatste: je kan op je profiel klikken op je profielfoto, dan op "
+                f"**Profile**, en dan **Referrals** — daar kan je een referrer opgeven. Vul "
+                f"hier het liefst een **Nederlander** in (bijvoorbeeld *{refferer_name}*), "
+                f"dan krijgen jij en de referrer muntjes."
             )
 
             welcome_embed = discord.Embed(

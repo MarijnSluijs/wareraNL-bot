@@ -76,6 +76,8 @@ class CitizenCache:
             name = self._extract_name(obj)
             mu_id, mu_name = self._extract_mu_info(obj)
             avatar_url = self._extract_avatar_url(obj)
+            is_active = self._extract_is_active(obj)
+            is_banned = self._extract_is_banned(obj)
             if lvl is not None:
                 await self._db.upsert_citizen_level(
                     uid,
@@ -89,6 +91,8 @@ class CitizenCache:
                     mu_id=mu_id,
                     mu_name=mu_name,
                     avatar_url=avatar_url,
+                    is_active=is_active,
+                    is_banned=is_banned,
                 )
                 recorded += 1
 
@@ -141,6 +145,101 @@ class CitizenCache:
             logger.debug(
                 "refresh_country: pruned %d stale citizens for %s", pruned, country_id
             )
+        return recorded
+
+    async def refresh_specific_users(self, user_ids: list[str]) -> int:
+        """Fetch and persist an explicit list of user IDs via getUserLite.
+
+        Exists for citizens who fall out of :meth:`refresh_country`'s per-country
+        sweep entirely: ``user.getUsersByCountry`` was confirmed live to omit
+        inactive players (``isActive: false``) from its paginated results, even
+        though such a player's profile (and companies) are still fully live and
+        fetchable by ID. A country-by-country sweep can therefore never see
+        them no matter how often it runs — the gap has to be closed by asking
+        for these specific IDs directly, which is what this method is for.
+
+        Callers are expected to already know which IDs need backfilling (e.g.
+        company owners with no ``citizen_levels`` row yet — see
+        ``full_fetcher.fetch_missing_owner_citizenships``); this method does no
+        discovery of its own and does not prune anything, since it only ever
+        touches the exact rows it was asked about.
+
+        This is also the only path that ever writes ``is_active = False``:
+        the per-country sweep in :meth:`refresh_country` can't, because
+        ``user.getUsersByCountry`` never returns inactive players to begin
+        with. Once written, :meth:`Database.prune_stale_citizens` leaves
+        inactive rows alone, so — unlike active citizens — an inactive owner
+        only needs to be fetched here once, not every sweep.
+
+        Returns the number of citizens successfully recorded.
+        """
+        if not user_ids:
+            return 0
+
+        updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        inputs = [{"userId": uid} for uid in user_ids]
+        results = await self._client.batch_get(
+            "/user.getUserLite", inputs, batch_size=100, chunk_sleep=0.15,
+        )
+
+        recorded = 0
+        pill_tracking_rows: list[tuple] = []
+        combat_state_rows: list[tuple] = []
+
+        for uid, obj in zip(user_ids, results):
+            if not isinstance(obj, dict):
+                continue
+            country_id = obj.get("country")
+            if not country_id:
+                continue  # can't satisfy citizen_levels' NOT NULL country_id
+            country_id = str(country_id)
+
+            lvl = self._extract_level(obj)
+            if lvl is not None:
+                await self._db.upsert_citizen_level(
+                    uid,
+                    country_id,
+                    lvl,
+                    updated_at,
+                    skill_mode=self._extract_skill_mode(obj),
+                    last_skills_reset_at=self._extract_last_skills_reset_at(obj),
+                    citizen_name=self._extract_name(obj),
+                    last_login_at=self._extract_last_login_at(obj),
+                    avatar_url=self._extract_avatar_url(obj),
+                    is_active=self._extract_is_active(obj),
+                    is_banned=self._extract_is_banned(obj),
+                )
+                recorded += 1
+
+            buffs = obj.get("buffs") or {}
+            buff_end_at = buffs.get("buffEndAt")
+            exp_ts: int | None = None
+            if buff_end_at:
+                try:
+                    exp_ts = int(
+                        datetime.fromisoformat(buff_end_at.replace("Z", "+00:00")).timestamp()
+                    )
+                except Exception:
+                    pass
+            pill_tracking_rows.append((uid, country_id, exp_ts, updated_at))
+
+            health_cur, health_max, hunger_cur, hunger_max = self._extract_combat_state(obj)
+            if health_cur is not None or hunger_cur is not None:
+                combat_state_rows.append(
+                    (uid, country_id, health_cur, health_max, hunger_cur, hunger_max)
+                )
+
+        if pill_tracking_rows:
+            try:
+                await self._db.bulk_upsert_pill_tracking(pill_tracking_rows)
+            except Exception:
+                logger.warning("refresh_specific_users: failed to persist pill tracking")
+        if combat_state_rows:
+            try:
+                await self._db.bulk_upsert_combat_state(combat_state_rows, updated_at)
+            except Exception:
+                logger.warning("refresh_specific_users: failed to persist combat state")
+
         return recorded
 
     async def fetch_mu_players_live(
@@ -659,6 +758,38 @@ class CitizenCache:
         if not isinstance(obj, dict):
             return None
         return obj.get("avatarUrl") or None
+
+    @staticmethod
+    def _extract_is_active(obj: Any) -> bool:
+        """Pull ``isActive`` from a getUserLite result.
+
+        Confirmed live to always be present (boolean) on both listing-endpoint
+        and by-ID responses. Defaults to True when missing or malformed so a
+        future API change degrades to "never excluded" rather than silently
+        marking everyone inactive.
+        """
+        if not isinstance(obj, dict):
+            return True
+        val = obj.get("isActive")
+        return val if isinstance(val, bool) else True
+
+    @staticmethod
+    def _extract_is_banned(obj: Any) -> bool:
+        """Pull ``infos.isBanned`` from a getUserLite result.
+
+        Confirmed live present on both listing-endpoint and by-ID responses
+        (a banned player can also be ``isActive: false`` at the same time).
+        Defaults to False when missing or malformed — a schema change should
+        degrade to "never excluded", never to "everyone banned".
+        """
+        if not isinstance(obj, dict):
+            return False
+        infos = obj.get("infos")
+        if isinstance(infos, dict):
+            val = infos.get("isBanned")
+            if isinstance(val, bool):
+                return val
+        return False
 
     @staticmethod
     def _extract_name(obj: Any) -> str | None:

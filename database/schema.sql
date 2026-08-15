@@ -104,6 +104,13 @@ CREATE TABLE IF NOT EXISTS division_mu_overrides (
 -- ── Citizens ──────────────────────────────────────────────────────────────────
 
 -- citizen_levels: hourly snapshot of level, skill mode, and MU per citizen
+--   is_active mirrors getUserLite's "isActive" — false for players
+--   user.getUsersByCountry silently excludes from its own listing (see
+--   services/citizen_cache.py). Defaults to 1 because every row populated by
+--   the normal per-country sweep is, by construction, active.
+--   is_banned mirrors getUserLite's "infos.isBanned". Defaults to 0; a banned
+--   player can also be inactive (confirmed live), so it needs the same
+--   by-ID backfill path as is_active to ever be known for such players.
 CREATE TABLE IF NOT EXISTS citizen_levels (
     user_id              TEXT PRIMARY KEY,
     country_id           TEXT NOT NULL,
@@ -115,7 +122,9 @@ CREATE TABLE IF NOT EXISTS citizen_levels (
     mu_id                TEXT,
     mu_name              TEXT,
     updated_at           TEXT NOT NULL,
-    avatar_url           TEXT
+    avatar_url           TEXT,
+    is_active            INTEGER NOT NULL DEFAULT 1,
+    is_banned            INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_citizen_levels_country ON citizen_levels(country_id);
 CREATE INDEX IF NOT EXISTS idx_citizen_levels_mu_name ON citizen_levels(mu_name) WHERE mu_name IS NOT NULL;
@@ -637,6 +646,18 @@ CREATE TABLE IF NOT EXISTS item_trades (
 CREATE INDEX IF NOT EXISTS idx_item_trades_code_ts ON item_trades(item_code, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_item_trades_ts      ON item_trades(created_at DESC);
 
+-- item_price_history: hourly snapshot of itemTrading.getPrices (fungible
+-- resources: iron, bread, ammo, cases, ...). The API only exposes the
+-- current price, not history, so this table is what powers the price
+-- chart on the /markt/items pages. Populated by cogs/tasks/item_price_sync.py.
+CREATE TABLE IF NOT EXISTS item_price_history (
+    item_code   TEXT NOT NULL,
+    price       REAL NOT NULL,
+    captured_at TEXT NOT NULL,
+    PRIMARY KEY (item_code, captured_at)
+);
+CREATE INDEX IF NOT EXISTS idx_item_price_history_code_ts ON item_price_history(item_code, captured_at DESC);
+
 -- ── Daily damage accumulator ─────────────────────────────────────────────────
 
 -- daily_dmg_hits: per-player damage per battle, populated hourly by daily_dmg_task.
@@ -868,6 +889,21 @@ CREATE TABLE IF NOT EXISTS country_tax_rates (
     income_tax REAL NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
 );
+
+-- Company -> owner map (latest known owner per company), keyed by company_id
+-- so company_tax_revenue rows (which carry only a company_id) can be traced
+-- back to the owner's nationality. Built from the same company.getById
+-- responses the census phase already reads, so it costs no extra API calls;
+-- populated for every company seen, not just staffed ones. Read by the
+-- Nigeria bot's /tax-breakdown command.
+CREATE TABLE IF NOT EXISTS company_owner_map (
+    company_id TEXT PRIMARY KEY,
+    owner_id   TEXT NOT NULL,
+    country_id TEXT NOT NULL,
+    item_code  TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_company_owner_map_owner ON company_owner_map(owner_id);
 
 -- Tax revenue aggregated per day per (country, item, company).  Daily buckets
 -- keep this bounded at roughly one row per staffed company per day (~10k),
