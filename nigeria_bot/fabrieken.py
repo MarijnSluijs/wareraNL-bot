@@ -36,6 +36,15 @@ region changing hands is reflected within the hour.
 
 The 7-day delta is shown only once history reaches back that far; until then the
 command says so rather than showing a meaningless "+108".
+
+Command name and argument names stay Dutch (``/fabrieken item: land: eigenaren:
+alles: met_werknemers: belasting_per_land: sinds:``) to match the rest of this
+guild's command surface; all *output* (titles, descriptions, table contents,
+error messages) is English. Item labels are therefore duplicated: the
+Dutch ``ITEM_LABELS_NL`` / ``_item_label`` pair stays exactly as it was
+because :mod:`nigeria_bot.productie` imports ``_item_label`` and still needs
+Dutch output — this module's own views use the English ``ITEM_LABELS_EN`` /
+``_item_label_en`` instead.
 """
 
 from __future__ import annotations
@@ -75,6 +84,8 @@ _PAGE_BUDGET = _EMBED_DESC_LIMIT - 250  # headroom for header and truncation not
 # Dutch display names for the item codes that companies actually produce.
 # Anything missing falls back to the raw code, so a new game item degrades
 # gracefully instead of breaking the command.
+# Kept for nigeria_bot.productie, which imports `_item_label` and still shows
+# Dutch output — this module's own views use ITEM_LABELS_EN below instead.
 ITEM_LABELS_NL: dict[str, str] = {
     "ammo": "Munitie",
     "bread": "Brood",
@@ -98,19 +109,48 @@ ITEM_LABELS_NL: dict[str, str] = {
     "wood": "Hout",
 }
 
+# English display names for the same item codes, used by this module's own
+# output. Anything missing falls back to the raw code.
+ITEM_LABELS_EN: dict[str, str] = {
+    "ammo": "Ammo",
+    "bread": "Bread",
+    "coca": "Coca",
+    "cocain": "Cocaine",
+    "concrete": "Concrete",
+    "cookedFish": "Cooked fish",
+    "fish": "Fish",
+    "grain": "Grain",
+    "heavyAmmo": "Heavy ammo",
+    "iron": "Iron",
+    "lead": "Lead",
+    "lightAmmo": "Light ammo",
+    "limestone": "Limestone",
+    "livestock": "Livestock",
+    "oil": "Oil",
+    "paper": "Paper",
+    "petroleum": "Petroleum",
+    "steak": "Steak",
+    "steel": "Steel",
+    "wood": "Wood",
+}
+
 
 def _item_label(code: str) -> str:
     return ITEM_LABELS_NL.get(code, code)
 
 
+def _item_label_en(code: str) -> str:
+    return ITEM_LABELS_EN.get(code, code)
+
+
 def _fmt_int(n: int) -> str:
     """Thousands-separated with a narrow no-break space (matches other cogs)."""
-    return f"{n:,}".replace(",", " ")
+    return f"{n:,}".replace(",", " ")
 
 
 def _fmt_money(v: float) -> str:
     """Money with two decimals and the same narrow-space grouping as counts."""
-    return f"{v:,.2f}".replace(",", "\u202f")
+    return f"{v:,.2f}".replace(",", " ")
 
 
 def _fmt_delta(now: int, then: int) -> str:
@@ -461,15 +501,15 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         message(s) — using the 4096-char *description* budget instead, the
         same way ``_view_owners`` paginates a long owner list.
         """
-        title = f"💰 Belasting per land van eigenaar — {scope_title}"
+        title = f"💰 Tax by owner's country — {scope_title}"
         if not await self._tax_available(conn):
             return []
         if not await self._owner_map_available(conn):
             return [discord.Embed(
                 title=title,
                 description=(
-                    "_Nog niet beschikbaar — deze uitsplitsing vereist een nieuwere "
-                    "versie van de bedrijvenscan. Probeer het over een uur opnieuw._"
+                    "_Not yet available — this breakdown requires a newer "
+                    "version of the company scan. Please try again in an hour._"
                 ),
                 colour=discord.Colour.orange(),
             )]
@@ -479,31 +519,32 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         if not rows or total_tax <= 0:
             return [discord.Embed(
                 title=title,
-                description="_Nog geen belasting geïnd in deze scope._",
+                description="_No tax collected yet in this scope._",
                 colour=discord.Colour.orange(),
             )]
 
         entries = [
-            f"`{(names.get(cid, cid) if cid else '❓ Onbekend'):<20}` "
-            f"{_fmt_money(tax):>12} CC · {_fmt_int(companies)} bedrijven · "
+            f"`{(names.get(cid, cid) if cid else '❓ Unknown'):<20}` "
+            f"{_fmt_money(tax):>12} CC · {_fmt_int(companies)} "
+            f"{'company' if companies == 1 else 'companies'} · "
             f"{100.0 * tax / total_tax:.0f}%"
             for cid, tax, _wage, companies in rows
         ]
 
-        header = f"**Totaal:** {_fmt_money(total_tax)} CC over **{len(rows)}** landen"
-        header += f", sinds {since_day}." if since_day else "."
+        header = f"**Total:** {_fmt_money(total_tax)} CC across **{len(rows)}** countries"
+        header += f", since {since_day}." if since_day else "."
         started_at = await self._tax_started_at(conn)
         if started_at:
             try:
                 since = datetime.fromisoformat(started_at)
                 if since_day and since_day < since.strftime("%Y-%m-%d"):
                     header += (
-                        f"\n*Let op: belasting wordt pas bijgehouden sinds "
-                        f"{since:%d-%m-%Y %H:%M} UTC — data van vóór die datum "
-                        f"bestaat niet.*"
+                        f"\n*Note: tax has only been tracked since "
+                        f"{since:%d-%m-%Y %H:%M} UTC — data from before that "
+                        f"date doesn't exist.*"
                     )
                 else:
-                    header += f"\n*Belasting bijgehouden sinds {since:%d-%m-%Y %H:%M} UTC.*"
+                    header += f"\n*Tax tracked since {since:%d-%m-%Y %H:%M} UTC.*"
             except (ValueError, TypeError):
                 pass
 
@@ -561,28 +602,28 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         for offset in range(_TAX_DAYS - 1, -1, -1):
             day = (today - timedelta(days=offset)).isoformat()
             rows.append((day[5:], _fmt_money(per_day.get(day, 0.0))))
-        table = _table(("Dag", "Belasting"), (7, 14), rows)
+        table = _table(("Day", "Tax"), (7, 14), rows)
 
         lines = [table]
         week_total = sum(per_day.values())
-        lines.append(f"**7 dagen totaal:** {_fmt_money(week_total)} CC")
+        lines.append(f"**7-day total:** {_fmt_money(week_total)} CC")
         # Only claim a monthly figure once there is more than a week of it,
         # otherwise it just restates the 7-day total.
         if month_days > _TAX_DAYS:
             lines.append(
-                f"**{_TAX_MONTH_DAYS} dagen totaal:** {_fmt_money(month_tax)} CC "
-                f"*(over {month_days} dagen met data)*"
+                f"**{_TAX_MONTH_DAYS}-day total:** {_fmt_money(month_tax)} CC "
+                f"*(across {month_days} days with data)*"
             )
         if started_at:
             try:
                 since = datetime.fromisoformat(started_at)
-                lines.append(f"*Belasting bijgehouden sinds {since:%d-%m-%Y %H:%M} UTC.*")
+                lines.append(f"*Tax tracked since {since:%d-%m-%Y %H:%M} UTC.*")
             except (ValueError, TypeError):
                 pass
         else:
-            lines.append("*Belastingregistratie is nog niet gestart.*")
+            lines.append("*Tax tracking has not started yet.*")
 
-        return ("💰 Belastinginkomsten", "\n".join(lines))
+        return ("💰 Tax revenue", "\n".join(lines))
 
     async def _country_names(self, conn) -> dict[str, str]:
         """``{country_id: name}`` from the country sweep's snapshot table."""
@@ -599,7 +640,7 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
     # ── argument resolution ──────────────────────────────────────────────────
 
     async def _known_item_codes(self, conn) -> set[str]:
-        codes = set(ITEM_LABELS_NL)
+        codes = set(ITEM_LABELS_EN)
         try:
             if await self._census_available(conn):
                 async with conn.execute(
@@ -614,7 +655,7 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         """Map user input to an item code.
 
         Picking a suggestion sends the code (``paper``), but typing the label
-        and pressing enter sends the raw text (``papier``) — Discord does not
+        and pressing enter sends the raw text (``paper``) — Discord does not
         force a selection.  Both must resolve, or the command silently reports
         zero for a perfectly valid item.
         """
@@ -625,7 +666,7 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         for code in codes:
             if code.lower() == needle:
                 return code
-        for code, label in ITEM_LABELS_NL.items():
+        for code, label in ITEM_LABELS_EN.items():
             if label.lower() == needle:
                 return code
         return None
@@ -665,12 +706,12 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
             async with _connect_ro() as conn:
                 codes = await self._known_item_codes(conn)
         except Exception:
-            codes = set(ITEM_LABELS_NL)
+            codes = set(ITEM_LABELS_EN)
         needle = (current or "").strip().lower()
         return [
-            app_commands.Choice(name=_item_label(c), value=c)
-            for c in sorted(codes, key=_item_label)
-            if needle in c.lower() or needle in _item_label(c).lower()
+            app_commands.Choice(name=_item_label_en(c), value=c)
+            for c in sorted(codes, key=_item_label_en)
+            if needle in c.lower() or needle in _item_label_en(c).lower()
         ][:_AUTOCOMPLETE_LIMIT]
 
     async def _country_choices(
@@ -699,22 +740,22 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
 
     @app_commands.command(
         name="fabrieken",
-        description="Toon hoeveel fabrieken er per product en per land staan.",
+        description="Show how many factories exist per item and per country.",
     )
     @app_commands.describe(
-        item="Product. Laat leeg voor een overzicht per land.",
-        land="Land dat de regio's beheerst. Laat leeg voor een overzicht per land.",
-        eigenaren="Toon de grootste eigenaren in plaats van de aantallen.",
-        alles="Toon álle eigenaren i.p.v. de top 25 (kan meerdere berichten opleveren).",
-        met_werknemers="Tel alleen bedrijven die minstens één werknemer hebben.",
+        item="Item. Leave empty for an overview per country.",
+        land="Country that controls the regions. Leave empty for an overview per country.",
+        eigenaren="Show the largest owners instead of the counts.",
+        alles="Show ALL owners instead of the top 25 (may result in multiple messages).",
+        met_werknemers="Only count companies that have at least one worker.",
         belasting_per_land=(
-            "Splits de belastinginkomsten uit naar het land van de bedrijfseigenaren "
-            "i.p.v. per dag."
+            "Break down tax revenue by the country of the company owners "
+            "instead of by day."
         ),
         sinds=(
-            "Alleen gebruikt bij belasting_per_land: tel alleen belasting vanaf deze "
-            "datum (JJJJ-MM-DD). Laat leeg voor de volledige bewaarde geschiedenis "
-            "(~90 dagen)."
+            "Only used with belasting_per_land: only count tax from this date "
+            "onward (YYYY-MM-DD). Leave empty for the full retained history "
+            "(~90 days)."
         ),
     )
     @app_commands.autocomplete(item=_item_choices, land=_country_choices)
@@ -737,8 +778,8 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
             except ValueError:
                 await interaction.followup.send(
                     embed=discord.Embed(
-                        title="🏭 Fabrieken",
-                        description=f"❌ `sinds` moet het formaat JJJJ-MM-DD hebben, niet `{sinds}`.",
+                        title="🏭 Factories",
+                        description=f"❌ `sinds` must be in the format YYYY-MM-DD, not `{sinds}`.",
                         colour=discord.Colour.red(),
                     )
                 )
@@ -746,8 +787,8 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
             if not belasting_per_land:
                 await interaction.followup.send(
                     embed=discord.Embed(
-                        title="🏭 Fabrieken",
-                        description="❌ `sinds` werkt alleen samen met `belasting_per_land:True`.",
+                        title="🏭 Factories",
+                        description="❌ `sinds` only works together with `belasting_per_land:True`.",
                         colour=discord.Colour.red(),
                     )
                 )
@@ -760,10 +801,10 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
             logger.exception("fabrieken: failed to build response")
             embeds = [
                 discord.Embed(
-                    title="🏭 Fabrieken",
+                    title="🏭 Factories",
                     description=(
-                        "⚠️ Kon de bedrijvendatabase niet uitlezen. "
-                        "Probeer het later opnieuw."
+                        "⚠️ Could not read the company database. "
+                        "Please try again later."
                     ),
                     colour=discord.Colour.red(),
                 )
@@ -777,18 +818,18 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         return discord.Embed(
             title=title,
             description=(
-                "⏳ Er is nog geen scan uitgevoerd. De bedrijvenscan draait elk "
-                "uur — probeer het over een uur opnieuw."
+                "⏳ No scan has been run yet. The company scan runs every "
+                "hour — please try again in an hour."
             ),
             colour=discord.Colour.orange(),
         )
 
     def _unknown_embed(self, what: str, raw: str) -> discord.Embed:
         return discord.Embed(
-            title="🏭 Fabrieken",
+            title="🏭 Factories",
             description=(
-                f"❌ `{raw}` is geen bekend {what}. "
-                f"Kies er een uit de suggestielijst."
+                f"❌ `{raw}` is not a known {what}. "
+                f"Pick one from the suggestion list."
             ),
             colour=discord.Colour.red(),
         )
@@ -806,29 +847,29 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         """Dispatch to a view and render it. Only the owner view spans pages."""
         if not os.path.isfile(EXTERNAL_DB_PATH):
             logger.warning("fabrieken: %s does not exist", EXTERNAL_DB_PATH)
-            return [self._no_scan_embed("🏭 Fabrieken")]
+            return [self._no_scan_embed("🏭 Factories")]
 
         async with _connect_ro() as conn:
             if not await self._census_available(conn):
                 logger.warning("fabrieken: census tables not present yet")
-                return [self._no_scan_embed("🏭 Fabrieken")]
+                return [self._no_scan_embed("🏭 Factories")]
 
             # Resolve arguments before touching the census, so a typo is
-            # reported as a typo rather than as "0 bedrijven".
+            # reported as a typo rather than as "0 companies".
             item_code: str | None = None
             if item:
                 item_code = await self._resolve_item(conn, item)
                 if item_code is None:
-                    return [self._unknown_embed("product", item)]
+                    return [self._unknown_embed("item", item)]
             country: tuple[str, str] | None = None
             if land:
                 country = await self._resolve_country(conn, land)
                 if country is None:
-                    return [self._unknown_embed("land", land)]
+                    return [self._unknown_embed("country", land)]
 
             run = await self._latest_run(conn)
             if run is None:
-                return [self._no_scan_embed("🏭 Fabrieken")]
+                return [self._no_scan_embed("🏭 Factories")]
             at, listed, checked = run
             base_at = await self._baseline_run(conn)
             names = await self._country_names(conn)
@@ -857,13 +898,13 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
             # gets its own message(s) appended after the others instead.
             if belasting_per_land:
                 if item_code and country:
-                    scope_title = f"{_item_label(item_code)} in {country[1]}"
+                    scope_title = f"{_item_label_en(item_code)} in {country[1]}"
                 elif item_code:
-                    scope_title = f"{_item_label(item_code)} wereldwijd"
+                    scope_title = f"{_item_label_en(item_code)} worldwide"
                 elif country:
                     scope_title = country[1]
                 else:
-                    scope_title = "wereldwijd"
+                    scope_title = "worldwide"
                 try:
                     tax_embeds = await self._tax_breakdown_embeds(
                         conn,
@@ -892,11 +933,11 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
                         name=tax_field[0], value=tax_field[1], inline=False
                     )
 
-        footer = f"{_fmt_int(checked)} bedrijven gecontroleerd"
+        footer = f"{_fmt_int(checked)} companies checked"
         if listed and listed != checked:
-            footer += f" van {_fmt_int(listed)} gevonden"
+            footer += f" of {_fmt_int(listed)} found"
         try:
-            footer += f" · laatste scan {datetime.fromisoformat(at):%d-%m-%Y %H:%M} UTC"
+            footer += f" · last scan {datetime.fromisoformat(at):%d-%m-%Y %H:%M} UTC"
         except (ValueError, TypeError):
             pass
         embeds[-1].set_footer(text=footer)
@@ -911,8 +952,8 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         country_id, country_name = country
         companies, workers = await self._pair(conn, at, country_id, item_code, staffed)
         lines = [
-            f"**Bedrijven{' met werknemers' if staffed else ''}:** {_fmt_int(companies)}",
-            f"**Werknemers:** {_fmt_int(workers)}",
+            f"**Companies{' with workers' if staffed else ''}:** {_fmt_int(companies)}",
+            f"**Workers:** {_fmt_int(workers)}",
         ]
         if base_at is None:
             lines.append(self._no_baseline_note())
@@ -921,12 +962,12 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
                 conn, base_at, country_id, item_code, staffed
             )
             lines.append(
-                f"\n**Verschil t.o.v. {_DELTA_DAYS} dagen geleden**\n"
-                f"Bedrijven: **{_fmt_delta(companies, old_c)}**  ·  "
-                f"Werknemers: **{_fmt_delta(workers, old_w)}**"
+                f"\n**Change vs. {_DELTA_DAYS} days ago**\n"
+                f"Companies: **{_fmt_delta(companies, old_c)}**  ·  "
+                f"Workers: **{_fmt_delta(workers, old_w)}**"
             )
         return discord.Embed(
-            title=f"🏭 {_item_label(item_code)}fabrieken in {country_name}",
+            title=f"🏭 {_item_label_en(item_code)} factories in {country_name}",
             description="\n".join(lines),
             colour=discord.Colour.green(),
         )
@@ -936,12 +977,12 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         item_code: str, names: dict[str, str], staffed: bool = False,
     ) -> discord.Embed:
         rows = await self._by_country(conn, at, item_code, staffed)
-        label = _item_label(item_code)
-        suffix = " met werknemers" if staffed else ""
+        label = _item_label_en(item_code)
+        suffix = " with workers" if staffed else ""
         if not rows:
             return discord.Embed(
-                title=f"🏭 {label}fabrieken per land",
-                description=f"Geen enkel land heeft {label.lower()}fabrieken{suffix}.",
+                title=f"🏭 {label} factories per country",
+                description=f"No country has {label.lower()} factories{suffix}.",
                 colour=discord.Colour.orange(),
             )
 
@@ -957,12 +998,12 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         shown = rows[:_MAX_LIST_ROWS]
         if base_at is None:
             table = _table(
-                ("Land", "Bedrijven", "Werknemers"), (20, 9, 10),
+                ("Country", "Companies", "Workers"), (20, 9, 10),
                 [(names.get(c, c), _fmt_int(comp), _fmt_int(w)) for c, comp, w in shown],
             )
         else:
             table = _table(
-                ("Land", "Bedrijven", "Werknemers", f"Δ{_DELTA_DAYS}d"), (18, 9, 10, 7),
+                ("Country", "Companies", "Workers", f"Δ{_DELTA_DAYS}d"), (18, 9, 10, 7),
                 [
                     (names.get(c, c), _fmt_int(comp), _fmt_int(w),
                      _fmt_delta(comp, base.get(c, 0)))
@@ -973,15 +1014,15 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         total_c = sum(c for _, c, _ in rows)
         total_w = sum(w for _, _, w in rows)
         head = (
-            f"**{_fmt_int(total_c)}** {label.lower()}fabrieken{suffix} in "
-            f"**{len(rows)}** landen, samen **{_fmt_int(total_w)}** werknemers."
+            f"**{_fmt_int(total_c)}** {label.lower()} factories{suffix} in "
+            f"**{len(rows)}** countries, totaling **{_fmt_int(total_w)}** workers."
         )
         if len(rows) > len(shown):
-            head += f"\n*Top {len(shown)} getoond.*"
+            head += f"\n*Top {len(shown)} shown.*"
         if base_at is None:
             head += self._no_baseline_note()
         return discord.Embed(
-            title=f"🏭 {label}fabrieken per land",
+            title=f"🏭 {label} factories per country",
             description=head + "\n" + table,
             colour=discord.Colour.green(),
         )
@@ -992,11 +1033,11 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
     ) -> discord.Embed:
         country_id, country_name = country
         rows = await self._by_item(conn, at, country_id, staffed)
-        suffix = " met werknemers" if staffed else ""
+        suffix = " with workers" if staffed else ""
         if not rows:
             return discord.Embed(
-                title=f"🏭 Fabrieken in {country_name}",
-                description=f"{country_name} heeft geen bedrijven{suffix}.",
+                title=f"🏭 Factories in {country_name}",
+                description=f"{country_name} has no companies{suffix}.",
                 colour=discord.Colour.orange(),
             )
 
@@ -1012,14 +1053,14 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         shown = rows[:_MAX_LIST_ROWS]
         if base_at is None:
             table = _table(
-                ("Product", "Bedrijven", "Werknemers"), (20, 9, 10),
-                [(_item_label(i), _fmt_int(c), _fmt_int(w)) for i, c, w in shown],
+                ("Item", "Companies", "Workers"), (20, 9, 10),
+                [(_item_label_en(i), _fmt_int(c), _fmt_int(w)) for i, c, w in shown],
             )
         else:
             table = _table(
-                ("Product", "Bedrijven", "Werknemers", f"Δ{_DELTA_DAYS}d"), (18, 9, 10, 7),
+                ("Item", "Companies", "Workers", f"Δ{_DELTA_DAYS}d"), (18, 9, 10, 7),
                 [
-                    (_item_label(i), _fmt_int(c), _fmt_int(w), _fmt_delta(c, base.get(i, 0)))
+                    (_item_label_en(i), _fmt_int(c), _fmt_int(w), _fmt_delta(c, base.get(i, 0)))
                     for i, c, w in shown
                 ],
             )
@@ -1027,13 +1068,13 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         total_c = sum(c for _, c, _ in rows)
         total_w = sum(w for _, _, w in rows)
         head = (
-            f"**{_fmt_int(total_c)}** bedrijven{suffix} in **{len(rows)}** "
-            f"productsoorten, samen **{_fmt_int(total_w)}** werknemers."
+            f"**{_fmt_int(total_c)}** companies{suffix} in **{len(rows)}** "
+            f"item types, totaling **{_fmt_int(total_w)}** workers."
         )
         if base_at is None:
             head += self._no_baseline_note()
         return discord.Embed(
-            title=f"🏭 Fabrieken in {country_name}",
+            title=f"🏭 Factories in {country_name}",
             description=head + "\n" + table,
             colour=discord.Colour.green(),
         )
@@ -1044,33 +1085,33 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         top_countries = await self._totals(conn, at, "country_id", _TOP_N, staffed)
         top_items = await self._totals(conn, at, "item_code", _TOP_N, staffed)
         if not top_countries:
-            return self._no_scan_embed("🏭 Fabrieken wereldwijd")
+            return self._no_scan_embed("🏭 Factories worldwide")
 
         note = (
-            "Alleen bedrijven met minstens één werknemer.\n"
+            "Only companies with at least one worker.\n"
             if staffed else ""
         )
         embed = discord.Embed(
-            title="🏭 Fabrieken wereldwijd",
+            title="🏭 Factories worldwide",
             description=(
-                note + "Gebruik `/fabrieken item:` of `land:` voor een uitsplitsing."
+                note + "Use `/fabrieken item:` or `land:` for a breakdown."
             ),
             colour=discord.Colour.green(),
         )
         embed.add_field(
-            name=f"Top {len(top_countries)} landen",
+            name=f"Top {len(top_countries)} countries",
             value=_table(
-                ("Land", "Bedrijven", "Werknemers"), (20, 9, 10),
+                ("Country", "Companies", "Workers"), (20, 9, 10),
                 [(names.get(c, c), _fmt_int(comp), _fmt_int(w))
                  for c, comp, w in top_countries],
             ),
             inline=False,
         )
         embed.add_field(
-            name=f"Top {len(top_items)} producten",
+            name=f"Top {len(top_items)} items",
             value=_table(
-                ("Product", "Bedrijven", "Werknemers"), (20, 9, 10),
-                [(_item_label(i), _fmt_int(comp), _fmt_int(w))
+                ("Item", "Companies", "Workers"), (20, 9, 10),
+                [(_item_label_en(i), _fmt_int(comp), _fmt_int(w))
                  for i, comp, w in top_items],
             ),
             inline=False,
@@ -1097,19 +1138,19 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         # Rendered as a markdown list rather than a code-block table because
         # links do not render inside code blocks, and every owner links to
         # their in-game companies page.
-        suffix = " met werknemers" if staffed else ""
+        suffix = " with workers" if staffed else ""
         if item_code and country_name:
-            scope = f"{_item_label(item_code).lower()}fabrieken{suffix} in {country_name}"
-            title = f"👑 Grootste eigenaren — {_item_label(item_code)} in {country_name}"
+            scope = f"{_item_label_en(item_code).lower()} factories{suffix} in {country_name}"
+            title = f"👑 Largest owners — {_item_label_en(item_code)} in {country_name}"
         elif item_code:
-            scope = f"{_item_label(item_code).lower()}fabrieken{suffix} wereldwijd"
-            title = f"👑 Grootste eigenaren — {_item_label(item_code)} wereldwijd"
+            scope = f"{_item_label_en(item_code).lower()} factories{suffix} worldwide"
+            title = f"👑 Largest owners — {_item_label_en(item_code)} worldwide"
         elif country_name:
-            scope = f"bedrijven{suffix} in {country_name}"
-            title = f"👑 Grootste eigenaren in {country_name}"
+            scope = f"companies{suffix} in {country_name}"
+            title = f"👑 Largest owners in {country_name}"
         else:
-            scope = f"bedrijven{suffix} wereldwijd"
-            title = "👑 Grootste eigenaren wereldwijd"
+            scope = f"companies{suffix} worldwide"
+            title = "👑 Largest owners worldwide"
 
         limit = _MAX_ALL_ROWS if alles else _MAX_LIST_ROWS
         try:
@@ -1121,15 +1162,15 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
             return [discord.Embed(
                 title=title,
                 description=(
-                    "⏳ De eigenarenlijst is nog niet beschikbaar. Die wordt bij "
-                    "de eerstvolgende scan gevuld — probeer het over een uur opnieuw."
+                    "⏳ The owner list is not yet available. It will be filled "
+                    "in during the next scan — please try again in an hour."
                 ),
                 colour=discord.Colour.orange(),
             )]
         if not rows:
             return [discord.Embed(
                 title=title,
-                description=f"Geen eigenaren gevonden voor {scope}.",
+                description=f"No owners found for {scope}.",
                 colour=discord.Colour.orange(),
             )]
 
@@ -1139,8 +1180,8 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
         names = await self._owner_names(conn, [o for o, _, _ in rows])
 
         header = (
-            f"**{_fmt_int(owners)}** spelers bezitten samen **{_fmt_int(total_c)}** "
-            f"{scope} met **{_fmt_int(total_w)}** werknemers."
+            f"**{_fmt_int(owners)}** players together own **{_fmt_int(total_c)}** "
+            f"{scope} with **{_fmt_int(total_w)}** workers."
         )
 
         entries: list[str] = []
@@ -1150,8 +1191,8 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
                 discord.utils.escape_markdown(name) if name else f"`{owner_id[:8]}…`"
             )
             who = f"**[{label}](https://app.warera.io/user/{owner_id}/companies)**"
-            bedrijf = "bedrijf" if comps == 1 else "bedrijven"
-            werk = "werknemer" if works == 1 else "werknemers"
+            bedrijf = "company" if comps == 1 else "companies"
+            werk = "worker" if works == 1 else "workers"
             entries.append(
                 f"`{rank:>3}.` {who} — {_fmt_int(comps)} {bedrijf}, "
                 f"{_fmt_int(works)} {werk}"
@@ -1171,9 +1212,9 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
                 body = header + "\n\n" + body
             if idx == len(pages) - 1 and truncated:
                 body += (
-                    f"\n\n*{_fmt_int(shown)} van {_fmt_int(owners)} eigenaren getoond"
-                    + ("" if alles else " — gebruik `alles:True` voor de volledige lijst")
-                    + ". Verfijn met `item:` of `land:` voor een kortere lijst.*"
+                    f"\n\n*{_fmt_int(shown)} of {_fmt_int(owners)} owners shown"
+                    + ("" if alles else " — use `alles:True` for the full list")
+                    + ". Narrow with `item:` or `land:` for a shorter list.*"
                 )
             embeds.append(discord.Embed(
                 title=title if idx == 0 else f"{title} ({idx + 1}/{len(pages)})",
@@ -1184,9 +1225,8 @@ class FabriekenCog(commands.Cog, name="fabrieken"):
 
     def _no_baseline_note(self) -> str:
         return (
-            f"\n*Verschil t.o.v. {_DELTA_DAYS} dagen geleden is nog niet "
-            f"beschikbaar — daarvoor moet de scan {_DELTA_DAYS} dagen "
-            f"gedraaid hebben.*"
+            f"\n*Change vs. {_DELTA_DAYS} days ago is not yet available — "
+            f"the scan needs to have run for {_DELTA_DAYS} days first.*"
         )
 
 
