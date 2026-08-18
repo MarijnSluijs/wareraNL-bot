@@ -1,0 +1,22 @@
+# WarEra Ops extension — allowed Discord users and roles.
+#
+# Copy this file to _extension_allowlist.txt (gitignored — that's the one the
+# server actually reads) and fill in real IDs. Edits take effect immediately —
+# the file is re-read on every login/refresh, no server restart needed.
+#
+# Two kinds of line, either can have an optional trailing "# name" comment.
+# Blank lines and full-line comments are ignored.
+#
+#   <user id>          grants that one Discord account access
+#   role:<role id>     grants anyone holding that role in the configured
+#                       Discord server (EXTENSION_GUILD_ID, or ADMIN_GUILD_ID
+#                       if that's unset) access
+#
+# How to find a Discord user/role ID: Discord settings -> Advanced -> turn on
+# Developer Mode, then right-click a name (Copy User ID) or a role in
+# Server Settings -> Roles (Copy Role ID).
+
+111222333444555666  # Marijn
+222333444555666777  # SomeoneElse
+
+role:333444555666777888  # MU Leadership

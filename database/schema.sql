@@ -953,3 +953,59 @@ CREATE TABLE IF NOT EXISTS citizen_combat_state (
     updated_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_citizen_combat_state_country ON citizen_combat_state(country_id);
+
+-- ── Extension (WarEra Ops) auth sessions ───────────────────────────────────────
+-- One row per logged-in browser install. Backs the extension's whitelist-gated
+-- Discord-OAuth login (see rijksoverheid_web/app/routers/extension_auth.py).
+--
+-- The refresh token handed to the extension is "{id}.{secret}" — id is this
+-- row's primary key (O(1) lookup), secret is a high-entropy random string we
+-- only ever store hashed (refresh_token_hash = sha256(secret)), same as a
+-- password. Refresh tokens are single-use and rotated on every refresh; the
+-- immediately-previous hash is kept in prev_token_hash for a short grace
+-- window so a *reused* (i.e. shared/copied) token can be detected — if it's
+-- presented again after rotation, that's proof two parties had a copy, and
+-- the whole session is revoked, forcing a fresh Discord login.
+--
+-- Access tokens are NOT stored here — they're short-lived, stateless,
+-- HMAC-signed tokens (see services.py: mint_access_token/verify_access_token)
+-- verified without a DB hit on every API request.
+CREATE TABLE IF NOT EXISTS extension_sessions (
+    id                  TEXT PRIMARY KEY,   -- session id, also the refresh token's id prefix
+    user_id             TEXT NOT NULL,      -- Discord snowflake
+    username            TEXT NOT NULL,      -- cached Discord username, for admin visibility only
+    refresh_token_hash  TEXT NOT NULL,      -- sha256 hex of the current valid refresh secret
+    prev_token_hash     TEXT,               -- sha256 hex of the just-rotated-away secret (reuse detection)
+    prev_token_expires_at TEXT,             -- grace-window deadline for prev_token_hash
+    created_at          TEXT NOT NULL,
+    last_used_at        TEXT NOT NULL,
+    expires_at          TEXT NOT NULL,      -- sliding expiry, extended on every successful refresh
+    revoked             INTEGER NOT NULL DEFAULT 0,
+    user_agent          TEXT                -- best-effort device label for admin visibility
+);
+CREATE INDEX IF NOT EXISTS idx_extension_sessions_user ON extension_sessions(user_id);
+
+
+-- ── Region status (base/bunker upgrades + resistance) ───────────────────────
+-- Written hourly by services/full_fetcher.py:fetch_region_status(), read by
+-- the extension's whitelisted-only /api/ext/regions/* endpoints (see
+-- rijksoverheid_web/app/routers/extension_regions.py). Regions are a small,
+-- fixed set (~726) that never appear/disappear mid-sweep, so — like
+-- alliance_countries — each sweep deletes and reinserts whole rather than
+-- upserting per-row; only the latest snapshot is kept, no history.
+CREATE TABLE IF NOT EXISTS region_upgrade_status (
+    region_id         TEXT NOT NULL,
+    upgrade_type      TEXT NOT NULL,   -- 'base' or 'bunker'
+    status            TEXT NOT NULL,   -- 'active' | 'pending' | 'disabled'
+    level             INTEGER NOT NULL DEFAULT 0,
+    will_be_active_at TEXT,            -- ISO-8601; only meaningful while status='pending'
+    updated_at        TEXT NOT NULL,
+    PRIMARY KEY (region_id, upgrade_type)
+);
+
+CREATE TABLE IF NOT EXISTS region_resistance (
+    region_id      TEXT PRIMARY KEY,
+    resistance     REAL NOT NULL DEFAULT 0,
+    resistance_max REAL NOT NULL DEFAULT 0,
+    updated_at     TEXT NOT NULL
+);

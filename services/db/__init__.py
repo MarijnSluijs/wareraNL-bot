@@ -12,6 +12,7 @@ Mixin                Tables
 :mod:`.events`       ``seen_articles``, ``seen_events``, ``war_events``
 :mod:`.luck`         ``citizen_luck``
 :mod:`.resistance`   ``resistance_state``
+:mod:`.region_status`   ``region_upgrade_status``, ``region_resistance``
 :mod:`.mus_registry` ``known_mus``
 :mod:`.battle_drops`    ``battle_drops``
 :mod:`.battle_rankings` ``battle_hits``, ``processed_battles``
@@ -24,6 +25,7 @@ Mixin                Tables
 :mod:`.tx_cache`        ``player_tx_cache``
 :mod:`.trades`          ``item_trades``
 :mod:`.item_prices`     ``item_price_history``
+:mod:`.extension_auth`  ``extension_sessions``
 ===================  ========================================
 Usage::
 
@@ -36,6 +38,7 @@ Usage::
 from .article_tips import ArticleTipsMixin
 from .base import DatabaseBase
 from .eco_donations import EcoDonationsMixin
+from .extension_auth import ExtensionAuthMixin
 from .battle_drops import BattleDropsMixin
 from .battle_rankings import BattleRankingsMixin
 from .citizens import CitizensMixin
@@ -61,6 +64,7 @@ from .mus_registry import MusRegistryMixin
 from .pill_reminders import PillRemindersMixin
 from .pill_tracking import PillTrackingMixin
 from .production import ProductionMixin
+from .region_status import RegionStatusMixin
 from .resistance import ResistanceMixin
 from .state import StateMixin
 from .trades import TradesMixin
@@ -73,6 +77,7 @@ from .wealth import WealthMixin
 class Database(
     MuSubscriptionsMixin,
     EcoDonationsMixin,
+    ExtensionAuthMixin,
     DailyDmgMixin,
     DamageHistoryMixin,
     GemsMixin,
@@ -86,6 +91,7 @@ class Database(
     GiveawaysMixin,
     LuckMixin,
     ResistanceMixin,
+    RegionStatusMixin,
     MusRegistryMixin,
     DivisionOverridesMixin,
     BattleDropsMixin,

@@ -31,6 +31,10 @@ What is fetched, in order, every hour:
        omits inactive players (``isActive: false``) — see
        ``fetch_missing_owner_citizenships`` for how this was found and why a
        direct-by-ID fetch is the only way to close the gap.
+    7. Every region's resistance (``region.getAll``) and base/bunker upgrade
+       status (``upgrade.getUpgradeByTypeAndEntity``) → ``region_resistance``
+       / ``region_upgrade_status``, for the extension's whitelisted
+       ``/api/ext/regions/*`` endpoints (see ``fetch_region_status``).
 
 Each sweep step records progress through
 :meth:`services.db.Database.mark_started` / :meth:`mark_finished` under
@@ -85,6 +89,10 @@ _COMPANY_CENSUS_MAX_PAGES = 2000  # safety cap: 2000 × 100 = 200k companies
 # Wage-tax tuning. ~8,700 wage transactions an hour is ~87 pages, so 600 pages
 # absorbs roughly seven hours of fetcher downtime before a gap is reported.
 _WAGE_TAX_MAX_PAGES = 600
+
+# Region status tuning. ~726 regions × 2 upgrade types (base, bunker) batched
+# 100 per request is ~15 requests per type — cheap next to company_census.
+_REGION_STATUS_BATCH = 100
 
 
 def _env_int(name: str, default: int) -> int:
@@ -245,6 +253,88 @@ async def fetch_alliance_countries(client: APIClient, db: Database) -> int:
         )
         logger.exception("alliance_countries sweep failed")
         return 0
+
+
+async def fetch_region_status(client: APIClient, db: Database) -> tuple[int, int]:
+    """Sweep every region's resistance and base/bunker upgrade status.
+
+    Powers the extension's whitelisted-only /api/ext/regions/* endpoints
+    (bases, bunkers, resistance) — see rijksoverheid_web/app/routers/
+    extension_regions.py. ``region.getAll`` gives resistance/resistanceMax
+    for free in the same response that lists every region, but its embedded
+    ``upgradesV2.upgrades.{base,bunker}`` has no ``willBeActiveAt`` and is
+    missing entirely for regions that have never built one. The authoritative
+    per-region ``upgrade.getUpgradeByTypeAndEntity`` is used instead for
+    upgrade status. A region that has never had a base/bunker built at all
+    (never even started, not even to level 0) returns a 404 ("Upgrades not
+    found") rather than a default record — confirmed live, and NOT rare
+    (roughly a third of regions for "base", a seventh for "bunker" at time of
+    writing) — so that's treated the same as an explicit disabled/level 0
+    rather than silently dropping the region from the output.
+
+    Returns ``(resistance_rows_written, upgrade_rows_written)``.
+    """
+    dataset = "all_countries.region_status"
+    await db.mark_started(dataset, source="full_fetcher")
+    started = time.monotonic()
+    try:
+        raw = await client.get("/region.getAll")
+        regions = _unwrap_trpc(raw) if isinstance(raw, dict) else raw
+        if not isinstance(regions, list) or not regions:
+            raise RuntimeError("region.getAll returned no regions")
+
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        region_ids = [str(r.get("_id")) for r in regions if r.get("_id")]
+
+        resistance_rows = [
+            (str(r.get("_id")), _to_float(r.get("resistance")) or 0.0,
+             _to_float(r.get("resistanceMax")) or 0.0)
+            for r in regions if r.get("_id")
+        ]
+        res_written = await db.save_region_resistance(resistance_rows, now_iso)
+
+        upgrade_written: dict[str, int] = {}
+        for upgrade_type in ("base", "bunker"):
+            inputs = [{"regionId": rid, "upgradeType": upgrade_type} for rid in region_ids]
+            results = await client.batch_get(
+                "/upgrade.getUpgradeByTypeAndEntity", inputs, batch_size=_REGION_STATUS_BATCH,
+            )
+            rows: list[tuple[str, str, int, str | None]] = []
+            for rid, raw_up in zip(region_ids, results):
+                up = _unwrap_trpc(raw_up) if isinstance(raw_up, dict) else raw_up
+                if isinstance(up, dict):
+                    status = str(up.get("status") or "disabled")
+                    try:
+                        level = int(up.get("level") or 0)
+                    except (TypeError, ValueError):
+                        level = 0
+                    will_be_active_at = up.get("willBeActiveAt")
+                else:
+                    # 404 ("Upgrades not found") for a region that's never had
+                    # this upgrade built at all — batch_get unwraps the error
+                    # response to None. Same meaning as an explicit disabled/
+                    # level 0, not a fetch failure to skip.
+                    status, level, will_be_active_at = "disabled", 0, None
+                rows.append((rid, status, level, will_be_active_at))
+            upgrade_written[upgrade_type] = await db.save_region_upgrade_status(
+                upgrade_type, rows, now_iso
+            )
+
+        duration_ms = int((time.monotonic() - started) * 1000)
+        await db.mark_finished(dataset, status="ok", duration_ms=duration_ms)
+        logger.info(
+            "region_status: %d regions, resistance=%d base=%d bunker=%d (%.1fs)",
+            len(region_ids), res_written, upgrade_written.get("base", 0),
+            upgrade_written.get("bunker", 0), duration_ms / 1000,
+        )
+        return res_written, sum(upgrade_written.values())
+    except Exception as exc:  # noqa: BLE001
+        duration_ms = int((time.monotonic() - started) * 1000)
+        await db.mark_finished(
+            dataset, status="error", error=str(exc)[:500], duration_ms=duration_ms
+        )
+        logger.exception("region_status sweep failed")
+        return 0, 0
 
 
 async def fetch_all_citizen_levels(
@@ -1271,12 +1361,15 @@ async def run_once(client: APIClient, db: Database, *, country_limit: int = 0) -
       - owner_citizenships  FULL_FETCH_ENABLE_OWNER_CITIZENSHIPS (default 1; needs census)
       - worker_citizenships FULL_FETCH_ENABLE_WORKER_CITIZENSHIPS (default 1; needs census)
       - alliances           FULL_FETCH_ENABLE_ALLIANCES (default 1)
+      - region_status       FULL_FETCH_ENABLE_REGION_STATUS (default 1)
     """
     _written, countries = await fetch_country_snapshots(client, db)
     if not countries:
         return
     if _env_int("FULL_FETCH_ENABLE_ALLIANCES", 1) == 1:
         await fetch_alliance_countries(client, db)
+    if _env_int("FULL_FETCH_ENABLE_REGION_STATUS", 1) == 1:
+        await fetch_region_status(client, db)
     cache = CitizenCache(client, db)
     await fetch_all_citizen_levels(cache, db, countries, limit=country_limit)
 
