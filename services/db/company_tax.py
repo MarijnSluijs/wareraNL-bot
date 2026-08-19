@@ -206,6 +206,38 @@ class CompanyTaxMixin:
         await self._conn.commit()
         return cursor.rowcount or 0
 
+    async def get_country_tax_summary(
+        self, today: str, week_start: str, month_start: str
+    ) -> dict[str, dict[str, float]]:
+        """Per-country tax totals for three trailing windows, in one query.
+
+        ``today``/``week_start``/``month_start`` are ``YYYY-MM-DD`` (UTC) day
+        strings computed by the caller — ``today`` is today's own bucket
+        (still filling in as the day goes), ``week_start``/``month_start`` are
+        the first day of a 7-/30-day trailing window (inclusive of today).
+        Returns ``{country_id: {"daily": x, "weekly": y, "monthly": z}}`` for
+        every country with at least one row in the monthly window; a country
+        with no tax at all this month is simply absent, not zeroed.
+
+        Used by the browser extension's country-page tax tiles — see
+        rijksoverheid_web/app/routers/extension_countries.py.
+        """
+        async with self._conn.execute(
+            "SELECT country_id, "
+            "  SUM(CASE WHEN day = ? THEN tax_total ELSE 0 END), "
+            "  SUM(CASE WHEN day >= ? THEN tax_total ELSE 0 END), "
+            "  SUM(CASE WHEN day >= ? THEN tax_total ELSE 0 END) "
+            "FROM company_tax_revenue "
+            "WHERE day >= ? "
+            "GROUP BY country_id",
+            (today, week_start, month_start, month_start),
+        ) as cur:
+            rows = await cur.fetchall()
+        return {
+            str(cid): {"daily": float(d or 0), "weekly": float(w or 0), "monthly": float(m or 0)}
+            for cid, d, w, m in rows
+        }
+
     # ── watermark / start marker ─────────────────────────────────────────────
 
     async def get_tax_watermark(self) -> Optional[str]:
