@@ -218,7 +218,7 @@ class NigeriaIronCampaignCog(CommandCogBase, name="nigeria_iron_campaign"):
             f"Je hebt op dit moment **{foreign_count}** ijzerfabriek{nl_plural} die niet in "
             f"Nigeria {nl_verb}. We raden je sterk aan deze te verplaatsen naar de regio "
             "**Abuja** in Nigeria.\n\n"
-            "Vragen? Stel ze gerust in de server.\n\n"
+            "Heb je werknemers bij andere fabrieken? Verhuis je werknemers naar de ijzerfabrieken in Nigeria!\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "**🇬🇧 English**\n"
             "Nigeria currently has the highest production bonus on **Iron** "
@@ -229,7 +229,7 @@ class NigeriaIronCampaignCog(CommandCogBase, name="nigeria_iron_campaign"):
             f"You currently have **{foreign_count}** iron factor{en_plural} that {en_verb} not "
             "located in Nigeria. We strongly recommend relocating them to the **Abuja** region "
             "in Nigeria.\n\n"
-            "Questions? Feel free to ask in the server."
+            "If you have workers at other factories, consider moving them to iron factories in Nigeria!"
         )
         if is_test:
             description = "🧪 **TESTBERICHT / TEST MESSAGE — preview only**\n\n" + description
