@@ -5,6 +5,14 @@ cross-references with the NL citizen IDs stored in citizen_levels.  Any
 citizen that appears in the ranking gets their damage upserted.  Citizens with
 no damage this week are set to 0 so they still appear (at the bottom) in the
 command output.
+
+On deployments where the standalone data-fetcher isn't running (e.g. the
+production/staging droplets, which only run the Discord bot process), this
+task is also the sole source of ``citizen_daily_damage`` /
+``citizen_weekly_damage_history`` — the tables /dailydmg reads. It therefore
+mirrors ``services/full_fetcher.py``'s ``fetch_weekly_damages`` and feeds the
+same global ranking reading into ``Database.apply_weekly_damage_snapshot``,
+tagging every player (not just NL ones) via ``citizen_levels``.
 """
 
 from __future__ import annotations
@@ -18,6 +26,7 @@ from discord.ext import tasks
 
 from cogs.tasks._base import TaskCogBase
 from cogs.tasks.war_guild_divisions import DIVISION_MUS
+from services.game_time import game_day, game_week_start
 
 logger = logging.getLogger("discord_bot")
 
@@ -200,6 +209,52 @@ class DamageTasks(TaskCogBase, name="damage_tasks"):
             len(ranking_map),
             len(ranking_by_name),
         )
+
+        # ── 1b. Derive daily/weekly-history rows for every player ──────
+        # (same as full_fetcher.fetch_weekly_damages) so /dailydmg has data
+        # even when the standalone data-fetcher isn't running here.
+        try:
+            meta: dict[str, tuple] = {}
+            async with self._db._conn.execute(
+                "SELECT user_id, citizen_name, country_id, mu_id, mu_name FROM citizen_levels"
+            ) as cur:
+                async for row in cur:
+                    meta[str(row[0])] = (row[1], row[2], row[3], row[4])
+
+            snapshot_payload: list[dict] = []
+            seen_uids: set[str] = set()
+            for entry in entries:
+                uid = _entry_user_id(entry)
+                if not uid or uid in seen_uids:
+                    continue
+                seen_uids.add(uid)
+                name, country_id, mu_id, mu_name = meta.get(
+                    uid, (None, None, None, None)
+                )
+                snapshot_payload.append({
+                    "user_id": uid,
+                    "citizen_name": _entry_username(entry) or name,
+                    "country_id": country_id,
+                    "mu_id": mu_id,
+                    "mu_name": mu_name,
+                    "weekly_damage": _entry_damage(entry),
+                })
+
+            snap_now = datetime.now(timezone.utc)
+            snap_counts = await self._db.apply_weekly_damage_snapshot(
+                snapshot_payload,
+                game_date=game_day(snap_now),
+                week_start=game_week_start(snap_now),
+                updated_at=snap_now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            )
+            logger.info(
+                "weekly_damage_refresh: daily/weekly snapshot — %d players (day=%s, %d prior days closed)",
+                snap_counts.get("weekly", 0),
+                game_day(snap_now),
+                snap_counts.get("closed", 0),
+            )
+        except Exception:
+            logger.exception("weekly_damage_refresh: failed to apply daily/weekly snapshot")
 
         # ── 2. Get citizens from DB ───────────────────────────────────
         nl_citizens = await self._db.get_nl_citizen_ids(nl_country_id)

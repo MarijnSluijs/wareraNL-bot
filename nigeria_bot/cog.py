@@ -228,13 +228,6 @@ FORBIDDEN_WORD_GROUPS: tuple[tuple[tuple[str, ...], tuple[str, ...], bool], ...]
         True,
     ),
     (
-        ("sr",),
-        (
-            "https://giphy.com/gifs/mrw-civilization-gandhi-slErRFjUBNoeQ",
-        ),
-        True,
-    ),
-    (
         ("pyramidscheme", "pyramid scheme", "ponzi"),
         (
             "https://giphy.com/gifs/scheme-7wToiGB3M5wME",

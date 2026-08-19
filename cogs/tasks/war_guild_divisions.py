@@ -36,7 +36,6 @@ DIVISION_MUS: dict[int, list[str]] = {
         "Oranje Huurlingen",
         "Pannekoekenoffensief",
         "AIVD",
-        "Dutch Legion",
     ],
     2: [
         "Korps Mariniers",
