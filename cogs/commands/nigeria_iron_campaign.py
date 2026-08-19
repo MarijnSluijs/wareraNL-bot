@@ -208,8 +208,8 @@ class NigeriaIronCampaignCog(CommandCogBase, name="nigeria_iron_campaign"):
             "Nigeria (en daarmee indirect ook Nederland) ontvangt zo alle belastinginkomsten, "
             "in plaats van een vreemde natie.\n\n"
             f"Je hebt op dit moment **{foreign_count}** ijzerfabriek{nl_plural} die niet in "
-            f"Nigeria {nl_verb}. We raden je sterk aan deze te verplaatsen naar Nigeria zodra "
-            "dat mogelijk is.\n\n"
+            f"Nigeria {nl_verb}. We raden je sterk aan deze te verplaatsen naar de regio "
+            "**Abuja** in Nigeria zodra dat mogelijk is.\n\n"
             "Vragen? Stel ze gerust in de server.\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "**🇬🇧 English**\n"
@@ -219,8 +219,8 @@ class NigeriaIronCampaignCog(CommandCogBase, name="nigeria_iron_campaign"):
             "indirectly the Netherlands too) receives all the tax revenue, instead of a foreign "
             "nation.\n\n"
             f"You currently have **{foreign_count}** iron factor{en_plural} that {en_verb} not "
-            "located in Nigeria. We strongly recommend relocating them to Nigeria as soon as "
-            "possible.\n\n"
+            "located in Nigeria. We strongly recommend relocating them to the **Abuja** region "
+            "in Nigeria as soon as possible.\n\n"
             "Questions? Feel free to ask in the server."
         )
         if is_test:
