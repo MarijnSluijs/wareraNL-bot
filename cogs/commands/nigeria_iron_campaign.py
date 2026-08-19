@@ -157,10 +157,15 @@ class NigeriaIronCampaignCog(CommandCogBase, name="nigeria_iron_campaign"):
                 company = _unwrap_trpc(raw) if isinstance(raw, dict) else raw
                 if not isinstance(company, dict):
                     continue
+                try:
+                    workers = int(company.get("workerCount") or 0)
+                except (TypeError, ValueError):
+                    workers = 0
                 company_info[cid] = {
                     "item_code": str(company.get("itemCode") or ""),
                     "country_id": region_country.get(str(company.get("region") or "")),
                     "disabled": bool(company.get("disabledAt")),
+                    "workers": workers,
                 }
 
         targets: list[dict] = []
@@ -168,6 +173,7 @@ class NigeriaIronCampaignCog(CommandCogBase, name="nigeria_iron_campaign"):
             uid = link["in_game_user_id"]
             discord_id = link["discord_user_id"]
             foreign_iron = 0
+            foreign_iron_workers = 0
             for cid in owner_company_ids.get(uid, []):
                 info = company_info.get(cid)
                 if not info or info["disabled"]:
@@ -177,12 +183,14 @@ class NigeriaIronCampaignCog(CommandCogBase, name="nigeria_iron_campaign"):
                 if info["country_id"] == NIGERIA_COUNTRY_ID:
                     continue
                 foreign_iron += 1
+                foreign_iron_workers += info["workers"]
             if foreign_iron > 0:
                 targets.append({
                     "discord_id": discord_id,
                     "warera_id": uid,
                     "citizen_name": names.get(discord_id) or uid,
                     "foreign_iron_count": foreign_iron,
+                    "foreign_iron_workers": foreign_iron_workers,
                 })
 
         stats = {
@@ -202,25 +210,25 @@ class NigeriaIronCampaignCog(CommandCogBase, name="nigeria_iron_campaign"):
 
         description = (
             "**🇳🇱 Nederlands**\n"
-            "Nigeria — onze proxynatie — heeft momenteel de hoogste productiebonus op **IJzer** "
+            "Nigeria heeft momenteel de hoogste productiebonus op **IJzer** "
             "van heel WarEra. Door je ijzerfabriek te verplaatsen naar Nigeria profiteer je zelf "
             "van deze bonus, én blijft alle belasting die je betaalt binnen onze eigen kring: "
-            "Nigeria (en daarmee indirect ook Nederland) ontvangt zo alle belastinginkomsten, "
-            "in plaats van een vreemde natie.\n\n"
+            "Nigeria (en daarmee indirect ook Nederland door onze tax deal) ontvangt zo alle belastinginkomsten, "
+            "in plaats van een vreemd land.\n\n"
             f"Je hebt op dit moment **{foreign_count}** ijzerfabriek{nl_plural} die niet in "
             f"Nigeria {nl_verb}. We raden je sterk aan deze te verplaatsen naar de regio "
-            "**Abuja** in Nigeria zodra dat mogelijk is.\n\n"
+            "**Abuja** in Nigeria.\n\n"
             "Vragen? Stel ze gerust in de server.\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "**🇬🇧 English**\n"
-            "Nigeria — our proxy nation — currently has the highest production bonus on **Iron** "
+            "Nigeria currently has the highest production bonus on **Iron** "
             "in all of WarEra. By moving your iron factory to Nigeria you benefit from this bonus "
             "yourself, and all the tax you pay stays within our own circle: Nigeria (and therefore "
-            "indirectly the Netherlands too) receives all the tax revenue, instead of a foreign "
+            "indirectly the Netherlands too with our tax deal) receives all the tax revenue, instead of a foreign "
             "nation.\n\n"
             f"You currently have **{foreign_count}** iron factor{en_plural} that {en_verb} not "
             "located in Nigeria. We strongly recommend relocating them to the **Abuja** region "
-            "in Nigeria as soon as possible.\n\n"
+            "in Nigeria.\n\n"
             "Questions? Feel free to ask in the server."
         )
         if is_test:
@@ -339,7 +347,8 @@ class NigeriaIronCampaignCog(CommandCogBase, name="nigeria_iron_campaign"):
         if targets:
             lines = [
                 f"• {t['citizen_name']} (<@{t['discord_id']}>) — "
-                f"{t['foreign_iron_count']} ijzerfabriek(en) buiten Nigeria"
+                f"{t['foreign_iron_count']} ijzerfabriek(en) buiten Nigeria "
+                f"({t['foreign_iron_workers']} werknemer(s))"
                 for t in targets
             ]
             for chunk in _paginate(lines):
