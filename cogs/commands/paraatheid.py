@@ -30,6 +30,13 @@ from services.country_utils import find_country
 
 logger = logging.getLogger("discord_bot")
 
+# /paraatheid land only counts level 21+ citizens — matches
+# cogs/tasks/monitor.py's _MIN_LEVEL, which the paraatheidsupdate posted to
+# the war-readiness channel is built from. Below level 21 a citizen can't
+# meaningfully contribute to war readiness yet, so counting them would make
+# this command's percentages diverge from that update.
+_LAND_MIN_LEVEL = 21
+
 # /paraatheid nl_mus categorisation — overrides any "type" set in mus.json.
 # Any MU not listed here falls into "Casual MU".
 _NL_MU_CATEGORIES: dict[str, str] = {
@@ -753,9 +760,13 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
             await ctx.send(f"Databasefout: {exc}")
             return
 
+        # Only level 21+ counts — see _LAND_MIN_LEVEL.
+        skill_buckets = {b: v for b, v in skill_buckets.items() if b >= _LAND_MIN_LEVEL}
+        cd_buckets = {b: v for b, v in cd_buckets.items() if b >= _LAND_MIN_LEVEL}
+
         if not skill_buckets:
             await ctx.send(
-                f"Nog geen gecachte vaardigheidsdata voor **{country_name}**.\n"
+                f"Nog geen gecachte vaardigheidsdata voor **{country_name}** (niveau {_LAND_MIN_LEVEL}+).\n"
                 f"Run `/peil burgers` om de cache op te bouwen."
             )
             return
@@ -810,26 +821,27 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
         war_pct_total = total_war / total_known * 100 if total_known else 0.0
         avail_pct_total = total_avail / total_eco * 100 if total_eco else 0.0
 
-        footer_parts = [f"{total_citizens} burgers"]
+        footer_parts = [f"{total_citizens} burgers (niveau {_LAND_MIN_LEVEL}+)"]
         if last_updated:
             footer_parts.append(
                 f"Bijgewerkt: {last_updated[:16].replace('T', ' ')} UTC"
             )
         footer_parts.append("Spl=spelers  %Oor=%Oorlog  Kan/CD=alleen eco-spelers")
+        footer_parts.append(f"Alleen niveau {_LAND_MIN_LEVEL}+ meegeteld — zelfde als de paraatheidsupdate")
         footer_text = "  •  ".join(footer_parts)
 
         page_embeds: list[discord.Embed] = []
         for page_idx, chunk in enumerate(chunks):
             block = f"```\n{header}\n{sep}\n" + "\n".join(chunk) + "\n```"
             emb = discord.Embed(
-                title=f"Paraatheid — {country_name}",
+                title=f"Paraatheid — {country_name} (niveau {_LAND_MIN_LEVEL}+)",
                 description=block,
                 colour=colour,
             )
             emb.set_footer(
                 text=footer_text
                 if page_idx == 0
-                else f"{total_citizens} burgers (vervolg)"
+                else f"{total_citizens} burgers (vervolg, niveau {_LAND_MIN_LEVEL}+)"
             )
             page_embeds.append(emb)
 
