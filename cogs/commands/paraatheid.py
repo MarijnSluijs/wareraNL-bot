@@ -97,34 +97,56 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
     async def _resolve_caller_mu(self, ctx: Context) -> str | None:
         """Resolve the invoking Discord user's current MU name, if known.
 
-        Looks the citizen up by *name* (Discord display name, minus any
-        "[Dx] " war-guild division prefix) rather than via ``identity_links``
-        — Discord usernames in our servers match WarEra citizen names
-        exactly, and this sidesteps ``identity_links`` being scoped per
-        guild, which meant a caller verified in one guild resolved to
-        nothing when running the command in another.
+        Two tiers to find the citizen's in-game user_id:
+          1. By *name* — Discord display name, minus any "[Dx] " war-guild
+             division prefix (only used in the war-guild-division tracking
+             guild; the main guild's nicknames carry no such prefix, so
+             stripping it there is a no-op). Discord nicknames are kept in
+             sync with WarEra citizen names, but only for *NL* citizens (see
+             ``cogs/tasks/citizens.py:_do_nl_refresh`` →
+             ``_sync_discord_nicknames_for_country``) — the equivalent sync
+             for every other country only runs when
+             ``config.enable_all_countries_sweep`` is true, which it isn't on
+             any deployment right now. So a citizen who switches away from NL
+             (e.g. to Nigeria) keeps whatever nickname they had at the time
+             and permanently stops matching their citizen name by this tier.
+          2. ``identity_links`` (scoped to this guild) as a fallback — catches
+             exactly that case, plus a caller verified in one guild running
+             the command in another used to resolve to nothing at all before
+             tier 1 was added.
 
-        Once the citizen is found by name, this mirrors the two-tier MU
-        lookup ``cogs/tasks/war_sync.py`` already uses for Discord role
-        assignment: ``citizen_mu_membership`` (kept fresh by the Dutch-MU
-        scan) first, then ``citizen_levels.mu_id``/``mu_name`` (kept fresh by
-        the hourly citizen refresh for every country) as a fallback — the
-        latter also covers non-Dutch MUs, which the scan doesn't track.
+        Once a user_id is found, this mirrors the two-tier MU lookup
+        ``cogs/tasks/war_sync.py`` already uses for Discord role assignment:
+        ``citizen_mu_membership`` (kept fresh by the Dutch-MU scan) first,
+        then ``citizen_levels.mu_id``/``mu_name`` (kept fresh by the hourly
+        citizen refresh for every country) as a fallback — the latter also
+        covers non-Dutch MUs, which the scan doesn't track.
 
         Returns None (never raises) so callers can fall back to the old
-        per-player behaviour when no citizen matches the caller's name, or
-        they aren't currently in any MU.
+        per-player behaviour when no citizen can be found, or they aren't
+        currently in any MU.
         """
+        user_id: str | None = None
         name = strip_division_prefix(ctx.author.display_name).strip()
-        if not name:
+        if name:
+            try:
+                citizen = await self._db.get_citizen_by_name_exact(name)
+            except Exception:
+                citizen = None
+            if citizen:
+                user_id = citizen[0]
+
+        if not user_id and ctx.guild:
+            try:
+                link = await self._db.get_identity_link_by_discord(
+                    str(ctx.author.id), str(ctx.guild.id)
+                )
+            except Exception:
+                link = None
+            user_id = (link or {}).get("in_game_user_id")
+
+        if not user_id:
             return None
-        try:
-            citizen = await self._db.get_citizen_by_name_exact(name)
-        except Exception:
-            return None
-        if not citizen:
-            return None
-        user_id = citizen[0]
 
         try:
             memberships = await self._db.get_mu_memberships_for_citizen(user_id)
