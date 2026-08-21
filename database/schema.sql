@@ -1009,3 +1009,18 @@ CREATE TABLE IF NOT EXISTS region_resistance (
     resistance_max REAL NOT NULL DEFAULT 0,
     updated_at     TEXT NOT NULL
 );
+
+-- ── Proxy/puppet-country status ─────────────────────────────────────────────
+-- Written periodically by services/full_fetcher.py:fetch_country_proxy_status()
+-- from a third-party detection service (PROXY_API_URL/PROXY_API_KEY, see .env)
+-- — read by the extension's whitelisted-only /api/ext/countries/proxy endpoint
+-- (see rijksoverheid_web/app/routers/extension_countries.py). Only countries
+-- CURRENTLY flagged as a proxy get a row — like region_upgrade_status, each
+-- sweep deletes and reinserts whole, so a country that stops being a proxy
+-- simply disappears rather than lingering with a stale row.
+CREATE TABLE IF NOT EXISTS country_proxy_status (
+    country_id TEXT PRIMARY KEY,
+    origin_id  TEXT NOT NULL,   -- country the majority of immigrants came from
+    rate       REAL NOT NULL DEFAULT 0,  -- fraction (0..1) of citizens who are immigrants at all
+    updated_at TEXT NOT NULL
+);

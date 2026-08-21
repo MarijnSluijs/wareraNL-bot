@@ -91,6 +91,55 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
         self.bot = bot
 
     # ------------------------------------------------------------------ #
+    # Caller MU resolution (no-args default)                              #
+    # ------------------------------------------------------------------ #
+
+    async def _resolve_caller_mu(self, ctx: Context) -> str | None:
+        """Resolve the invoking Discord user's current MU name, if known.
+
+        Looks the citizen up by *name* (Discord display name, minus any
+        "[Dx] " war-guild division prefix) rather than via ``identity_links``
+        — Discord usernames in our servers match WarEra citizen names
+        exactly, and this sidesteps ``identity_links`` being scoped per
+        guild, which meant a caller verified in one guild resolved to
+        nothing when running the command in another.
+
+        Once the citizen is found by name, this mirrors the two-tier MU
+        lookup ``cogs/tasks/war_sync.py`` already uses for Discord role
+        assignment: ``citizen_mu_membership`` (kept fresh by the Dutch-MU
+        scan) first, then ``citizen_levels.mu_id``/``mu_name`` (kept fresh by
+        the hourly citizen refresh for every country) as a fallback — the
+        latter also covers non-Dutch MUs, which the scan doesn't track.
+
+        Returns None (never raises) so callers can fall back to the old
+        per-player behaviour when no citizen matches the caller's name, or
+        they aren't currently in any MU.
+        """
+        name = strip_division_prefix(ctx.author.display_name).strip()
+        if not name:
+            return None
+        try:
+            citizen = await self._db.get_citizen_by_name_exact(name)
+        except Exception:
+            return None
+        if not citizen:
+            return None
+        user_id = citizen[0]
+
+        try:
+            memberships = await self._db.get_mu_memberships_for_citizen(user_id)
+        except Exception:
+            memberships = []
+        if memberships:
+            return memberships[0][1]
+
+        try:
+            mu_row = await self._db.get_citizen_mu_from_levels(user_id)
+        except Exception:
+            mu_row = None
+        return mu_row[1] if mu_row else None
+
+    # ------------------------------------------------------------------ #
     # Autocomplete helpers                                                 #
     # ------------------------------------------------------------------ #
 
@@ -153,13 +202,19 @@ class ParaatheadCog(CommandCogBase, name="paraatheid"):
         /paraatheid mu:naam      — %oorlog + reset-cooldown voor eco-spelers in de MU (alle MUs)
         /paraatheid nl_mus:Ja    — overzicht van alle NL MUs gegroepeerd op type
         /paraatheid divisie:Ja    — overzicht paraatheid per divisie (D1–D5)
+
+        Zonder argumenten: toont de MU van de aanroeper (via _resolve_caller_mu),
+        niet meer diens eigen individuele paraatheid — valt terug op speler-modus
+        als de aanroeper niet geverifieerd is of niet in een MU zit.
         """
         if not self._db:
             await ctx.send("Database niet geïnitialiseerd.")
             return
 
         if speler is None and land is None and mu is None and nl_mus is None and divisie is None:
-            speler = strip_division_prefix(ctx.author.display_name)
+            mu = await self._resolve_caller_mu(ctx)
+            if mu is None:
+                speler = strip_division_prefix(ctx.author.display_name)
 
         provided = sum(x is not None for x in (land, speler, mu, divisie)) + int(
             nl_mus is not None

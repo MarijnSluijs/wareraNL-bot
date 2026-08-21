@@ -35,6 +35,11 @@ What is fetched, in order, every hour:
        status (``upgrade.getUpgradeByTypeAndEntity``) → ``region_resistance``
        / ``region_upgrade_status``, for the extension's whitelisted
        ``/api/ext/regions/*`` endpoints (see ``fetch_region_status``).
+    8. Proxy/puppet-country status from a third-party detection API (NOT
+       WarEra's own) → ``country_proxy_status``, for the extension's
+       whitelisted ``/api/ext/countries/proxy`` endpoint (see
+       ``fetch_country_proxy_status``). No-op unless PROXY_API_URL/
+       PROXY_API_KEY are configured.
 
 Each sweep step records progress through
 :meth:`services.db.Database.mark_started` / :meth:`mark_finished` under
@@ -48,6 +53,8 @@ Configuration via environment:
                                  interval before doing any work)
     FULL_FETCH_COUNTRY_LIMIT    (default 0 = unlimited; useful for smoke tests)
     RW_DB_PATH, RW_API_BASE_URL, RW_API_KEYS_PATH — same as the website.
+    PROXY_API_URL, PROXY_API_KEY — third-party proxy-country detection
+                                 service (step 8); step is skipped if unset.
 """
 
 from __future__ import annotations
@@ -60,6 +67,8 @@ import signal
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+
+import httpx
 
 from services.api_client import APIClient
 from services.citizen_cache import CitizenCache
@@ -335,6 +344,84 @@ async def fetch_region_status(client: APIClient, db: Database) -> tuple[int, int
         )
         logger.exception("region_status sweep failed")
         return 0, 0
+
+
+# Timeout for the proxy-detection API — a single call already returns every
+# country (~180) in one response (confirmed live), so this doesn't need
+# batching/pagination like the WarEra API steps above. Observed live latency
+# varies wildly (a few seconds warm, ~60s+ cold) — this runs in a background
+# hourly sweep with nobody waiting synchronously on it, so a generous timeout
+# costs nothing and a too-tight one would just make the step flaky.
+_PROXY_API_TIMEOUT_S = 120.0
+
+
+async def fetch_country_proxy_status(db: Database) -> int:
+    """Sweep proxy/puppet-country status from the third-party detection API.
+
+    Powers the extension's whitelisted-only /api/ext/countries/proxy endpoint
+    (see rijksoverheid_web/app/routers/extension_countries.py). Unlike every
+    other sweep step here, this doesn't touch WarEra's own API at all — it's a
+    single authenticated GET against PROXY_API_URL (PROXY_API_KEY in .env),
+    which returns EVERY country's status in one response, keyed by country id,
+    each entry shaped like ``{country_id, total, immigrants, origins, rate,
+    is_proxy}`` where ``origins`` is a ``[[countryId, name, count], ...]`` list
+    already sorted by ``count`` descending (confirmed live) — so the "origin"
+    a proxy country answers to is simply ``origins[0][0]``, no local ranking
+    needed. Only entries with ``is_proxy`` true, and a resolvable top origin,
+    are kept — see country_proxy_status's schema comment for why this is a
+    whole-table replace rather than an upsert.
+
+    Silently returns 0 (no sweep) if PROXY_API_URL/PROXY_API_KEY aren't
+    configured, so this step is a no-op on any deployment that hasn't opted
+    into it — same posture as the other optional FULL_FETCH_ENABLE_* steps.
+    """
+    api_url = os.getenv("PROXY_API_URL", "").rstrip("/")
+    api_key = os.getenv("PROXY_API_KEY", "")
+    if not api_url or not api_key:
+        logger.info("country_proxy: PROXY_API_URL/PROXY_API_KEY not set, skipping")
+        return 0
+
+    dataset = "all_countries.country_proxy"
+    await db.mark_started(dataset, source="full_fetcher")
+    started = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=_PROXY_API_TIMEOUT_S) as http:
+            resp = await http.get(
+                f"{api_url}/countries/proxy", headers={"X-API-Key": api_key}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        if not isinstance(data, dict):
+            raise RuntimeError("countries/proxy returned an unexpected shape")
+
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows: list[tuple[str, str, float]] = []
+        for country_id, entry in data.items():
+            if not isinstance(entry, dict) or not entry.get("is_proxy"):
+                continue
+            origins = entry.get("origins") or []
+            if not origins or not origins[0]:
+                continue  # flagged a proxy but no attributable origin — nothing to color it as
+            origin_id = origins[0][0]
+            if not origin_id:
+                continue
+            rows.append((str(country_id), str(origin_id), float(entry.get("rate") or 0.0)))
+
+        written = await db.save_country_proxy_status(rows, now_iso)
+        duration_ms = int((time.monotonic() - started) * 1000)
+        await db.mark_finished(dataset, status="ok", duration_ms=duration_ms)
+        logger.info(
+            "country_proxy: %d countries checked, %d proxies written (%.1fs)",
+            len(data), written, duration_ms / 1000,
+        )
+        return written
+    except Exception as exc:  # noqa: BLE001
+        duration_ms = int((time.monotonic() - started) * 1000)
+        await db.mark_finished(
+            dataset, status="error", error=str(exc)[:500], duration_ms=duration_ms
+        )
+        logger.exception("country_proxy sweep failed")
+        return 0
 
 
 async def fetch_all_citizen_levels(
@@ -1362,6 +1449,8 @@ async def run_once(client: APIClient, db: Database, *, country_limit: int = 0) -
       - worker_citizenships FULL_FETCH_ENABLE_WORKER_CITIZENSHIPS (default 1; needs census)
       - alliances           FULL_FETCH_ENABLE_ALLIANCES (default 1)
       - region_status       FULL_FETCH_ENABLE_REGION_STATUS (default 1)
+      - country_proxy       FULL_FETCH_ENABLE_COUNTRY_PROXY (default 1; no-op without
+                             PROXY_API_URL/PROXY_API_KEY configured)
     """
     _written, countries = await fetch_country_snapshots(client, db)
     if not countries:
@@ -1370,6 +1459,8 @@ async def run_once(client: APIClient, db: Database, *, country_limit: int = 0) -
         await fetch_alliance_countries(client, db)
     if _env_int("FULL_FETCH_ENABLE_REGION_STATUS", 1) == 1:
         await fetch_region_status(client, db)
+    if _env_int("FULL_FETCH_ENABLE_COUNTRY_PROXY", 1) == 1:
+        await fetch_country_proxy_status(db)
     cache = CitizenCache(client, db)
     await fetch_all_citizen_levels(cache, db, countries, limit=country_limit)
 

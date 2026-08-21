@@ -13,6 +13,7 @@ Mixin                Tables
 :mod:`.luck`         ``citizen_luck``
 :mod:`.resistance`   ``resistance_state``
 :mod:`.region_status`   ``region_upgrade_status``, ``region_resistance``
+:mod:`.country_proxy`   ``country_proxy_status``
 :mod:`.mus_registry` ``known_mus``
 :mod:`.battle_drops`    ``battle_drops``
 :mod:`.battle_rankings` ``battle_hits``, ``processed_battles``
@@ -45,6 +46,7 @@ from .citizens import CitizensMixin
 from .company_bonus import CompanyBonusMixin
 from .company_census import CompanyCensusMixin
 from .company_tax import CompanyTaxMixin
+from .country_proxy import CountryProxyMixin
 from .damage_projection import DamageProjectionMixin
 from .company_move_advice import CompanyMoveAdviceMixin
 from .daily_dmg import DailyDmgMixin
@@ -92,6 +94,7 @@ class Database(
     LuckMixin,
     ResistanceMixin,
     RegionStatusMixin,
+    CountryProxyMixin,
     MusRegistryMixin,
     DivisionOverridesMixin,
     BattleDropsMixin,
