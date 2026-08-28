@@ -62,7 +62,8 @@ DIVISION_MUS: dict[int, list[str]] = {
         "De Munterij",
         "De Mobiele Eenheid",
         "Lowland Lions",
-        "De Zwarte Duivels"
+        "De Zwarte Duivels",
+        "LowLand Goats"
     ],
     5: [
         "TSCo",
