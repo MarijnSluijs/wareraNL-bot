@@ -247,6 +247,7 @@ FORBIDDEN_WORD_GROUPS: tuple[tuple[tuple[str, ...], tuple[str, ...], bool], ...]
 # working directory the process was launched from.
 _PROJECT_ROOT   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _GEAR_IMAGE_PATH = os.path.join(_PROJECT_ROOT, "equipment-item-icons", "gear.png")
+_MYTHIC_GEAR_IMAGE_PATH = os.path.join(_PROJECT_ROOT, "nigeria_bot", "mythicgear.png")
 
 AMBASSADOR_ROLES: dict[str, int] = {
     "Netherlands":             1495785962234577037,
@@ -1066,6 +1067,7 @@ class VerificationCog(commands.Cog, name="verification"):
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:
             return
+
         # Some channels are opted out of the GIF reactions entirely.
         if message.channel.id in NO_REACTION_CHANNEL_IDS:
             return
@@ -1569,15 +1571,18 @@ class VerificationCog(commands.Cog, name="verification"):
         await interaction.followup.send(result, ephemeral=True)
 
     @app_commands.command(name="gear", description="Stuur de gear-afbeelding.")
-    async def gear(self, interaction: discord.Interaction) -> None:
-        if not os.path.isfile(_GEAR_IMAGE_PATH):
-            logger.warning("gear: image not found at %s", _GEAR_IMAGE_PATH)
+    @app_commands.describe(mythic="Stuur de mythic-gear-afbeelding in plaats van de standaard.")
+    async def gear(self, interaction: discord.Interaction, mythic: bool = False) -> None:
+        image_path = _MYTHIC_GEAR_IMAGE_PATH if mythic else _GEAR_IMAGE_PATH
+        filename = "mythicgear.png" if mythic else "gear.png"
+        if not os.path.isfile(image_path):
+            logger.warning("gear: image not found at %s", image_path)
             await interaction.response.send_message(
                 "❌ Afbeelding niet gevonden.", ephemeral=True
             )
             return
         await interaction.response.send_message(
-            file=discord.File(_GEAR_IMAGE_PATH, filename="gear.png")
+            file=discord.File(image_path, filename=filename)
         )
 
     async def cog_app_command_error(

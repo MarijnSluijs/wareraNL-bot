@@ -79,6 +79,17 @@ class NigeriaBot(commands.Bot):
         import nigeria_bot.oliegebruik as oliegebruik
         await oliegebruik.setup(self)
 
+        # Battle-link watcher — posts a concise summary whenever someone
+        # links a WarEra battle in chat.
+        import nigeria_bot.battle_watch as battle_watch
+        await battle_watch.setup(self)
+
+        # Daily unclaimed-XP reminder — checks all linked users at 22:00 NL
+        # time daily, but only ever DMs PrinceRealMarijn for now (test mode,
+        # see nigeria_bot/daily_xp_reminder.py's module docstring).
+        import nigeria_bot.daily_xp_reminder as daily_xp_reminder
+        await daily_xp_reminder.setup(self, self.nigeria_db)
+
         # Register persistent views so buttons survive restarts
         from nigeria_bot.cog import VerificationView, TicketActionView
         self.add_view(VerificationView())

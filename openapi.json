@@ -319,6 +319,60 @@
         }
       }
     },
+    "/article.getWelcomeArticleByCountryId": {
+      "post": {
+        "tags": [
+          "article"
+        ],
+        "description": "Retrieves a country's pinned welcome article shown to new citizens",
+        "summary": "Get welcome article by country ID",
+        "operationId": "article.getWelcomeArticleByCountryId",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "_id": "69790ece512bb7c92204c073",
+                  "title": "Welkom in Nederland!",
+                  "content": "<p>...</p>",
+                  "stats": {
+                    "likes": 129,
+                    "views": 4575,
+                    "comments": 11,
+                    "subs": 24,
+                    "tips": 4,
+                    "dislikes": 0,
+                    "score": 129,
+                    "gemTips": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "countryId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The country ID"
+                  }
+                },
+                "required": [
+                  "countryId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
     "/battle.getBattles": {
       "post": {
         "tags": [
@@ -1136,6 +1190,222 @@
         }
       }
     },
+    "/country.getUnrestData": {
+      "post": {
+        "tags": [
+          "country"
+        ],
+        "description": "Retrieves a country's current unrest/revolution bar level",
+        "summary": "Get country unrest data",
+        "operationId": "country.getUnrestData",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "bar": 1542,
+                  "barMax": 33003,
+                  "lastContributionAt": "2026-08-26T11:33:45.228Z",
+                  "isFull": false,
+                  "isOnRevolutionCooldown": false
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "countryId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The country ID"
+                  }
+                },
+                "required": [
+                  "countryId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/countryDiplomacy.getByCountry": {
+      "post": {
+        "tags": [
+          "countryDiplomacy"
+        ],
+        "description": "Retrieves a country's sworn enemy and defensive pacts, with damage dealt totals",
+        "summary": "Get country diplomacy by country",
+        "operationId": "countryDiplomacy.getByCountry",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "swornEnemy": {
+                    "enemy": "6813b6d446e731854c7ac802",
+                    "bonusPercent": 3,
+                    "damagesDealt": 1367818
+                  },
+                  "defensivePacts": [
+                    {
+                      "partner": "6813b6d446e731854c7ac7b8",
+                      "bonusPercent": 10,
+                      "damagesDealt": 1831050
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "countryId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The country ID"
+                  }
+                },
+                "required": [
+                  "countryId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/donation.getManyPaginated": {
+      "post": {
+        "tags": [
+          "donation"
+        ],
+        "description": "Retrieves a paginated list of donations, optionally scoped to a MU, country or party",
+        "summary": "Get donations (paginated)",
+        "operationId": "donation.getManyPaginated",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "_id": "698cf64827e92dac0afc1eb5",
+                      "partyId": null,
+                      "countryId": "6813b6d446e731854c7ac7a0",
+                      "muId": null,
+                      "userId": "6979164c2f1cef1c8ad98b7b",
+                      "amount": 34509.951,
+                      "createdAt": "2026-02-11T21:36:08.382Z"
+                    }
+                  ],
+                  "nextCursor": null
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "muId": {
+                    "type": "string",
+                    "description": "Filter by military unit ID"
+                  },
+                  "countryId": {
+                    "type": "string",
+                    "description": "Filter by country ID"
+                  },
+                  "partyId": {
+                    "type": "string",
+                    "description": "Filter by party ID"
+                  },
+                  "limit": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 10,
+                    "description": "Results per page"
+                  },
+                  "cursor": {
+                    "type": "string",
+                    "description": "Pagination cursor for next page"
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/donation.getTotalDonations": {
+      "post": {
+        "tags": [
+          "donation"
+        ],
+        "description": "Retrieves the total donated amount and donor count, optionally scoped to a MU, country or party",
+        "summary": "Get total donations",
+        "operationId": "donation.getTotalDonations",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "totalAmount": 728196.6774332636,
+                  "donorCount": 1023
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "muId": {
+                    "type": "string",
+                    "description": "Filter by military unit ID"
+                  },
+                  "countryId": {
+                    "type": "string",
+                    "description": "Filter by country ID"
+                  },
+                  "partyId": {
+                    "type": "string",
+                    "description": "Filter by party ID"
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
     "/event.getEventsPaginated": {
       "post": {
         "tags": [
@@ -1453,6 +1723,96 @@
               "schema": {
                 "type": "object",
                 "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/gameStat.getWorldDevelopment": {
+      "post": {
+        "tags": [
+          "gameStat"
+        ],
+        "description": "Retrieves the total world development stat (sum across all countries)",
+        "summary": "Get world development",
+        "operationId": "gameStat.getWorldDevelopment",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": 15114.49
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/giveaway.getManyPaginated": {
+      "post": {
+        "tags": [
+          "giveaway"
+        ],
+        "description": "Retrieves a paginated list of giveaways and their participants/winners",
+        "summary": "Get giveaways (paginated)",
+        "operationId": "giveaway.getManyPaginated",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "_id": "6a8b8980114e75cb61f975d4",
+                      "prize": {
+                        "case1": 60
+                      },
+                      "winnersQuantity": 20,
+                      "participants": [
+                        "6a57c889fd560094506e9415"
+                      ]
+                    }
+                  ],
+                  "nextCursor": null
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "limit": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 10,
+                    "description": "Results per page"
+                  },
+                  "cursor": {
+                    "type": "string",
+                    "description": "Pagination cursor for next page"
+                  }
+                },
+                "required": [],
                 "additionalProperties": false
               }
             }
@@ -1911,6 +2271,58 @@
                     "type": "string"
                   }
                 },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/muMember.getByMu": {
+      "post": {
+        "tags": [
+          "muMember"
+        ],
+        "description": "Retrieves all members of a military unit with their damage/help counters",
+        "summary": "Get MU members by MU ID",
+        "operationId": "muMember.getByMu",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "_id": "6a8ee19a1375cafe49af520e",
+                    "mu": "6a8ee19a1375cafe49af5201",
+                    "user": "6a37fe5e871d760212fc106a",
+                    "totalDamagesCount": 899,
+                    "monthlyDamagesCount": 899,
+                    "weeklyDamagesCount": 899,
+                    "totalHelpCount": 0,
+                    "monthlyHelpCount": 0,
+                    "weeklyHelpCount": 0
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "muId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The military unit ID"
+                  }
+                },
+                "required": [
+                  "muId"
+                ],
                 "additionalProperties": false
               }
             }
@@ -2434,6 +2846,72 @@
         }
       }
     },
+    "/sanction.getPaginated": {
+      "post": {
+        "tags": [
+          "sanction"
+        ],
+        "description": "Retrieves a paginated list of moderation sanctions (mutes/bans), optionally scoped to a target user or type",
+        "summary": "Get sanctions (paginated)",
+        "operationId": "sanction.getPaginated",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "_id": "6a8ef0b4b43834ecb5876ac4",
+                      "targetUser": "6a7398610a9ba40d749c5f61",
+                      "data": {
+                        "type": "MUTE_USER",
+                        "durationInHours": 168,
+                        "reason": "..."
+                      },
+                      "createdAt": "2026-08-26T13:57:08.883Z"
+                    }
+                  ],
+                  "nextCursor": null
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "targetUserId": {
+                    "type": "string",
+                    "description": "Filter by sanctioned user ID"
+                  },
+                  "type": {
+                    "type": "string",
+                    "description": "Filter by sanction type, e.g. MUTE_USER"
+                  },
+                  "limit": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 10,
+                    "description": "Results per page"
+                  },
+                  "cursor": {
+                    "type": "string",
+                    "description": "Pagination cursor for next page"
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
     "/search.searchAnything": {
       "post": {
         "tags": [
@@ -2568,6 +3046,120 @@
         }
       }
     },
+    "/shop.getLastGifts": {
+      "post": {
+        "tags": [
+          "shop"
+        ],
+        "description": "Retrieves the most recent gem/premium gifts sent between players",
+        "summary": "Get last gifts",
+        "operationId": "shop.getLastGifts",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "_id": "6a8ee0a222f9d860e102d5db",
+                    "giftedBy": "681fd9b52a75ce8a59a7437b",
+                    "recipient": "68f8092634027bcf5dbc2fba",
+                    "createdAt": "2026-08-26T12:48:34.027Z"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shop.getSubscribedUsers": {
+      "post": {
+        "tags": [
+          "shop"
+        ],
+        "description": "Retrieves recently-started WarEra Premium subscriptions",
+        "summary": "Get subscribed users",
+        "operationId": "shop.getSubscribedUsers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "_id": "6a8ec3c83923e74d826de239",
+                    "subscriptionDate": "2026-08-26T10:51:13.737Z"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shop.getTopGiftGivers": {
+      "post": {
+        "tags": [
+          "shop"
+        ],
+        "description": "Retrieves the leaderboard of players who have gifted the most",
+        "summary": "Get top gift givers",
+        "operationId": "shop.getTopGiftGivers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "_id": "698f6021922ea51b23ca98d6",
+                    "giftCount": 43,
+                    "username": "Robert_Donwey_Jr"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
     "/tournament.getById": {
       "post": {
         "tags": [
@@ -2646,6 +3238,63 @@
               "schema": {
                 "type": "object",
                 "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tournament.getManyPaginated": {
+      "post": {
+        "tags": [
+          "tournament"
+        ],
+        "description": "Retrieves a paginated list of tournaments",
+        "summary": "Get tournaments (paginated)",
+        "operationId": "tournament.getManyPaginated",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "_id": "...",
+                      "registered": {
+                        "countries": [],
+                        "mus": [
+                          "6980b01819decffdc7848ef9"
+                        ]
+                      }
+                    }
+                  ],
+                  "nextCursor": null
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "limit": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 3,
+                    "description": "Results per page"
+                  },
+                  "cursor": {
+                    "type": "string",
+                    "description": "Pagination cursor for next page"
+                  }
+                },
+                "required": [],
                 "additionalProperties": false
               }
             }
@@ -2753,6 +3402,62 @@
                 "required": [
                   "tournamentId"
                 ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tradingOrder.getPublicOrdersByOwner": {
+      "post": {
+        "tags": [
+          "tradingOrder"
+        ],
+        "description": "Retrieves a user's, MU's, country's or party's public trading orders",
+        "summary": "Get public trading orders by owner",
+        "operationId": "tradingOrder.getPublicOrdersByOwner",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "buyOrders": [],
+                  "sellOrders": [],
+                  "allOrders": [],
+                  "totalBuyMoneyInvested": 0,
+                  "totalSellMoneyExpected": 0,
+                  "totalSellQuantities": {}
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "description": "Filter by user ID"
+                  },
+                  "muId": {
+                    "type": "string",
+                    "description": "Filter by military unit ID"
+                  },
+                  "countryId": {
+                    "type": "string",
+                    "description": "Filter by country ID"
+                  },
+                  "partyId": {
+                    "type": "string",
+                    "description": "Filter by party ID"
+                  }
+                },
+                "required": [],
                 "additionalProperties": false
               }
             }
@@ -3379,6 +4084,241 @@
         }
       }
     },
+    "/work.getStatsByCompany": {
+      "post": {
+        "tags": [
+          "work"
+        ],
+        "description": "Retrieves a company's daily work stats (aggregated across all its workers) over a period of days. Requires the calling account to have WarEra Premium; undocumented in WarEra's own public API reference.",
+        "summary": "Get work stats by company",
+        "operationId": "work.getStatsByCompany",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "dailyDate": "2026-08-25",
+                    "total": 223.2,
+                    "wage": 0,
+                    "employeeProd": 0,
+                    "automatedEngine": 223.2
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "companyId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The company ID"
+                  },
+                  "days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 60,
+                    "default": 30,
+                    "description": "Number of days of history to return (max 60)"
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "description": "IANA timezone used to bucket the daily stats, e.g. Europe/Amsterdam"
+                  }
+                },
+                "required": [
+                  "companyId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/work.getStatsByUserId": {
+      "post": {
+        "tags": [
+          "work"
+        ],
+        "description": "Retrieves a user's daily work stats (production, wage, self-work vs. automated engine) over a period of days. Requires the calling account to have WarEra Premium; undocumented in WarEra's own public API reference.",
+        "summary": "Get work stats by user ID",
+        "operationId": "work.getStatsByUserId",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "dailyDate": "2026-08-25",
+                    "total": 6987.78,
+                    "wage": 357.456,
+                    "employeeProd": 3904.45,
+                    "selfWork": 473.2,
+                    "automatedEngine": 2610.13
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The user ID to get work stats for"
+                  },
+                  "days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 60,
+                    "default": 30,
+                    "description": "Number of days of history to return (max 60)"
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "description": "IANA timezone used to bucket the daily stats, e.g. Europe/Amsterdam"
+                  }
+                },
+                "required": [
+                  "userId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/work.getStatsByWorker": {
+      "post": {
+        "tags": [
+          "work"
+        ],
+        "description": "Retrieves a worker's daily work stats across all companies (not scoped to one company) over a period of days. Requires the calling account to have WarEra Premium; undocumented in WarEra's own public API reference.",
+        "summary": "Get work stats by worker",
+        "operationId": "work.getStatsByWorker",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "dailyDate": "2026-08-25",
+                    "total": 1206.47,
+                    "wage": 66.285,
+                    "employeeProd": 793.985,
+                    "selfWork": 412.485
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workerId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The worker (user) ID"
+                  },
+                  "days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 60,
+                    "default": 30,
+                    "description": "Number of days of history to return (max 60)"
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "description": "IANA timezone used to bucket the daily stats, e.g. Europe/Amsterdam"
+                  }
+                },
+                "required": [
+                  "workerId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/work.getStatsByWorkerAndCompany": {
+      "post": {
+        "tags": [
+          "work"
+        ],
+        "description": "Retrieves a worker's daily work stats scoped to one specific company over a period of days. Requires the calling account to have WarEra Premium; undocumented in WarEra's own public API reference.",
+        "summary": "Get work stats by worker and company",
+        "operationId": "work.getStatsByWorkerAndCompany",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": []
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workerId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The worker (user) ID"
+                  },
+                  "companyId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The company ID"
+                  },
+                  "days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 60,
+                    "default": 30,
+                    "description": "Number of days of history to return (max 60)"
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "description": "IANA timezone used to bucket the daily stats, e.g. Europe/Amsterdam"
+                  }
+                },
+                "required": [
+                  "workerId",
+                  "companyId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
     "/workOffer.getById": {
       "post": {
         "tags": [
@@ -3416,6 +4356,60 @@
                 "required": [
                   "workOfferId"
                 ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workOffer.getWageStats": {
+      "post": {
+        "tags": [
+          "workOffer"
+        ],
+        "description": "Retrieves the allowed wage range and top eligible work offers for a worker's stats",
+        "summary": "Get wage stats",
+        "operationId": "workOffer.getWageStats",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "example": {
+                  "allowedRange": {
+                    "min": 0.106,
+                    "max": 0.159,
+                    "average": 0.1329
+                  },
+                  "topOffer": 0.159,
+                  "topEligibleOffer": 0.143,
+                  "topEligibleOffers": []
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "energy": {
+                    "type": "number",
+                    "description": "Worker's total energy stat"
+                  },
+                  "production": {
+                    "type": "number",
+                    "description": "Worker's total production stat"
+                  },
+                  "citizenship": {
+                    "type": "string",
+                    "description": "Worker's citizenship country ID"
+                  }
+                },
+                "required": [],
                 "additionalProperties": false
               }
             }
