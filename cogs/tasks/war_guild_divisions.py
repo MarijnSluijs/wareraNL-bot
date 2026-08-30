@@ -94,6 +94,26 @@ DIVISION_COLOURS: dict[int, discord.Colour] = {
     5: discord.Colour(0x9B59B6),  # Purple
 }
 
+# MU category permissions — "commander is admin of their own category".
+# Discord has no per-channel Administrator flag, so this is the broadest set
+# of channel-scoped permissions Discord actually offers, excluding anything
+# that's guild-wide (kick/ban, manage_guild, server-level manage_roles, real
+# Administrator) since those can't be scoped to one category anyway.
+_COMMANDER_CATEGORY_PERMS: dict[str, bool] = {
+    "view_channel": True,
+    "manage_channels": True,
+    "manage_permissions": True,
+    "manage_webhooks": True,
+    "create_instant_invite": True,
+    "manage_messages": True,
+    "manage_threads": True,
+    "mute_members": True,
+    "deafen_members": True,
+    "move_members": True,
+    "mention_everyone": True,
+}
+_MEMBER_CATEGORY_PERMS: dict[str, bool] = {"view_channel": True}
+
 # War-guild government role names
 GOV_ROLE_NAMES: dict[str, str] = {
     "president":                   "President",
@@ -760,41 +780,158 @@ class WarGuildDivisionsCog(TaskCogBase):
 
     # ── Category prefix sync ──────────────────────────────────────────────────
 
+    def _overwrite_matches(
+        self, overwrite: discord.PermissionOverwrite, desired: dict[str, bool]
+    ) -> bool:
+        return all(getattr(overwrite, perm) is value for perm, value in desired.items())
+
     async def _sync_mu_categories(self, guild: discord.Guild) -> dict:
-        """Prefix MU category channels with [DN] based on their division.
+        """Prefix MU category channels with [DN] based on their division;
+        repair each category's permissions for that MU's Commander/Member
+        roles; make Commander the de-facto admin of their own category; and
+        sync every channel inside the category to match it.
+
+        The permission repair matters because Discord automatically strips
+        every channel/category permission overwrite for a role the instant
+        that role is deleted. Recreating a role with the same name afterwards
+        (e.g. war_sync.py re-creating MU roles after they were wiped by the
+        API-outage incident) does NOT restore those overwrites — Discord
+        treats the new role as a completely unrelated object. _ensure_mu_category
+        only sets these overwrites when a category is first CREATED, so an
+        existing category whose MU role got recreated was otherwise never
+        re-permissioned. This re-applies the desired overwrites every hour,
+        via set_permissions per-role (never a full overwrites= replace) so any
+        other, unrelated role access manually granted on the category is left
+        alone.
+
+        Discord has no per-channel "Administrator" flag, so "commander is
+        admin of their category" is approximated with the broadest set of
+        channel-scoped permissions Discord actually offers (_COMMANDER_CATEGORY_PERMS
+        below) — channel/permission/webhook management, message and thread
+        moderation, voice moderation, and @everyone mentions. It deliberately
+        excludes guild-wide powers (kick/ban, manage_guild, manage_roles at
+        the server level, real Administrator) since those can't be scoped to
+        one category anyway.
+
+        A channel newly created in one of these categories inherits nothing
+        automatically unless it's marked "synced" to its category — an
+        unsynced channel keeps whatever (often empty) overwrites it was
+        created with. This checks channel.permissions_synced and calls
+        channel.edit(sync_permissions=True) — the same operation as Discord's
+        own "Sync Permissions" button — to bring it in line. Whenever a
+        category's own permissions were just changed this run, every channel
+        in it is force-synced regardless of what permissions_synced reports,
+        since that property reads the client's local overwrite cache, which
+        can still be stale from set_permissions calls made moments earlier
+        in this same run.
 
         Matches category names against DIVISION_MUS using normalised comparison
         so that minor spacing/punctuation differences still resolve correctly.
         Strips any existing [DN] prefix before matching so a division change
         is handled automatically.
         """
-        counts = {"cats_updated": 0}
+        counts = {"cats_updated": 0, "perms_repaired": 0, "channels_synced": 0}
+
+        # {normalised_mu_name: {"commander": role_id, "member": role_id}}
+        role_ids_by_mu: dict[str, dict[str, int]] = {}
+        if self._db:
+            try:
+                rows = await self._db.get_all_war_mu_roles(str(guild.id))
+                for row in rows:
+                    if row["role_type"] not in ("commander", "member"):
+                        continue
+                    key = _norm(row["mu_name"] or "")
+                    if key:
+                        role_ids_by_mu.setdefault(key, {})[row["role_type"]] = row["discord_role_id"]
+            except Exception as exc:
+                logger.warning(
+                    "war_guild_divisions: role lookup for permission repair failed: %s", exc
+                )
+
         for cat in guild.categories:
             bare = _NICK_PREFIX_RE.sub("", cat.name)  # strip existing [Dx] prefix
-            div = _MU_TO_DIV.get(_norm(bare))
+            norm_bare = _norm(bare)
+            div = _MU_TO_DIV.get(norm_bare)
             if div is None:
                 continue
+
             expected = f"[D{div}] {bare}"
-            if cat.name == expected:
-                continue
-            try:
-                await cat.edit(
-                    name=expected,
-                    reason="war_guild_divisions: division category prefix sync",
-                )
-                counts["cats_updated"] += 1
-                logger.info(
-                    "war_guild_divisions: renamed category %r → %r", cat.name, expected
-                )
-            except discord.Forbidden as exc:
-                logger.warning(
-                    "war_guild_divisions: no permission to rename category %r "
-                    "(HTTP %s, code %s: %s)",
-                    cat.name,
-                    getattr(exc, "status", "?"),
-                    getattr(exc, "code", "?"),
-                    getattr(exc, "text", str(exc)),
-                )
+            if cat.name != expected:
+                try:
+                    await cat.edit(
+                        name=expected,
+                        reason="war_guild_divisions: division category prefix sync",
+                    )
+                    counts["cats_updated"] += 1
+                    logger.info(
+                        "war_guild_divisions: renamed category %r → %r", cat.name, expected
+                    )
+                except discord.Forbidden as exc:
+                    logger.warning(
+                        "war_guild_divisions: no permission to rename category %r "
+                        "(HTTP %s, code %s: %s)",
+                        cat.name,
+                        getattr(exc, "status", "?"),
+                        getattr(exc, "code", "?"),
+                        getattr(exc, "text", str(exc)),
+                    )
+
+            # ── Permission repair ───────────────────────────────────────────
+            to_fix: list[tuple[discord.Role, dict[str, bool]]] = []
+            if cat.overwrites_for(guild.default_role).view_channel is not False:
+                to_fix.append((guild.default_role, {"view_channel": False}))
+
+            mu_role_ids = role_ids_by_mu.get(norm_bare, {})
+            commander_role = guild.get_role(mu_role_ids["commander"]) if "commander" in mu_role_ids else None
+            member_role = guild.get_role(mu_role_ids["member"]) if "member" in mu_role_ids else None
+
+            if commander_role and not self._overwrite_matches(
+                cat.overwrites_for(commander_role), _COMMANDER_CATEGORY_PERMS
+            ):
+                to_fix.append((commander_role, _COMMANDER_CATEGORY_PERMS))
+            if member_role and not self._overwrite_matches(
+                cat.overwrites_for(member_role), _MEMBER_CATEGORY_PERMS
+            ):
+                to_fix.append((member_role, _MEMBER_CATEGORY_PERMS))
+
+            cat_perms_changed = False
+            for target, perms in to_fix:
+                try:
+                    await cat.set_permissions(
+                        target,
+                        reason="war_guild_divisions: MU-categorie permissie herstel",
+                        **perms,
+                    )
+                    counts["perms_repaired"] += 1
+                    cat_perms_changed = True
+                    logger.info(
+                        "war_guild_divisions: repaired permissions for %r on category %r: %s",
+                        getattr(target, "name", target), cat.name, perms,
+                    )
+                except discord.Forbidden:
+                    logger.warning(
+                        "war_guild_divisions: no permission to fix permissions on category %r",
+                        cat.name,
+                    )
+
+            # ── Channel sync ─────────────────────────────────────────────────
+            for ch in cat.channels:
+                if cat_perms_changed or not ch.permissions_synced:
+                    try:
+                        await ch.edit(
+                            sync_permissions=True,
+                            reason="war_guild_divisions: kanaal-permissies synchroniseren met categorie",
+                        )
+                        counts["channels_synced"] += 1
+                        logger.info(
+                            "war_guild_divisions: synced channel %r to category %r",
+                            ch.name, cat.name,
+                        )
+                    except discord.Forbidden:
+                        logger.warning(
+                            "war_guild_divisions: no permission to sync channel %r", ch.name
+                        )
+
         logger.info("war_guild_divisions: category sync done — %s", counts)
         return counts
 
@@ -838,7 +975,12 @@ class WarGuildDivisionsCog(TaskCogBase):
         }
         if mu_id and self._db:
             # No dedicated "owner" role anymore — owners get Commander+Member.
-            for role_type in ("commander", "member"):
+            # Commander is the de-facto admin of their own category (see
+            # _COMMANDER_CATEGORY_PERMS); Member just gets to see it.
+            for role_type, perms in (
+                ("commander", _COMMANDER_CATEGORY_PERMS),
+                ("member", _MEMBER_CATEGORY_PERMS),
+            ):
                 try:
                     rid = await self._db.get_war_mu_role(
                         mu_id, role_type, str(guild.id)
@@ -851,7 +993,7 @@ class WarGuildDivisionsCog(TaskCogBase):
                     continue
                 role = guild.get_role(rid) if rid else None
                 if role:
-                    overwrites[role] = discord.PermissionOverwrite(view_channel=True)
+                    overwrites[role] = discord.PermissionOverwrite(**perms)
 
         try:
             await guild.create_category(
@@ -1132,7 +1274,9 @@ class WarGuildDivisionsCog(TaskCogBase):
             f"verwijderd: {gov_counts.get('gov_removed', 0)}\n"
             f"• Leiderschap-rollen toegevoegd: {leadership_counts.get('leadership_added', 0)}, "
             f"verwijderd: {leadership_counts.get('leadership_removed', 0)}\n"
-            f"• Categorieën hernoemd: {cat_counts.get('cats_updated', 0)}\n"
+            f"• Categorieën hernoemd: {cat_counts.get('cats_updated', 0)}, "
+            f"permissies hersteld: {cat_counts.get('perms_repaired', 0)}, "
+            f"kanalen gesynchroniseerd: {cat_counts.get('channels_synced', 0)}\n"
             f"• Leden zonder gekoppeld in-game account: {div_counts.get('no_link', 0)}"
             + (
                 "\n  → " + ", ".join(no_link_members)
