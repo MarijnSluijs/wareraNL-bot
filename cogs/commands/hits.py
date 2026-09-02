@@ -35,8 +35,11 @@ side, trying the player's own country's side first as a hint, then the
 other side) looking for two things at once: the player's own entry, and
 the transition point from "has lootItem" to doesn't — the lowest damage
 value that still earned loot, i.e. the target the player needs to clear.
-Battles with hundreds of participants may not resolve within the page cap;
-that shows as "onbekend" rather than a guess.
+Battles with more participants than the page cap covers on the relevant
+side won't resolve; that shows as "onbekend" rather than a guess — this is
+a real ceiling, not a bug: the endpoint has no "look up just this user" or
+"which side is this user on" filter (confirmed live), so the only way to
+find a low-ranked player is to page through everyone ranked above them.
 """
 
 from __future__ import annotations
@@ -62,7 +65,7 @@ logger = logging.getLogger("discord_bot")
 _BATTLE_URL = "https://app.warera.io/battle/{battle_id}"
 _REQUEST_DELAY = 0.15
 _DESCRIPTION_CHAR_LIMIT = 3900  # embed description hard limit is 4096; leave headroom
-_MAX_RANKING_PAGES = 3  # per (scope, side) — bounds worst-case API calls per hit battle
+_MAX_RANKING_PAGES = 6  # per (scope, side) — bounds worst-case API calls per hit battle
 
 
 def _unwrap(resp: object) -> object:
@@ -82,15 +85,32 @@ def _battle_label(battle: dict, country_names: dict[str, str]) -> str:
     return f"{def_name} vs {att_name}"
 
 
-_MAX_LINES_PER_SECTION = 50  # keeps the combined description under Discord's 4096-char limit
+def _chunk_section(title: str, lines: list[str]) -> list[str]:
+    """Split a titled list of lines into one or more embed-description-sized
+    chunks, breaking only between lines — never mid-line — so a long loot
+    annotation can't get cut off halfway through a markdown link.
 
-
-def _format_section(title: str, lines: list[str]) -> str:
-    shown = lines[:_MAX_LINES_PER_SECTION]
-    body = "\n".join(shown) if shown else "—"
-    if len(lines) > len(shown):
-        body += f"\n… en {len(lines) - len(shown)} meer"
-    return f"**{title} ({len(lines)})**\n{body}"
+    Previously this just hard-sliced the final combined description to
+    _DESCRIPTION_CHAR_LIMIT chars, which could (a) cut a line in half,
+    producing a broken, unclosed [label](url), and (b) silently drop an
+    entire section (confirmed live: "Nog niet geraakt" could vanish
+    completely once "Geraakt" alone — with loot=True's much longer
+    per-line annotations — already used up the whole budget).
+    """
+    header = f"**{title} ({len(lines)})**"
+    if not lines:
+        return [f"{header}\n—"]
+    chunks: list[str] = []
+    current = header
+    for line in lines:
+        candidate = f"{current}\n{line}"
+        if len(candidate) > _DESCRIPTION_CHAR_LIMIT and current != header:
+            chunks.append(current)
+            current = f"{header} (vervolg)\n{line}"
+        else:
+            current = candidate
+    chunks.append(current)
+    return chunks
 
 
 def _fmt_int(n: object) -> str:
@@ -378,18 +398,15 @@ class HitsCog(CommandCogBase, name="hits"):
             else:
                 no_hit_lines.append(f"[{label}]({url})")
 
-        description = (
-            _format_section("✅ Geraakt", hit_lines)
-            + "\n\n"
-            + _format_section("❌ Nog niet geraakt", no_hit_lines)
+        chunks = _chunk_section("✅ Geraakt", hit_lines) + _chunk_section(
+            "❌ Nog niet geraakt", no_hit_lines
         )
-        embed = discord.Embed(
-            title=f"⚔️ Hits — {citizen_name}",
-            description=description[:_DESCRIPTION_CHAR_LIMIT],
-            colour=self._embed_colour(),
-        )
-
-        await ctx.send(embed=embed)
+        for i, chunk in enumerate(chunks):
+            title = f"⚔️ Hits — {citizen_name}"
+            if len(chunks) > 1:
+                title += f" ({i + 1}/{len(chunks)})"
+            embed = discord.Embed(title=title, description=chunk, colour=self._embed_colour())
+            await ctx.send(embed=embed)
 
 
 async def setup(bot) -> None:
